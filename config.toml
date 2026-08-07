@@ -1,0 +1,100 @@
+# Configuração do orquestrador.
+#
+# Caminhos relativos são resolvidos contra o diretório DESTE arquivo.
+# Nenhum nome de modelo aparece no código: tudo vem daqui (princípio 6).
+
+[caminhos]
+# A skill `qa-api` mora em OUTRO projeto e é apenas consumida, nunca modificada.
+# Caminho absoluto de propósito: os dois repositórios são independentes e não têm
+# posição relativa garantida.
+skill = "C:/agentesQualidade/qa-agent-skills/skills/qa-api"
+# scripts = ".../skills/qa-api/scripts"   # derivado de `skill` quando omitido
+
+# AJUSTE OS DOIS ABAIXO antes de rodar sem --dry-run.
+# O --dry-run ignora ambos e usa a sandbox de fixtures.
+backend = "../backend"
+projeto_testes = "../projeto-de-testes"
+
+# Relativos ao projeto de testes.
+dir_recursos = "cypress/e2e/apis"
+graph = ".agents/state/qa-api/graphify-out/graph.json"
+
+# Relativo a este diretório: logs, artefatos e sandbox de cada execução.
+saida = ".execucoes"
+
+[openrouter]
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+# referer = "https://exemplo.interno/qa-api"
+# titulo  = "orquestrador qa-api"
+timeout_s = 180.0
+max_retries = 2
+
+# ---------------------------------------------------------------------------
+# Modelos por estágio
+# ---------------------------------------------------------------------------
+# O mapeador tem o julgamento mais difícil e o menor volume de saída: recebe o
+# modelo mais capaz. O executor tem o volume de tokens e trabalho mecânico se o
+# gabarito for bom: aceita um modelo mais barato, porque o Gate B pega os erros
+# de forma determinística.
+#
+# `modo_estruturado`: "prompt" (mais portátil), "json_schema", "json_object" ou
+# "tools". Em qualquer modo a saída é validada por Pydantic aqui; se não validar,
+# um delta de estágio "schema" é reenviado sozinho.
+
+[estagios.mapeador]
+modelo = "<defina: id do modelo no OpenRouter, ex. vendor/modelo>"
+temperatura = 0.0
+modo_estruturado = "prompt"
+max_tentativas_schema = 3
+limite_passos = 60
+
+[estagios.executor]
+modelo = "<defina: id do modelo no OpenRouter, ex. vendor/modelo>"
+temperatura = 0.0
+modo_estruturado = "prompt"
+max_tentativas_schema = 3
+
+[estagios.auditor]
+modelo = "<defina: id do modelo no OpenRouter, ex. vendor/modelo>"
+temperatura = 0.0
+modo_estruturado = "prompt"
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+[gates.a]
+# --so-manifesto é acrescentado de qualquer forma; --json também.
+flags = ["--so-manifesto"]
+max_tentativas = 3
+
+[gates.b]
+flags = ["--exigir-campos"]
+max_tentativas = 3
+
+# ---------------------------------------------------------------------------
+# Execução
+# ---------------------------------------------------------------------------
+
+[execucao]
+node = "node"
+graphify = "graphify"
+timeout_s = 600
+
+# Prettier e ESLint do Gate B. Lista vazia desliga a etapa.
+# Ligue apontando para o toolchain do projeto consumidor, por exemplo:
+#   prettier = ["npx", "--no-install", "prettier", "--check"]
+#   eslint   = ["npx", "--no-install", "eslint", "--format", "json"]
+# O diretório do recurso é acrescentado como último argumento.
+prettier = []
+eslint = []
+# true faz ferramenta configurada e ausente do PATH reprovar; false gera aviso.
+exigir_formatadores = false
+
+# Bloco 3. Só roda com --rodar-cypress.
+#   cypress = ["npx", "--no-install", "cypress", "run"]
+cypress = []
+
+max_bytes_arquivo = 2000000
+max_resultados_busca = 40

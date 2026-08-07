@@ -1,0 +1,81 @@
+{
+  "descricao": "Primeira tentativa do mapeador: explora o backend por uma tool e emite um manifesto com CAT-05 não contabilizada em POST /pedidos. O Gate A reprova com QAAPI-021.",
+  "passos": [
+    {
+      "tipo": "tool",
+      "pensamento": "Vou olhar a estrutura do backend antes de inventariar.",
+      "nome": "listar_diretorio",
+      "argumentos": {
+        "caminho": "src"
+      }
+    },
+    {
+      "tipo": "final",
+      "artefato": {
+        "inventario": {
+          "recurso": "pedidos",
+          "endpoints": [
+            {
+              "metodo": "GET",
+              "rota": "/pedidos",
+              "handler": "PedidoController.listar",
+              "arquivo": "src/controllers/PedidoController.java",
+              "linha": 12
+            },
+            {
+              "metodo": "POST",
+              "rota": "/pedidos",
+              "handler": "PedidoController.criar",
+              "arquivo": "src/controllers/PedidoController.java",
+              "linha": 17
+            }
+          ],
+          "rotas_dinamicas_nao_resolvidas": []
+        },
+        "manifesto": {
+          "recurso": "pedidos",
+          "endpoints": [
+            {
+              "endpoint": "GET /pedidos",
+              "cats": [
+                "CAT-01",
+                "CAT-06",
+                "CAT-08",
+                "CAT-10"
+              ],
+              "naoAplica": {
+                "CAT-02": "a listagem nao recebe corpo nem parametro obrigatorio: nao existe campo de entrada para omitir ou anular nesta rota",
+                "CAT-03": "sem corpo e sem parametro tipado na rota, nao ha valor de entrada cujo tipo ou formato possa ser violado",
+                "CAT-04": "a rota nao aceita entrada com grandeza de comprimento, faixa ou tamanho a delimitar",
+                "CAT-05": "a leitura ignora corpo e aceita apenas o metodo GET; o transporte invalido e exercido na criacao",
+                "CAT-07": "a listagem nao altera estado nem dispara transicao: nao ha regra de negocio a exercitar aqui",
+                "CAT-09": "a listagem nao aceita entrada, entao nao ha campo controlado pelo servidor que o cliente possa tentar sobrescrever",
+                "CAT-11": "leitura sem efeito colateral: repetir a chamada nao cria, altera nem duplica registro",
+                "CAT-12": "a rota devolve dados em JSON e nao recebe nem entrega arquivo"
+              }
+            },
+            {
+              "endpoint": "POST /pedidos",
+              "cats": [
+                "CAT-01",
+                "CAT-02",
+                "CAT-03",
+                "CAT-08",
+                "CAT-09",
+                "CAT-11"
+              ],
+              "naoAplica": {
+                "CAT-04": "o unico campo de entrada aceita um conjunto fechado de dois valores, sem grandeza de comprimento ou faixa a delimitar",
+                "CAT-06": "a criacao nao recebe identificador de recurso alvo nem referencia outra entidade no corpo",
+                "CAT-07": "a criacao nao tem transicao de estado nem calculo derivado: o registro nasce no estado enviado",
+                "CAT-10": "a criacao devolve um unico registro e nao aceita filtro, ordenacao ou paginacao",
+                "CAT-12": "a criacao recebe e devolve JSON, sem envio nem download de arquivo"
+              },
+              "schemaEntrada": "entidade"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

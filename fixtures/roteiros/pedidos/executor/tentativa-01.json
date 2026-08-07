@@ -1,0 +1,25 @@
+{
+  "descricao": "Primeira tentativa do executor: falta o spec-base seguranca.cy.js e falta o teste @campo situacao de CAT-03. O Gate B reprova com QAAPI-002 e QAAPI-025.",
+  "passos": [
+    {
+      "tipo": "final",
+      "artefato": {
+        "recurso": "pedidos",
+        "arquivos": [
+          {
+            "caminho": "_support/api.js",
+            "conteudo": "/**\n * Operações HTTP do recurso pedidos.\n */\nimport { apiRequest } from \"../../../../support/api/client.js\";\n\nexport function listarPedidos() {\n  return apiRequest({ method: \"GET\", url: \"/pedidos\" });\n}\n\nexport function criarPedido(corpo) {\n  return apiRequest({ method: \"POST\", url: \"/pedidos\", body: corpo });\n}\n"
+          },
+          {
+            "caminho": "crud.cy.js",
+            "conteudo": "/**\n * Pedidos — fluxo principal de listagem e criação.\n */\nimport { criarPedido, listarPedidos } from \"./_support/api.js\";\n\ndescribe(\"pedidos — fluxo principal\", () => {\n  // @endpoint GET /pedidos @cat CAT-01 @alvo listagem-devolve-colecao\n  it(\"lista pedidos e devolve a coleção\", () => {\n    listarPedidos().then((resposta) => {\n      expect(resposta.status, \"status da listagem de pedidos\").to.eq(200);\n      expect(resposta.body, \"corpo da listagem de pedidos\").to.be.an(\"array\");\n    });\n  });\n\n  // @endpoint POST /pedidos @cat CAT-01 @alvo criacao-persistida\n  it(\"cria um pedido e devolve o registro criado\", () => {\n    criarPedido({ situacao: \"ABERTO\" }).then((resposta) => {\n      expect(resposta.status, \"status da criação de pedido\").to.eq(201);\n      expect(resposta.body.situacao, \"situação do pedido criado\").to.eq(\"ABERTO\");\n    });\n  });\n});\n"
+          },
+          {
+            "caminho": "validacoes.cy.js",
+            "conteudo": "/**\n * Pedidos — validações da superfície de entrada da criação.\n */\nimport { criarPedido } from \"./_support/api.js\";\n\ndescribe(\"pedidos — validações\", () => {\n  // @endpoint POST /pedidos @cat CAT-02 @campo situacao @alvo situacao-ausente\n  it(\"recusa a criação quando situacao é omitida\", () => {\n    criarPedido({}).then((resposta) => {\n      expect(resposta.status, \"status ao omitir situacao\").to.eq(400);\n    });\n  });\n\n  // @endpoint POST /pedidos @cat CAT-05 @alvo corpo-escalar\n  it(\"recusa corpo escalar na criação\", () => {\n    criarPedido(\"texto\").then((resposta) => {\n      expect(resposta.status, \"status ao enviar corpo escalar\").to.eq(400);\n    });\n  });\n});\n"
+          }
+        ]
+      }
+    }
+  ]
+}

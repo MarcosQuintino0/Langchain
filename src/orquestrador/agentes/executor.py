@@ -1,0 +1,124 @@
+"""Bloco 2 — agente executor (LLM, sem tools).
+
+Não é um agente ReAct: é uma chamada de LLM com entrada estruturada. Recebe a
+entrada do `cobertura.json` referente a **um recurso** mais a fatia de prompt com
+os padrões de código Cypress, e emite os arquivos `.cy.js`.
+
+Aqui está o volume de tokens do pipeline. O trabalho é mecânico se o gabarito for
+bom, e o Gate B pega os erros de forma determinística — por isso o modelo deste
+estágio pode ser mais barato que o do mapeador.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from orquestrador.config import Config
+from orquestrador.contratos import Delta, Manifesto, Recurso, SaidaExecutor
+from orquestrador.llm.estruturado import GeradorEstruturado
+from orquestrador.observabilidade.telemetria import Telemetria
+from orquestrador.montagem import (
+    carregar_prompt,
+    esquema_json,
+    montar_entrada_inicial,
+    montar_entrada_reparo,
+)
+
+ESTAGIO = "executor"
+
+
+def instrucao_do_estagio(config: Config, recurso: Recurso) -> str:
+    return carregar_prompt(
+        ESTAGIO,
+        {
+            "recurso": recurso.nome,
+            "caminho_recurso": str(recurso.caminho_testes),
+            "caminho_projeto": str(config.caminhos.projeto_testes),
+            "schema_json": esquema_json(SaidaExecutor),
+        },
+        dir_prompts=config.caminhos.prompts,
+    )
+
+
+def entrada_inicial(recurso: Recurso, manifesto: Manifesto) -> str:
+    return montar_entrada_inicial(
+        {
+            "Recurso alvo": recurso.nome,
+            "Diretório do recurso": str(recurso.caminho_testes),
+            "Gabarito do recurso (_support/cobertura.json)": (
+                f"```json\n{manifesto.para_json().strip()}\n```"
+            ),
+        }
+    )
+
+
+def executar(
+    config: Config,
+    recurso: Recurso,
+    manifesto: Manifesto,
+    *,
+    modelo: Any,
+    telemetria: Telemetria,
+    registro: Any = None,
+    tentativa: int = 1,
+    delta: Delta | None = None,
+    artefato_atual: str | None = None,
+) -> SaidaExecutor:
+    """Uma tentativa do executor para um recurso. Sem histórico algum."""
+    parametros = config.estagio(ESTAGIO)
+    gerador = GeradorEstruturado(
+        modelo=modelo,
+        estagio=ESTAGIO,
+        parametros=parametros,
+        telemetria=telemetria,
+        registro=registro,
+    )
+    if delta is not None:
+        entrada = montar_entrada_reparo(artefato_atual or "(artefato ausente)", delta)
+    else:
+        entrada = entrada_inicial(recurso, manifesto)
+
+    return gerador.gerar(
+        SaidaExecutor,
+        instrucao=instrucao_do_estagio(config, recurso),
+        entrada=entrada,
+        recurso=recurso.nome,
+        tentativa=tentativa,
+    )
+
+
+def escrever(recurso: Recurso, saida: SaidaExecutor) -> list[Path]:
+    """Materializa os arquivos no diretório do recurso — o handoff é o disco."""
+    escritos: list[Path] = []
+    raiz = recurso.caminho_testes.resolve()
+    for arquivo in saida.arquivos:
+        destino = (raiz / arquivo.caminho).resolve()
+        # Cinto e suspensório: o contrato já recusa ".." e caminho absoluto.
+        if not str(destino).startswith(str(raiz)):
+            raise ValueError(f"arquivo fora do recurso: {arquivo.caminho}")
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_text(arquivo.conteudo, encoding="utf-8", newline="\n")
+        escritos.append(destino)
+    return escritos
+
+
+def artefato_em_disco(recurso: Recurso, saida: SaidaExecutor, *, limite: int = 60_000) -> str:
+    """Texto do artefato atual para o prompt de reparo (o que está no disco).
+
+    Truncado: o delta precisa do bastante para localizar o erro, não da suíte
+    inteira — reenviar tudo é o custo quadrático voltando pela janela.
+    """
+    partes: list[str] = []
+    for arquivo in saida.arquivos:
+        caminho = recurso.caminho_testes / arquivo.caminho
+        conteudo = (
+            caminho.read_text(encoding="utf-8")
+            if caminho.is_file()
+            else arquivo.conteudo
+        )
+        partes.append(f"--- {arquivo.caminho} ---\n{conteudo}")
+    texto = "\n\n".join(partes)
+    if len(texto) > limite:
+        texto = texto[:limite] + "\n... (truncado)"
+    return texto

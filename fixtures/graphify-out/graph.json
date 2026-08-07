@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "comentario": "graph.json de fixture, minúsculo de propósito. O real tem dezenas de MB e nunca deve ser lido nem varrido diretamente — só consultado por graphify query/affected.",
+  "nodes": [
+    {
+      "id": "PedidoController",
+      "kind": "class",
+      "file": "src/controllers/PedidoController.java",
+      "line": 9
+    },
+    {
+      "id": "Pedido",
+      "kind": "class",
+      "file": "src/entities/Pedido.java",
+      "line": 3
+    }
+  ],
+  "edges": [{ "from": "PedidoController", "to": "Pedido", "relation": "uses" }]
+}
