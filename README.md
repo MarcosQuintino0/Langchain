@@ -101,6 +101,27 @@ vivem num arquivo só: [`pyproject.toml`](pyproject.toml).
 Confira também `[caminhos].skill` no `config.toml`: ele aponta para o repositório
 da skill `qa-api`, que é outro projeto. Sem ele, os gates não têm o que invocar.
 
+### Pré-condição: o projeto de testes já preparado
+
+O orquestrador **gera testes**; ele não prepara o projeto. Antes da primeira
+execução real, o projeto de testes precisa ter os módulos compartilhados no lugar —
+por padrão em `cypress/support/api/` (`[caminhos].support_compartilhado`): o client
+HTTP com o `cy.request` centralizado, as rotas e os asserts base.
+
+O Bloco 0 lê esses módulos e extrai a **superfície do projeto**: nome de cada
+export, a declaração verbatim e os caminhos de import já calculados. Essa superfície
+entra na instrução do executor — é o que impede que ele invente `apiRequest`,
+`RotasApi` ou a profundidade de um `../../../..`.
+
+Se o diretório não existir ou não tiver export algum, o pipeline **falha antes de
+chamar qualquer modelo**, com a mensagem dizendo o que fazer. Ele não substitui pela
+arquitetura-base da skill: isso produziria imports que não existem no seu projeto, e
+o loop de reparo não converge sobre nome de símbolo que o executor nunca teve — o
+delta do gate diz "import não resolve", não diz qual era o nome certo.
+
+Preparar o projeto é outro fluxo da skill: `references/preparar-projeto.md`, ou a
+arquitetura-base executável em `assets/cypress-api-base/`.
+
 Para rodar de verdade (não é preciso para o `--dry-run`):
 
 ```bash

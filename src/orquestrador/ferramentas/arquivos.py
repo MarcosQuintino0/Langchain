@@ -62,6 +62,20 @@ class CaminhoForaDaRaiz(PermissionError):
     """O caminho pedido escapa da raiz autorizada."""
 
 
+def relativo_a(alvo: Path, base: Path) -> str:
+    """`alvo` visto a partir de `base`, em POSIX; o caminho inteiro se não couber.
+
+    Só desce: quando `alvo` está **fora** de `base`, devolve o caminho absoluto em
+    vez de subir com `../`. Para subir — o caso do import de um módulo
+    compartilhado, que nunca está abaixo do recurso — use
+    `ferramentas.superficie.caminho_de_import`, que usa `os.path.relpath`.
+    """
+    try:
+        return alvo.resolve().relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return alvo.as_posix()
+
+
 class Confinamento:
     """Resolve caminhos relativos a uma raiz e recusa qualquer fuga dela."""
 
@@ -87,10 +101,8 @@ class Confinamento:
         return candidato == raiz or candidato.startswith(raiz + os.sep)
 
     def relativo(self, alvo: Path) -> str:
-        try:
-            return alvo.relative_to(self.raiz).as_posix()
-        except ValueError:
-            return alvo.as_posix()
+        """Caminho para exibição, sempre relativo à raiz confinada."""
+        return relativo_a(alvo, self.raiz)
 
 
 # ---------------------------------------------------------------------------

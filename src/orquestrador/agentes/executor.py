@@ -15,7 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from orquestrador.config import Config
-from orquestrador.contratos import Delta, Manifesto, Recurso, SaidaExecutor
+from orquestrador.contratos import (
+    Delta,
+    Manifesto,
+    Recurso,
+    SaidaExecutor,
+    SuperficieDoProjeto,
+)
 from orquestrador.llm.estruturado import GeradorEstruturado
 from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.montagem import (
@@ -28,13 +34,25 @@ from orquestrador.montagem import (
 ESTAGIO = "executor"
 
 
-def instrucao_do_estagio(config: Config, recurso: Recurso) -> str:
+def instrucao_do_estagio(
+    config: Config, recurso: Recurso, superficie: SuperficieDoProjeto | None = None
+) -> str:
+    """Instrução fixa do estágio.
+
+    A superfície do projeto entra **aqui**, não na entrada da tentativa: ela é
+    constante durante toda a execução, então mantém a instrução idêntica entre
+    tentativas (princípio 2 e cache de prompt). Pela entrada, seria reenviada a cada
+    reparo — inflando justamente o que o delta existe para enxugar.
+    """
     return carregar_prompt(
         ESTAGIO,
         {
             "recurso": recurso.nome,
             "caminho_recurso": str(recurso.caminho_testes),
             "caminho_projeto": str(config.caminhos.projeto_testes),
+            "superficie_do_projeto": (
+                superficie.render() if superficie else "(superfície não extraída)"
+            ),
             "schema_json": esquema_json(SaidaExecutor),
         },
         dir_prompts=config.caminhos.prompts,
@@ -64,6 +82,7 @@ def executar(
     tentativa: int = 1,
     delta: Delta | None = None,
     artefato_atual: str | None = None,
+    superficie: SuperficieDoProjeto | None = None,
 ) -> SaidaExecutor:
     """Uma tentativa do executor para um recurso. Sem histórico algum."""
     parametros = config.estagio(ESTAGIO)
@@ -81,7 +100,7 @@ def executar(
 
     return gerador.gerar(
         SaidaExecutor,
-        instrucao=instrucao_do_estagio(config, recurso),
+        instrucao=instrucao_do_estagio(config, recurso, superficie),
         entrada=entrada,
         recurso=recurso.nome,
         tentativa=tentativa,

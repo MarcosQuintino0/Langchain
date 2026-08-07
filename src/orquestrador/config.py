@@ -38,6 +38,10 @@ class ConfigCaminhos(BaseModel):
     # Relativos ao projeto de testes.
     dir_recursos: str = "cypress/e2e/apis"
     graph: str = ".agents/state/qa-api/graphify-out/graph.json"
+    # Módulos compartilhados que o executor consome (client, rotas, auth, asserts
+    # base, schema). Configurável porque a skill manda preservar o padrão do
+    # consumidor, e nem todo projeto usa este caminho.
+    support_compartilhado: str = "cypress/support/api"
     # Relativos à raiz do projeto (resolvidos na carga).
     saida: Path = Path(".execucoes")
     # Prompt é conteúdo, não código: fica fora do pacote, na raiz do projeto, e o
@@ -63,6 +67,10 @@ class ConfigCaminhos(BaseModel):
     @property
     def graph_abs(self) -> Path:
         return self.projeto_testes / self.graph
+
+    @property
+    def support_abs(self) -> Path:
+        return self.projeto_testes / self.support_compartilhado
 
     def recurso(self, nome: str) -> Path:
         return self.dir_recursos_abs / nome

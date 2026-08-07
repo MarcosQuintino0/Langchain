@@ -33,10 +33,12 @@ from orquestrador.contratos import (
     ResultadoGate,
     SaidaExecutor,
     SaidaMapeador,
+    SuperficieDoProjeto,
 )
 from orquestrador.excecoes import FalhaDeEstagio, FalhaDeGate
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
 from orquestrador.ferramentas.scripts_qa import Cobertura
+from orquestrador.ferramentas.superficie import extrair as extrair_superficie
 from orquestrador.gates import gate_a, gate_b
 from orquestrador.gates.parser import resumo_da_cobertura
 from orquestrador.llm.cliente import criar_modelo
@@ -93,6 +95,9 @@ class Pipeline:
         self.dir_execucao = dir_execucao
         self.pular_cypress = pular_cypress
         self._modelos_reais: dict[str, Any] = {}
+        # Preenchida no Bloco 0: é do projeto, não do recurso, então é extraída uma
+        # vez e viaja pela instrução fixa do executor.
+        self.superficie: SuperficieDoProjeto | None = None
 
     # -- modelos ------------------------------------------------------------
 
@@ -133,7 +138,40 @@ class Pipeline:
             detalhe=resultado.detalhe,
         )
         (self.registro.ok if resultado.ok else self.registro.aviso)(resultado.detalhe)
+        self._extrair_superficie()
         return resultado
+
+    def _extrair_superficie(self) -> None:
+        """Lê os módulos compartilhados do projeto. Determinístico, zero token.
+
+        Falha aqui é pré-condição do projeto de testes, não do recurso: ela
+        interrompe a execução antes de qualquer chamada de modelo, porque o
+        executor não tem como adivinhar nomes de export que ninguém contou a ele —
+        e o delta do Gate B ("import não resolve") não é acionável.
+        """
+        self.superficie = extrair_superficie(self.config)
+        destino = self.dir_execucao / "artefatos" / "superficie-do-projeto.json"
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_text(self.superficie.para_json(), encoding="utf-8", newline="\n")
+
+        self.registro.evento(
+            "superficie",
+            raiz=self.superficie.raiz,
+            modulos=[
+                {
+                    "caminho": modulo.caminho,
+                    "import_do_recurso": modulo.import_do_recurso,
+                    "import_do_support": modulo.import_do_support,
+                    "exports": [exportado.nome for exportado in modulo.exports],
+                }
+                for modulo in self.superficie.modulos
+            ],
+            artefato=destino,
+        )
+        self.registro.ok(
+            f"superfície do projeto: {len(self.superficie.modulos)} módulo(s), "
+            f"{self.superficie.total_de_exports} export(s) em {self.superficie.raiz}"
+        )
 
     # -- Bloco 1 + Gate A ---------------------------------------------------
 
@@ -202,6 +240,7 @@ class Pipeline:
                 tentativa=tentativa,
                 delta=delta,
                 artefato_atual=atual,
+                superficie=self.superficie,
             )
 
         def persistir(saida: SaidaExecutor) -> list[Path]:

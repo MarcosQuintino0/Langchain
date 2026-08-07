@@ -19,6 +19,13 @@ projeto_testes = "../projeto-de-testes"
 dir_recursos = "cypress/e2e/apis"
 graph = ".agents/state/qa-api/graphify-out/graph.json"
 
+# Módulos compartilhados (client, rotas, auth, asserts base, schema) que o executor
+# importa. O Bloco 0 extrai deles a superfície — nomes de export, assinaturas
+# verbatim e caminhos de import calculados — e a injeta na instrução do executor.
+# PRÉ-CONDIÇÃO: este diretório precisa existir e ter exports. O orquestrador gera
+# testes num projeto já preparado; preparar o projeto é outro fluxo da skill.
+support_compartilhado = "cypress/support/api"
+
 # Relativo a este diretório: logs, artefatos e sandbox de cada execução.
 saida = ".execucoes"
 

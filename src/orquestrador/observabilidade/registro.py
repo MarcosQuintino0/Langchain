@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 
 from orquestrador.contratos import dados_para_log
 
@@ -57,21 +58,26 @@ class Registro:
         self._fluxo.flush()
 
     # -- console ------------------------------------------------------------
+    #
+    # O texto que chega aqui vem de mensagem de erro, de saída de script e de
+    # violação de gate — e quase sempre tem colchete. O Rich os lê como markup e
+    # engole o que parecer um estilo: "[caminhos]" some, "[QAAPI-025]" sobrevive.
+    # Escapar o texto e manter só as tags que este módulo escreve resolve os dois.
 
     def titulo(self, texto: str) -> None:
-        self.console.rule(f"[bold]{texto}")
+        self.console.rule(f"[bold]{escape(texto)}")
 
     def info(self, texto: str) -> None:
-        self.console.print(texto)
+        self.console.print(escape(texto))
 
     def ok(self, texto: str) -> None:
-        self.console.print(f"[green]✓[/green] {texto}")
+        self.console.print(f"[green]✓[/green] {escape(texto)}")
 
     def falha(self, texto: str) -> None:
-        self.console.print(f"[red]✗[/red] {texto}")
+        self.console.print(f"[red]✗[/red] {escape(texto)}")
 
     def aviso(self, texto: str) -> None:
-        self.console.print(f"[yellow]![/yellow] {texto}")
+        self.console.print(f"[yellow]![/yellow] {escape(texto)}")
 
     def fechar(self) -> None:
         if not self._fluxo.closed:

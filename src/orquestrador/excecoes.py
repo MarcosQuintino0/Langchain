@@ -36,6 +36,17 @@ class ErroDeInvocacao(ErroDeFerramenta):
     """Exit code 2 do validador: erro de uso nosso, não reprovação do artefato."""
 
 
+class ProjetoNaoPreparado(ErroDeFerramenta):
+    """O projeto de testes não tem os módulos compartilhados que o executor consome.
+
+    Pré-condição, não falha de recurso: o orquestrador **gera testes** num projeto
+    já preparado; preparar o projeto é outro fluxo da skill
+    (`references/preparar-projeto.md`). Falha cedo, antes de qualquer chamada de
+    modelo — substituir em silêncio pela arquitetura-base produziria imports que não
+    existem no projeto do usuário, e o loop de reparo não converge sobre isso.
+    """
+
+
 class FalhaComArtefatos(RuntimeError):
     """Falha de recurso que pode ter deixado artefato reprovado em disco."""
 
