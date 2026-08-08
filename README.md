@@ -216,11 +216,42 @@ python -m orquestrador --recurso pedidos
 | `--dry-run` | não chama modelo nenhum |
 | `--max-tentativas <n>` | sobrescreve o limite de todos os gates |
 | `--rodar-cypress` | executa o Cypress no Bloco 3 (por padrão é pulado) |
-| `--auditor` | mostra o veredito do auditor semântico (stub) e sai |
-| `--remover-reprovados` | apaga, ao final, os artefatos deixados em estado reprovado |
+| `--auditor` | **indisponível** — recusa com código 2 |
+| `--remover-reprovados` | **indisponível** — recusa com código 2 |
 
 Códigos de saída: `0` sucesso, `1` algum gate esgotou as tentativas, `2` erro de
-configuração ou de invocação de ferramenta.
+configuração, indisponibilidade de ferramenta ou flag recusada.
+
+**Por que as duas flags recusam em vez de sumir.** Continuam reconhecidas pelo
+argparse para não quebrar script existente em silêncio, mas encerram com código 2 e
+uma mensagem dizendo o que falta.
+
+O `--auditor` imprimia o veredito do stub e saía com **0**. Em CI, isso é
+indistinguível de auditoria feita — e o auditor não existe. O
+`--remover-reprovados` apagava todo caminho da lista de reprovados sem distinguir
+arquivo que criamos de arquivo que já era do cliente. Ele volta quando existir o
+diário de propriedade da Etapa 2, que registra por arquivo se ele foi criado,
+modificado ou preexistente.
+
+### Executar o Cypress
+
+O comando em `[execucao].cypress` **precisa** conter a marca `{relatorio}` no
+argumento que diz ao repórter onde escrever o JSON:
+
+```toml
+cypress = ["npx", "--no-install", "cypress", "run",
+           "--reporter", "json", "--reporter-options", "output={relatorio}"]
+```
+
+O orquestrador a substitui pelo caminho do relatório **desta** execução, garante que
+ele não existe antes de rodar e exige que exista depois. Sem isso não há como
+distinguir o relatório de agora daquele que uma execução anterior deixou no projeto
+— e relatório velho aprovando suíte nova é o falso sucesso mais silencioso que
+existe.
+
+Código de saída diferente de zero reprova o recurso. Quando o Cypress não roda, o
+resumo diz `NÃO EXECUTADOS` em vez de deixar a cobertura estática passar por prova
+de runtime.
 
 ⚠️ **Nunca chame `graphify extract` na mão.** Sem a flag `--code-only` que o
 `qa-reindex.mjs` passa, ele faz extração semântica paga por LLM sobre o backend
@@ -241,11 +272,13 @@ sandbox/                    só no --dry-run
 
 Tipos de evento no JSONL: `execucao_iniciada`, `bloco0`, `superficie`,
 `estagio_tentativa`, `chamada_llm`, `tool`, `gate`, `delta`, `artefatos`,
-`schemas_preservados`, `artefatos_reprovados`, `artefatos_removidos`,
-`cobertura`, `recurso_falhou`, `recurso_concluido`, `telemetria`,
-`execucao_concluida`. Dá para reconstruir o que aconteceu sem reexecutar — cada
-`chamada_llm` traz estágio, recurso, tentativa, modelo e tokens de entrada e
-saída; cada `gate` traz o veredito e os códigos de violação.
+`schemas_preservados`, `artefatos_reprovados`, `cypress`, `cobertura`,
+`recurso_falhou`, `recurso_concluido`, `telemetria`, `execucao_abortada`,
+`execucao_interrompida`, `execucao_concluida`. Dá para reconstruir o que aconteceu sem
+reexecutar — cada `chamada_llm` traz estágio, recurso, tentativa, modelo e tokens de
+entrada e saída; cada `gate` traz o veredito e os códigos de violação. A execução
+termina em `execucao_concluida` ou em `execucao_abortada` (com o motivo), nunca nos
+dois.
 
 `schemas_preservados` é o que separa denominador independente de denominador
 gerado: ele lista os schemas que já existiam no projeto do consumidor e que o
@@ -314,37 +347,50 @@ prompts/             PLACEHOLDERS — conteúdo é Fase 2
 fixtures/            artefatos do --dry-run
 tests/
 src/orquestrador/
+  __init__.py        docstring do pacote
+  __main__.py        ponto de entrada de `python -m orquestrador`
   cli.py             argumentos, montagem da execução e apresentação
   pipeline.py        a classe Pipeline e o _ciclo (o loop de reparo)
   config.py          carga e validação da configuração
   contratos.py       todos os modelos Pydantic
   montagem.py        carga dos prompts e a regra do prompt de reparo
   simulacao.py       modelo falso dirigido por fixture + sandbox do --dry-run
-  excecoes.py        FalhaDeGate, FalhaDeEstagio, ErroDeFerramenta, ErroDeInvocacao
+  excecoes.py        FalhaDeGate, FalhaDeEstagio, ErroDeFerramenta, ErroDeConfiguracao
   raiz.py            resolução da raiz do projeto — único uso de Path(__file__)
   textos.py          extrair_json tolerante (implementação única)
+  javascript.py      parser puro dos `export` de um módulo JS (sem I/O)
   llm/
+    __init__.py
     cliente.py       cliente OpenRouter, seleção por estágio
     mensagens.py     uso de token, texto e tamanho de entrada
     estruturado.py   saída estruturada + mini-loop de reparo de schema
   observabilidade/
+    __init__.py
     registro.py      log estruturado (JSONL) + console
     telemetria.py    tokens e caracteres por estágio, recurso e tentativa
   agentes/
+    __init__.py
     mapeador.py      agente ReAct + registro das tools
     executor.py      chamada estruturada, sem tools
     auditor.py       STUB, interface definida
   ferramentas/
+    __init__.py
     processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
     graphify.py      wrappers query/affected/reindex
     arquivos.py      ler/listar/buscar com confinamento de caminho
     scripts_qa.py    wrappers dos .mjs da skill
+    superficie.py    I/O da superfície do projeto: acha os módulos e calcula imports
   gates/
+    __init__.py
+    codigos.py       catálogo dos códigos de violação QAORQ-
     gate_a.py        --so-manifesto + STUB do diff grafo×manifesto
     gate_b.py        prettier + eslint + validador + lacuna de cobertura
     cobertura.py     QAORQ-030: categoria planejada que não virou teste
     parser.py        JSON dos .mjs → ResultadoGate/Violacao
 ```
+
+`javascript.py` fica na raiz do pacote, e não em `ferramentas/`, porque não fala com
+o mundo: entra texto, sai `ExportJs`. Quem faz o I/O é `ferramentas/superficie.py`.
 
 **Onde o Bloco 1 escreve.** O manifesto vai para `_support/cobertura.json`, dentro do
 diretório do recurso; os **schemas de entrada** vão para
