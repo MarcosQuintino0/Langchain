@@ -595,42 +595,66 @@ Fora da matriz, falhar com diagnóstico — nunca "universalizar" por prompt.
 
 ---
 
-# Etapa 6 — Refatorações caras
+# Etapa 6 — Refatorações caras — **CONCLUÍDA**
 
 > **Por que tarde.** São as de maior risco técnico — identidade de classe Pydantic, alvos de
 > monkeypatch, `model_json_schema()` — e o ganho é organizacional, não funcional. Só depois
 > que o produto não puder mais mentir nem destruir dado.
 
-## 6.1 — Dividir `contratos.py` `[G]`
+Resultado: a raiz do pacote saiu de nove arquivos para **cinco** (`__init__.py`,
+`__main__.py`, `config.py`, `excecoes.py`, `raiz.py`), e o pacote passou a ter nove
+subpacotes, todos com linha na tabela do `AGENTS.md` e todos cobertos por `DIRECAO_PROIBIDA`.
 
-✅ 702 linhas com seis vocabulários independentes. Dividir por vocabulário conforme a árvore
-da seção 3.3, com fachada temporária reexportando **as mesmas classes**, nunca cópias.
+## 6.1 — Dividir `contratos.py` `[G]` — **CONCLUÍDO**
 
-Risco: referências futuras, `$defs` e nomes qualificados no schema Pydantic, `isinstance`,
-alvos de monkeypatch. Comparar snapshot de `model_json_schema()` antes e depois dos seis
-contratos públicos, normalizando só ordenação.
+✅ 760 linhas com seis vocabulários independentes, agora em nove módulos de `dominio/`:
+`endpoint`, `recurso`, `inventario`, `manifesto`, `veredito`, `artefatos`, `propriedade`,
+`superficie`, `auditoria`. A telemetria (`UsoDeTokens`, `RegistroDeChamada`,
+`RegistroDeTool`) saiu antes, num commit próprio, para `observabilidade/medidas.py` — ela não
+é contrato de domínio, é a resposta para "quanto custou".
 
-## 6.2 — Dividir `pipeline.py` e criar `aplicacao/` `[G]`
+**Divergência do que esta seção pedia: sem fachada temporária.** O movimento foi atômico, com
+os 30 importadores no mesmo commit. A fachada não reduziria trabalho — os importadores são
+todos daqui e mudam de qualquer forma —, só dividiria o commit e tiraria a pressão de
+terminar, com `test_raiz_do_pacote_e_lista_fechada` verde o tempo todo. É a mesma política já
+registrada na seção 3.3.
 
-✅ 606 linhas: orquestração, persistência, heurística de schema, Cypress e telemetria.
-Extrair `CicloDeReparo` e `PersistenciaDeArtefatos`; o pipeline reduzido vai para
-`aplicacao/pipeline.py` com ~320 linhas.
+O risco previsto (`$defs`, nomes qualificados, `isinstance`, monkeypatch) foi verificado e não
+se materializou: o Pydantic chaveia `$defs` pelo nome da classe, sem módulo, e o snapshot de
+`model_json_schema()` dos 12 contratos públicos — **com** `description`, a comparação mais
+estrita possível — é idêntico byte a byte antes e depois.
 
-**Não** dividir `bloco0` a `bloco3` em módulos separados: eles formam a narrativa da
-orquestração, e separá-los por número cria navegação sem independência.
+O atrito com "sem `Path`" foi resolvido mudando a regra, não o código: ela passa a ser sobre
+**acesso**, e ganhou teste (`test_dominio_nao_toca_no_disco`).
 
-## 6.3 — Reduzir os agentes `[M]`
+## 6.2 — Dividir `pipeline.py` e criar `aplicacao/` `[G]` — **CONCLUÍDO**
 
-✅ `mapeador.py` tem 469 linhas. Extrair modelos de argumento, wrappers observados e
-construção das cinco tools para `agentes/ferramentas_do_mapeador.py`. A assinatura pública de
-`executar` não muda.
+✅ 982 linhas em quatro módulos: `pipeline.py` (596), `ciclo_de_reparo.py` (210),
+`persistencia.py` (263) e `simulacao.py` (222, `git mv`).
 
-## 6.4 — Diff grafo × manifesto `[G]`
+O alvo de "~320 linhas" para o pipeline não se sustentou, e não devia: `bloco0` a `bloco3`
+não se separam — esta mesma seção já dizia isso — e eles sozinhos são a maior parte do que
+sobrou. O que saiu foi o que tem **estado próprio**.
 
-O stub que fecha a promessa central. Depende de adaptadores por linguagem e de normalização
-determinística de rota. Está aqui, e não na Etapa 1, porque exige a matriz de suporte da
-Etapa 5 para ser honesto — mas o `QAORQ-001` deve **reprovar** em vez de avisar assim que a
-primeira linguagem estiver implementada.
+## 6.3 — Reduzir os agentes `[M]` — **CONCLUÍDO**
+
+✅ `mapeador.py` saiu de 597 para 257 linhas. Além de `ferramentas_do_mapeador.py`, ganhou
+`grafo_react.py` — todo o acoplamento com o LangGraph num arquivo com nome próprio, o que
+reduz o alvo do `filterwarnings` de 597 para 97 linhas. A assinatura pública de `executar`
+não mudou.
+
+## 6.4 — Diff grafo × manifesto `[G]` — **CONCLUÍDO**
+
+✅ `analise_estatica/extrator_de_endpoints.py` + `rotas_java_spring.py`, com `MATRIZ_DE_SUPORTE`
+e um adaptador. Verificado: 27 de 27 endpoints extraídos do backend de exemplo.
+
+**Divergência: o `QAORQ-001` continua sendo aviso, e deve continuar.** Esta seção pedia que
+ele passasse a reprovar assim que a primeira linguagem existisse. A implementação decidiu
+outra coisa, e melhor — ver o argumento na docstring de `_avisos`, em `gates/gate_a.py`: rota
+dinâmica não resolvida é **registro de incerteza, não ausência**. Não há endpoint a cobrar, e
+o mapeador não teria o que consertar; reprovar por incerteza gastaria as tentativas do loop
+num delta não acionável. Quem reprova de verdade são `QAORQ-002` (endpoint no backend e fora
+do manifesto) e `QAORQ-003` (rota inventada), que é onde estava o defeito de origem.
 
 ---
 
