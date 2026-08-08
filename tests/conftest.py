@@ -28,6 +28,22 @@ from orquestrador.ferramentas.processo import SaidaProcesso
 MARKERS_DE_CLASSE = frozenset({"unit", "integration", "e2e"})
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """`--mostrar-golden=<arquivo>`: imprime a saída atual e **não grava nada**.
+
+    É deliberadamente "mostrar" e não "atualizar". Um `--update-goldens` transforma
+    "por que isto mudou?" num reflexo de teclado; obrigar a copiar a saída do
+    terminal para o arquivo mantém a pergunta no caminho. Ver
+    `tests/goldens/README.md`.
+    """
+    parser.addoption(
+        "--mostrar-golden",
+        default="",
+        metavar="ARQUIVO",
+        help="imprime o conteúdo atual do golden indicado, sem gravá-lo.",
+    )
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Todo teste declara exatamente um marker de classe, ou a coleta falha.
 

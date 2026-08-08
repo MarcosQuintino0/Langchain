@@ -1,0 +1,20 @@
+{
+  "recurso": "pedidos",
+  "endpoints": [
+    {
+      "metodo": "GET",
+      "rota": "/pedidos",
+      "handler": "PedidoController.listar",
+      "arquivo": "src/controllers/PedidoController.java",
+      "linha": 12
+    },
+    {
+      "metodo": "POST",
+      "rota": "/pedidos",
+      "handler": "PedidoController.criar",
+      "arquivo": "src/controllers/PedidoController.java",
+      "linha": 17
+    }
+  ],
+  "rotas_dinamicas_nao_resolvidas": []
+}

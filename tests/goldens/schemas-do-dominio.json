@@ -1,0 +1,1095 @@
+{
+  "ArquivoGerado": {
+    "additionalProperties": false,
+    "properties": {
+      "caminho": {
+        "title": "Caminho",
+        "type": "string"
+      },
+      "conteudo": {
+        "title": "Conteudo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "caminho",
+      "conteudo"
+    ],
+    "title": "ArquivoGerado",
+    "type": "object"
+  },
+  "ArquivoSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "caminho": {
+        "title": "Caminho",
+        "type": "string"
+      },
+      "conteudo": {
+        "title": "Conteudo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "caminho",
+      "conteudo"
+    ],
+    "title": "ArquivoSchema",
+    "type": "object"
+  },
+  "Delta": {
+    "$defs": {
+      "Violacao": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Line"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "Violacao",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "estagio": {
+        "enum": [
+          "gate_a",
+          "gate_b",
+          "schema"
+        ],
+        "title": "Estagio",
+        "type": "string"
+      },
+      "recurso": {
+        "title": "Recurso",
+        "type": "string"
+      },
+      "tentativa": {
+        "title": "Tentativa",
+        "type": "integer"
+      },
+      "violacoes": {
+        "items": {
+          "$ref": "#/$defs/Violacao"
+        },
+        "title": "Violacoes",
+        "type": "array"
+      }
+    },
+    "required": [
+      "estagio",
+      "recurso",
+      "violacoes",
+      "tentativa"
+    ],
+    "title": "Delta",
+    "type": "object"
+  },
+  "Endpoint": {
+    "additionalProperties": false,
+    "properties": {
+      "arquivo": {
+        "title": "Arquivo",
+        "type": "string"
+      },
+      "handler": {
+        "title": "Handler",
+        "type": "string"
+      },
+      "linha": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Linha"
+      },
+      "metodo": {
+        "title": "Metodo",
+        "type": "string"
+      },
+      "rota": {
+        "title": "Rota",
+        "type": "string"
+      }
+    },
+    "required": [
+      "metodo",
+      "rota",
+      "handler",
+      "arquivo"
+    ],
+    "title": "Endpoint",
+    "type": "object"
+  },
+  "Inventario": {
+    "$defs": {
+      "Endpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "arquivo": {
+            "title": "Arquivo",
+            "type": "string"
+          },
+          "handler": {
+            "title": "Handler",
+            "type": "string"
+          },
+          "linha": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Linha"
+          },
+          "metodo": {
+            "title": "Metodo",
+            "type": "string"
+          },
+          "rota": {
+            "title": "Rota",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metodo",
+          "rota",
+          "handler",
+          "arquivo"
+        ],
+        "title": "Endpoint",
+        "type": "object"
+      },
+      "RotaDinamica": {
+        "additionalProperties": false,
+        "properties": {
+          "arquivo": {
+            "title": "Arquivo",
+            "type": "string"
+          },
+          "expressao": {
+            "title": "Expressao",
+            "type": "string"
+          },
+          "linha": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Linha"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expressao",
+          "arquivo",
+          "motivo"
+        ],
+        "title": "RotaDinamica",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "endpoints": {
+        "items": {
+          "$ref": "#/$defs/Endpoint"
+        },
+        "minItems": 1,
+        "title": "Endpoints",
+        "type": "array"
+      },
+      "recurso": {
+        "title": "Recurso",
+        "type": "string"
+      },
+      "rotas_dinamicas_nao_resolvidas": {
+        "items": {
+          "$ref": "#/$defs/RotaDinamica"
+        },
+        "title": "Rotas Dinamicas Nao Resolvidas",
+        "type": "array"
+      }
+    },
+    "required": [
+      "recurso",
+      "endpoints"
+    ],
+    "title": "Inventario",
+    "type": "object"
+  },
+  "Manifesto": {
+    "$defs": {
+      "EndpointManifesto": {
+        "additionalProperties": false,
+        "properties": {
+          "campos": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Campos"
+          },
+          "cats": {
+            "items": {
+              "pattern": "^CAT-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            "title": "Cats",
+            "type": "array"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "naoAplica": {
+            "patternProperties": {
+              "^CAT-(0[1-9]|1[0-2])$": {
+                "type": "string"
+              }
+            },
+            "title": "Naoaplica",
+            "type": "object"
+          },
+          "schemaEntrada": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Schemaentrada"
+          },
+          "semCorpo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Semcorpo"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "title": "EndpointManifesto",
+        "type": "object"
+      },
+      "SubDominio": {
+        "additionalProperties": false,
+        "properties": {
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "rotas": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Rotas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rotas",
+          "motivo"
+        ],
+        "title": "SubDominio",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "endpoints": {
+        "items": {
+          "$ref": "#/$defs/EndpointManifesto"
+        },
+        "minItems": 1,
+        "title": "Endpoints",
+        "type": "array"
+      },
+      "handlerCobertoPor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Handlercobertopor"
+      },
+      "handlerCompartilhado": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Handlercompartilhado"
+      },
+      "profundidade": {
+        "anyOf": [
+          {
+            "enum": [
+              "completa",
+              "contrato"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Profundidade"
+      },
+      "recurso": {
+        "title": "Recurso",
+        "type": "string"
+      },
+      "subDominios": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/SubDominio"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Subdominios"
+      }
+    },
+    "required": [
+      "recurso",
+      "endpoints"
+    ],
+    "title": "Manifesto",
+    "type": "object"
+  },
+  "Recurso": {
+    "properties": {
+      "caminho_testes": {
+        "format": "path",
+        "title": "Caminho Testes",
+        "type": "string"
+      },
+      "caminhos_backend": {
+        "items": {
+          "format": "path",
+          "type": "string"
+        },
+        "title": "Caminhos Backend",
+        "type": "array"
+      },
+      "nome": {
+        "title": "Nome",
+        "type": "string"
+      },
+      "raiz_schemas": {
+        "anyOf": [
+          {
+            "format": "path",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Raiz Schemas"
+      }
+    },
+    "required": [
+      "nome",
+      "caminho_testes"
+    ],
+    "title": "Recurso",
+    "type": "object"
+  },
+  "ResultadoGate": {
+    "$defs": {
+      "VereditoDeGate": {
+        "enum": [
+          "aprovado",
+          "reprovado",
+          "erro_da_ferramenta"
+        ],
+        "title": "VereditoDeGate",
+        "type": "string"
+      },
+      "Violacao": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Line"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "Violacao",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "avisos": {
+        "items": {
+          "$ref": "#/$defs/Violacao"
+        },
+        "title": "Avisos",
+        "type": "array"
+      },
+      "gate": {
+        "default": "",
+        "title": "Gate",
+        "type": "string"
+      },
+      "motivo": {
+        "default": "",
+        "title": "Motivo",
+        "type": "string"
+      },
+      "saida_bruta": {
+        "default": "",
+        "title": "Saida Bruta",
+        "type": "string"
+      },
+      "veredito": {
+        "$ref": "#/$defs/VereditoDeGate",
+        "default": "aprovado"
+      },
+      "violacoes": {
+        "items": {
+          "$ref": "#/$defs/Violacao"
+        },
+        "title": "Violacoes",
+        "type": "array"
+      }
+    },
+    "title": "ResultadoGate",
+    "type": "object"
+  },
+  "SaidaExecutor": {
+    "$defs": {
+      "ArquivoGerado": {
+        "additionalProperties": false,
+        "properties": {
+          "caminho": {
+            "title": "Caminho",
+            "type": "string"
+          },
+          "conteudo": {
+            "title": "Conteudo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "caminho",
+          "conteudo"
+        ],
+        "title": "ArquivoGerado",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "arquivos": {
+        "items": {
+          "$ref": "#/$defs/ArquivoGerado"
+        },
+        "minItems": 1,
+        "title": "Arquivos",
+        "type": "array"
+      },
+      "recurso": {
+        "title": "Recurso",
+        "type": "string"
+      }
+    },
+    "required": [
+      "recurso",
+      "arquivos"
+    ],
+    "title": "SaidaExecutor",
+    "type": "object"
+  },
+  "SaidaMapeador": {
+    "$defs": {
+      "ArquivoSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "caminho": {
+            "title": "Caminho",
+            "type": "string"
+          },
+          "conteudo": {
+            "title": "Conteudo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "caminho",
+          "conteudo"
+        ],
+        "title": "ArquivoSchema",
+        "type": "object"
+      },
+      "Endpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "arquivo": {
+            "title": "Arquivo",
+            "type": "string"
+          },
+          "handler": {
+            "title": "Handler",
+            "type": "string"
+          },
+          "linha": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Linha"
+          },
+          "metodo": {
+            "title": "Metodo",
+            "type": "string"
+          },
+          "rota": {
+            "title": "Rota",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metodo",
+          "rota",
+          "handler",
+          "arquivo"
+        ],
+        "title": "Endpoint",
+        "type": "object"
+      },
+      "EndpointManifesto": {
+        "additionalProperties": false,
+        "properties": {
+          "campos": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Campos"
+          },
+          "cats": {
+            "items": {
+              "pattern": "^CAT-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            "title": "Cats",
+            "type": "array"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "naoAplica": {
+            "patternProperties": {
+              "^CAT-(0[1-9]|1[0-2])$": {
+                "type": "string"
+              }
+            },
+            "title": "Naoaplica",
+            "type": "object"
+          },
+          "schemaEntrada": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Schemaentrada"
+          },
+          "semCorpo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Semcorpo"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "title": "EndpointManifesto",
+        "type": "object"
+      },
+      "Inventario": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoints": {
+            "items": {
+              "$ref": "#/$defs/Endpoint"
+            },
+            "minItems": 1,
+            "title": "Endpoints",
+            "type": "array"
+          },
+          "recurso": {
+            "title": "Recurso",
+            "type": "string"
+          },
+          "rotas_dinamicas_nao_resolvidas": {
+            "items": {
+              "$ref": "#/$defs/RotaDinamica"
+            },
+            "title": "Rotas Dinamicas Nao Resolvidas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recurso",
+          "endpoints"
+        ],
+        "title": "Inventario",
+        "type": "object"
+      },
+      "Manifesto": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoints": {
+            "items": {
+              "$ref": "#/$defs/EndpointManifesto"
+            },
+            "minItems": 1,
+            "title": "Endpoints",
+            "type": "array"
+          },
+          "handlerCobertoPor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Handlercobertopor"
+          },
+          "handlerCompartilhado": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Handlercompartilhado"
+          },
+          "profundidade": {
+            "anyOf": [
+              {
+                "enum": [
+                  "completa",
+                  "contrato"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profundidade"
+          },
+          "recurso": {
+            "title": "Recurso",
+            "type": "string"
+          },
+          "subDominios": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/$defs/SubDominio"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subdominios"
+          }
+        },
+        "required": [
+          "recurso",
+          "endpoints"
+        ],
+        "title": "Manifesto",
+        "type": "object"
+      },
+      "RotaDinamica": {
+        "additionalProperties": false,
+        "properties": {
+          "arquivo": {
+            "title": "Arquivo",
+            "type": "string"
+          },
+          "expressao": {
+            "title": "Expressao",
+            "type": "string"
+          },
+          "linha": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Linha"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expressao",
+          "arquivo",
+          "motivo"
+        ],
+        "title": "RotaDinamica",
+        "type": "object"
+      },
+      "SubDominio": {
+        "additionalProperties": false,
+        "properties": {
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "rotas": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Rotas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rotas",
+          "motivo"
+        ],
+        "title": "SubDominio",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "inventario": {
+        "$ref": "#/$defs/Inventario"
+      },
+      "manifesto": {
+        "$ref": "#/$defs/Manifesto"
+      },
+      "schemas": {
+        "items": {
+          "$ref": "#/$defs/ArquivoSchema"
+        },
+        "title": "Schemas",
+        "type": "array"
+      }
+    },
+    "required": [
+      "inventario",
+      "manifesto"
+    ],
+    "title": "SaidaMapeador",
+    "type": "object"
+  },
+  "SuperficieDoProjeto": {
+    "$defs": {
+      "ExportCompartilhado": {
+        "additionalProperties": false,
+        "properties": {
+          "comentario": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Comentario"
+          },
+          "declaracao": {
+            "title": "Declaracao",
+            "type": "string"
+          },
+          "nome": {
+            "title": "Nome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nome",
+          "declaracao"
+        ],
+        "title": "ExportCompartilhado",
+        "type": "object"
+      },
+      "ModuloCompartilhado": {
+        "additionalProperties": false,
+        "properties": {
+          "caminho": {
+            "title": "Caminho",
+            "type": "string"
+          },
+          "exports": {
+            "items": {
+              "$ref": "#/$defs/ExportCompartilhado"
+            },
+            "title": "Exports",
+            "type": "array"
+          },
+          "import_do_recurso": {
+            "title": "Import Do Recurso",
+            "type": "string"
+          },
+          "import_do_subdominio": {
+            "title": "Import Do Subdominio",
+            "type": "string"
+          },
+          "import_do_support": {
+            "title": "Import Do Support",
+            "type": "string"
+          }
+        },
+        "required": [
+          "caminho",
+          "import_do_recurso",
+          "import_do_subdominio",
+          "import_do_support"
+        ],
+        "title": "ModuloCompartilhado",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "modulos": {
+        "items": {
+          "$ref": "#/$defs/ModuloCompartilhado"
+        },
+        "title": "Modulos",
+        "type": "array"
+      },
+      "raiz": {
+        "title": "Raiz",
+        "type": "string"
+      }
+    },
+    "required": [
+      "raiz"
+    ],
+    "title": "SuperficieDoProjeto",
+    "type": "object"
+  },
+  "Violacao": {
+    "properties": {
+      "code": {
+        "title": "Code",
+        "type": "string"
+      },
+      "file": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "File"
+      },
+      "line": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Line"
+      },
+      "message": {
+        "title": "Message",
+        "type": "string"
+      }
+    },
+    "required": [
+      "code",
+      "message"
+    ],
+    "title": "Violacao",
+    "type": "object"
+  }
+}

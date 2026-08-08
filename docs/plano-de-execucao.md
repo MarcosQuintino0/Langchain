@@ -520,14 +520,35 @@ justamente onde não há taxonomia.
 documentação é gerada a partir dele. ✅ Hoje o catálogo do README já omite `execucao_abortada`
 e `cypress`.
 
-## 4.4 — Testes de fronteira `[G]`
+## 4.4 — Testes de fronteira `[G]` — **CONCLUÍDO**
 
-O que a suíte atual não cobre: quebra de contrato da skill, wheel incompleto, travessia de
-caminho, relatório Cypress velho, perda de arquivo, 401/429/5xx/timeout do provedor,
-vazamento de segredo.
+As sete fronteiras que esta seção nomeava foram auditadas contra a suíte. Todas têm dono, e a
+maioria ganhou cobertura como efeito das Etapas 1, 2 e 5 — o trabalho aqui foi **levantar**,
+não reescrever:
 
-Separar `unit`, `integration` e `e2e`; job Windows obrigatório com Node 24 e referência exata
-da skill, falhando se houver skip inesperado.
+| Fronteira | Onde |
+| --- | --- |
+| quebra de contrato da skill | `test_invariante_impressao_da_skill.py`, `test_gates_saidas.py` |
+| wheel incompleto | `test_invariante_empacotamento.py` |
+| travessia de caminho | `test_invariante_confinamento.py` (inclusive junction do Windows) |
+| relatório Cypress velho | `test_invariante_falhas_isoladas.py::test_relatorio_de_outra_execucao_nao_e_aceito` |
+| perda de arquivo | `test_ferramentas_publicacao.py` |
+| 401/429/5xx/timeout | `test_invariante_erros_de_provedor.py` |
+| vazamento de segredo | `test_ferramentas_privacidade.py`, `test_invariante_confinamento.py` |
+
+Markers `unit`/`integration`/`e2e` aplicados aos 26 arquivos, com um hook de coleta que
+reprova teste sem marker.
+
+**Divergência: o job Windows obrigatório não existe, e a decisão está declarada.** A skill
+`qa-api` mora fora deste repositório e não há cópia que o runner alcance; o job passou a
+`workflow_dispatch`, com o motivo escrito no `ci.yml` e o comando local no `AGENTS.md`. Antes
+ele ficava `skipped` ao lado dos verdes, o que é pior: fazia "a CI está passando" significar
+algo diferente do que parecia.
+
+Acrescentado fora do escopo original: **goldens de artefato** (`tests/goldens/`), que fecham o
+modo de falha específico de código escrito por IA — o formato de saída mudar e o teste ser
+ajustado no mesmo commit. Cada golden vem com uma asserção estrutural independente, porque o
+golden sozinho é regenerado junto com o erro.
 
 ## 4.5 — Reorganizar os testes `[M]` — **CONCLUÍDO**
 

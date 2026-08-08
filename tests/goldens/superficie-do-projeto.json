@@ -1,0 +1,49 @@
+{
+  "raiz": "cypress/support/api",
+  "modulos": [
+    {
+      "caminho": "cypress/support/api/asserts.base.js",
+      "import_do_recurso": "../../../support/api/asserts.base.js",
+      "import_do_subdominio": "../../../../support/api/asserts.base.js",
+      "import_do_support": "../../../../support/api/asserts.base.js",
+      "exports": [
+        {
+          "nome": "statusExato",
+          "declaracao": "export function statusExato(resposta, esperado, contexto)",
+          "comentario": null
+        },
+        {
+          "nome": "semVazamentoInterno",
+          "declaracao": "export function semVazamentoInterno(resposta, contexto)",
+          "comentario": null
+        }
+      ]
+    },
+    {
+      "caminho": "cypress/support/api/client.js",
+      "import_do_recurso": "../../../support/api/client.js",
+      "import_do_subdominio": "../../../../support/api/client.js",
+      "import_do_support": "../../../../support/api/client.js",
+      "exports": [
+        {
+          "nome": "apiRequest",
+          "declaracao": "export function apiRequest(opcoes)",
+          "comentario": "/**\n * Client HTTP compartilhado do projeto de testes.\n *\n * Fica FORA do diretório do recurso de propósito: `cy.request` só pode morar no\n * client compartilhado (QAAPI-005).\n */"
+        }
+      ]
+    },
+    {
+      "caminho": "cypress/support/api/rotas.js",
+      "import_do_recurso": "../../../support/api/rotas.js",
+      "import_do_subdominio": "../../../../support/api/rotas.js",
+      "import_do_support": "../../../../support/api/rotas.js",
+      "exports": [
+        {
+          "nome": "RotasApi",
+          "declaracao": "export const RotasApi = Object.freeze({\n  pedidos: Object.freeze({\n    colecao: \"/pedidos\",\n    porId: (id) => `/pedidos/${id}`,\n  }),\n})",
+          "comentario": "// Fonte única dos caminhos relativos confirmados no backend."
+        }
+      ]
+    }
+  ]
+}
