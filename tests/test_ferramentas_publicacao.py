@@ -16,13 +16,14 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from orquestrador import cli as modulo_cli
 from orquestrador.aplicacao.pipeline import (
     NAO_EXECUTADO,
     Pipeline,
     ResultadoDaExecucaoDeTestes,
     ResultadoDoRecurso,
 )
+from orquestrador.cli import principal as modulo_cli
+from orquestrador.cli.codigos_de_saida import FALHA_DE_GATE, REQUER_REVISAO, SUCESSO
 from orquestrador.dominio.propriedade import Classificacao, DivergenciaDeSchema, EntradaDoDiario
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import EstadoDoRecurso, ResultadoGate
@@ -491,9 +492,9 @@ def test_divergencia_de_schema_encerra_em_requer_revisao(pipeline, recurso, monk
 @pytest.mark.parametrize(
     ("estados", "esperado"),
     [
-        ([EstadoDoRecurso.APROVADO], modulo_cli.SUCESSO),
-        ([EstadoDoRecurso.APROVADO, EstadoDoRecurso.REQUER_REVISAO], modulo_cli.REQUER_REVISAO),
-        ([EstadoDoRecurso.REQUER_REVISAO, EstadoDoRecurso.REPROVADO], modulo_cli.FALHA_DE_GATE),
+        ([EstadoDoRecurso.APROVADO], SUCESSO),
+        ([EstadoDoRecurso.APROVADO, EstadoDoRecurso.REQUER_REVISAO], REQUER_REVISAO),
+        ([EstadoDoRecurso.REQUER_REVISAO, EstadoDoRecurso.REPROVADO], FALHA_DE_GATE),
     ],
 )
 def test_o_codigo_de_saida_distingue_os_tres_estados(estados, esperado):

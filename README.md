@@ -561,10 +561,15 @@ tests/
 src/orquestrador/
   __init__.py        docstring do pacote
   __main__.py        ponto de entrada de `python -m orquestrador`
-  cli.py             argumentos, montagem da execução e apresentação
   config.py          carga e validação da configuração
   excecoes.py        FalhaDeGate, FalhaDeEstagio, ErroDeFerramenta, ErroDeConfiguracao
   raiz.py            resolução da raiz do projeto — único uso de Path(__file__)
+  cli/
+    __init__.py
+    codigos_de_saida.py  0..4 — o contrato com quem automatiza
+    init.py          `orquestrador init`: o config.toml comentado
+    doctor.py        `orquestrador doctor`: 14 diagnósticos do ambiente
+    principal.py     argumentos, montagem da execução e apresentação
   aplicacao/
     __init__.py
     pipeline.py      a ordem dos quatro blocos e o desfecho de cada recurso

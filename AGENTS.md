@@ -57,7 +57,8 @@ Escolha o diretório pelo **único motivo dominante de mudança**:
 | `analise_estatica/` | lê código-fonte sem executar | não abre subprocesso nem fala com a rede |
 | `dominio/` | contratos e regras puras | não abre, não lê, não escreve, não lista e não resolve caminho; não roda subprocesso; não importa outro subpacote. `Path` entra só como valor |
 | `aplicacao/` | coordena estágios e persistência | não parseia saída de ferramenta, não decide aprovação |
-| raiz do pacote | **lista fechada**: `cli.py`, `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py` | não recebe arquivo novo |
+| `cli/` | argumentos, apresentação e códigos de saída | não coordena estágio nem escreve artefato |
+| raiz do pacote | **lista fechada**: `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py` | não recebe arquivo novo |
 
 **Sobre o `Path` em `dominio/`.** A regra é sobre **acesso**, não sobre o tipo.
 `Recurso.caminho_testes` é álgebra de caminho e `EntradaDoDiario.destino` é chave

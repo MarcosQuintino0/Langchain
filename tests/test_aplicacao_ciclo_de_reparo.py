@@ -21,9 +21,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from orquestrador import cli as modulo_cli
 from orquestrador.aplicacao.ciclo_de_reparo import CicloDeReparo
 from orquestrador.aplicacao.pipeline import Pipeline
+from orquestrador.cli import principal as modulo_cli
 from orquestrador.config import ConfigGate
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import Delta, ResultadoGate, Violacao

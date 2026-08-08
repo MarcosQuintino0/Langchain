@@ -24,14 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from orquestrador.cli import (
-    ERRO_DE_USO,
-    SUCESSO,
-    ItemDeDiagnostico,
-    Veredito,
-    diagnosticar,
-    main,
-)
+from orquestrador.cli.codigos_de_saida import ERRO_DE_USO, SUCESSO
+from orquestrador.cli.doctor import ItemDeDiagnostico, Veredito, diagnosticar
+from orquestrador.cli.principal import main
 from orquestrador.excecoes import ExecutavelAusente
 from orquestrador.ferramentas.processo import SaidaProcesso, executar
 
@@ -108,7 +103,7 @@ def versoes(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
             texto = node if alvo == "node" else f"graphify {graphify}"
             return SaidaProcesso(argv=argv, codigo=0, stdout=texto, stderr="", duracao_s=0.0)
 
-        monkeypatch.setattr("orquestrador.cli.executar", falso)
+        monkeypatch.setattr("orquestrador.cli.doctor.executar", falso)
 
     return instalar
 

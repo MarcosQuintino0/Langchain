@@ -29,12 +29,9 @@ from typing import Any
 
 import pytest
 
-from orquestrador.cli import (
-    MARCA_DE_PREENCHIMENTO,
-    MODELO_DE_CONFIG_DE_PROJETO,
-    SUCESSO,
-    main,
-)
+from orquestrador.cli.codigos_de_saida import SUCESSO
+from orquestrador.cli.init import MARCA_DE_PREENCHIMENTO, MODELO_DE_CONFIG_DE_PROJETO
+from orquestrador.cli.principal import main
 from orquestrador.config import Config
 from orquestrador.llm.montagem import carregar_prompt
 from orquestrador.raiz import ARVORE_DE_FONTES, DIR_PROMPTS_PADRAO

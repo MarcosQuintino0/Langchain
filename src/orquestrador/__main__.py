@@ -2,7 +2,7 @@
 
 import sys
 
-from orquestrador.cli import main
+from orquestrador.cli.principal import main
 
 if __name__ == "__main__":
     sys.exit(main())

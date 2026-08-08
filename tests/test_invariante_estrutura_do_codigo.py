@@ -57,7 +57,6 @@ RAIZ_PERMITIDA = frozenset(
     {
         "__init__.py",
         "__main__.py",
-        "cli.py",
         "config.py",
         "excecoes.py",
         "raiz.py",

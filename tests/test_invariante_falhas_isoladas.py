@@ -22,7 +22,6 @@ from types import SimpleNamespace
 import pytest
 from rich.console import Console
 
-from orquestrador import cli as modulo_cli
 from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.aplicacao.pipeline import (
     EXECUTADO,
@@ -32,7 +31,8 @@ from orquestrador.aplicacao.pipeline import (
     ResultadoDoRecurso,
 )
 from orquestrador.aplicacao.simulacao import ModeloSimulado, PassoDeTool, PassoDoRoteiro
-from orquestrador.cli import avisar_reprovados
+from orquestrador.cli import principal as modulo_cli
+from orquestrador.cli.principal import avisar_reprovados
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import EstadoDoRecurso, ResultadoGate, Violacao
 from orquestrador.excecoes import (

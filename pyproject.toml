@@ -80,7 +80,7 @@ dev = [
 ]
 
 [project.scripts]
-orquestrador = "orquestrador.cli:main"
+orquestrador = "orquestrador.cli.principal:main"
 
 # Empacotamento
 # -------------
@@ -114,6 +114,7 @@ packages = [
   "orquestrador.agentes",
   "orquestrador.analise_estatica",
   "orquestrador.aplicacao",
+  "orquestrador.cli",
   "orquestrador.dominio",
   "orquestrador.ferramentas",
   "orquestrador.gates",
