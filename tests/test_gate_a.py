@@ -36,6 +36,8 @@ from orquestrador.contratos import (
 from orquestrador.excecoes import GrafoNaoPreparado
 from orquestrador.gates.gate_a import diff_grafo_manifesto
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Fontes de fixture
 # ---------------------------------------------------------------------------

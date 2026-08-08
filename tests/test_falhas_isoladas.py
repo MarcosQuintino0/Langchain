@@ -48,6 +48,8 @@ from orquestrador.pipeline import (
 )
 from orquestrador.simulacao import ModeloSimulado, PassoDeTool, PassoDoRoteiro
 
+pytestmark = pytest.mark.unit
+
 # Roteiro patológico: o modelo só sabe pedir tool, nunca conclui. É o que um
 # recurso grande demais provoca no mundo real.
 SEM_FIM: list[PassoDoRoteiro] = [

@@ -44,6 +44,12 @@ precisa_da_skill = pytest.mark.skipif(
     reason=f"skill qa-api não encontrada em {SKILL}",
 )
 
+# Módulo misto: três casos exercitam o pipeline inteiro contra os `.mjs` reais, e o
+# quarto só lê `fixtures/roteiros/`. Por isso o marker vem por função e não em
+# `pytestmark` — o pytest **soma** os markers de módulo e de função, e um
+# `pytestmark = e2e` faria `-m e2e` selecionar também o caso que não precisa de nada.
+e2e = pytest.mark.e2e
+
 
 @pytest.fixture
 def config_toml(tmp_path: Path) -> Path:
@@ -82,6 +88,7 @@ def ultima_execucao(base: Path) -> Path:
     return max(diretorios, key=lambda caminho: caminho.stat().st_mtime)
 
 
+@e2e
 @precisa_de_node
 @precisa_da_skill
 def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path: Path):
@@ -123,6 +130,7 @@ def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path:
     assert telemetria["total"]["entrada"] > 0
 
 
+@e2e
 @precisa_de_node
 @precisa_da_skill
 def test_o_reparo_nao_cresce_o_contexto(config_toml: Path, tmp_path: Path):
@@ -140,6 +148,7 @@ def test_o_reparo_nao_cresce_o_contexto(config_toml: Path, tmp_path: Path):
     assert mapeador[1]["uso"]["entrada"] < mapeador[0]["uso"]["entrada"]
 
 
+@e2e
 @precisa_de_node
 @precisa_da_skill
 def test_artefatos_ficam_em_disco(config_toml: Path, tmp_path: Path):
@@ -158,6 +167,7 @@ def test_artefatos_ficam_em_disco(config_toml: Path, tmp_path: Path):
     assert (execucao / "artefatos" / "pedidos" / "inventario.json").is_file()
 
 
+@pytest.mark.unit
 def test_roteiros_repetem_o_ultimo_quando_a_tentativa_excede():
     roteiros = Roteiros(DIR_FIXTURES / "roteiros")
     assert list(roteiros.recursos()) == ["pedidos"]

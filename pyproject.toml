@@ -141,10 +141,22 @@ filterwarnings = [
   # aqui). Ver a nota em orquestrador/agentes/mapeador.py::_criar_agente.
   "ignore::DeprecationWarning:orquestrador.agentes.mapeador",
 ]
+# O marker responde **"do que este teste precisa além do venv?"**, e não "quantos
+# syscalls ele faz". A pergunta importa porque é a ausência de uma dependência de
+# máquina que faz um teste pular sozinho, e é o pulo silencioso que
+# `.github/scripts/checar_pulos.py` existe para caçar.
+#
+# Por isso `tmp_path` e `sys.executable` ficam em `unit`, por mais contraintuitivo
+# que soe: disco temporário e o próprio interpretador vêm com o pytest. Classificar
+# por mecanismo em vez de por dependência jogaria 15 dos 26 arquivos em
+# `integration`, e o conjunto deixaria de significar "precisa de máquina preparada".
+#
+# Todo teste declara exatamente um destes. Quem cobra é o hook
+# `pytest_collection_modifyitems` de `tests/conftest.py`.
 markers = [
-  "unit: unidade pura — sem I/O, sem subprocesso, sem rede.",
-  "integration: toca disco, subprocesso ou os scripts .mjs da skill; pula sozinho se o Node ou a skill faltarem.",
-  "e2e: pipeline ponta a ponta (hoje, o --dry-run completo).",
+  "unit: roda com o venv e nada mais. `tmp_path` e `sys.executable` são permitidos — o disco temporário é do pytest e o interpretador é o nosso.",
+  "integration: precisa de algo que o `pip install -e \".[dev]\"` não instala — Node, os scripts .mjs da skill, o uv, um executável de terceiro no PATH. Pula sozinho quando a dependência falta.",
+  "e2e: o pipeline inteiro, de `main()` ao artefato em disco, com gates reais. Hoje é o --dry-run.",
 ]
 
 # ---------------------------------------------------------------------------

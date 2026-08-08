@@ -21,6 +21,8 @@ from orquestrador.analise_estatica.exports_javascript import (
     nomes_exportados,
 )
 
+pytestmark = pytest.mark.unit
+
 OBJETO_LITERAL = 'export const Rotas = {\n  colecao: "/x",\n  porId: (id) => `/x/${id}`,\n};\n'
 CONGELADO = 'export const Rotas = Object.freeze({\n  colecao: "/x",\n});\n'
 

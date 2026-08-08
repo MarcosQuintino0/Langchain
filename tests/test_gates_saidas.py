@@ -24,6 +24,8 @@ from orquestrador.gates.saidas import (
     violacoes_do_eslint,
 )
 
+pytestmark = pytest.mark.unit
+
 APROVADO = json.dumps(
     {
         "valid": True,

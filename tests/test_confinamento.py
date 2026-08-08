@@ -50,6 +50,8 @@ from orquestrador.ferramentas.processo import (
 )
 from orquestrador.ferramentas.publicacao import AreaDeStaging
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def backend(tmp_path: Path) -> Path:

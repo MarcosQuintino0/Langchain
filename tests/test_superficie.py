@@ -19,6 +19,8 @@ from orquestrador.contratos import Recurso
 from orquestrador.excecoes import ProjetoNaoPreparado
 from orquestrador.raiz import DIR_FIXTURES
 
+pytestmark = pytest.mark.unit
+
 FIXTURE_PROJETO = DIR_FIXTURES / "projeto-testes"
 
 

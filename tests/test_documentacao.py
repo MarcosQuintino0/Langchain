@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 DIR_TESTES = Path(__file__).resolve().parent
 RAIZ_DO_REPOSITORIO = DIR_TESTES.parent
 PACOTE = RAIZ_DO_REPOSITORIO / "src" / "orquestrador"
@@ -139,7 +141,6 @@ def existe(caminho: str) -> bool:
     return any((base / caminho).exists() for base in (RAIZ_DO_REPOSITORIO, PACOTE))
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("documento", documentos(), ids=lambda p: p.as_posix())
 def test_link_relativo_resolve(documento: Path):
     texto = (RAIZ_DO_REPOSITORIO / documento).read_text(encoding="utf-8")
@@ -165,7 +166,6 @@ def test_link_relativo_resolve(documento: Path):
     )
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize("documento", documentos(), ids=lambda p: p.as_posix())
 def test_caminho_entre_crases_existe(documento: Path):
     if documento == SEM_CHECAGEM_DE_CRASE:

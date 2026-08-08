@@ -17,6 +17,8 @@ from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import gate_b
 from orquestrador.gates import lacunas as gate_lacunas
 
+pytestmark = pytest.mark.unit
+
 
 def recurso_de(config) -> Recurso:
     caminho = config.caminhos.recurso("pedidos")

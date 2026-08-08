@@ -18,10 +18,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.contratos import ArquivoGerado, Delta, SaidaExecutor, Violacao
 from orquestrador.llm.montagem import recortar_por_violacoes
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Bloco 1 — o bundle canônico do mapeador

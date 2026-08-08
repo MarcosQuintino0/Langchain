@@ -22,6 +22,8 @@ from orquestrador.observabilidade.registro import Registro
 from orquestrador.pipeline import Pipeline, nomes_de_campos
 from orquestrador.simulacao import ModeloSimulado, PassoFinal
 
+pytestmark = pytest.mark.unit
+
 SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "Pedido",

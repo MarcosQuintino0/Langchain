@@ -40,6 +40,8 @@ from orquestrador.pipeline import (
     ResultadoDoRecurso,
 )
 
+pytestmark = pytest.mark.unit
+
 DO_CLIENTE = "// escrito à mão pelo dono do projeto\n"
 
 

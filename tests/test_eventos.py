@@ -39,6 +39,8 @@ from orquestrador.observabilidade.eventos import (
 )
 from orquestrador.observabilidade.registro import Registro
 
+pytestmark = pytest.mark.unit
+
 DIR_TESTES = Path(__file__).resolve().parent
 RAIZ_DO_REPOSITORIO = DIR_TESTES.parent
 PACOTE = RAIZ_DO_REPOSITORIO / "src" / "orquestrador"

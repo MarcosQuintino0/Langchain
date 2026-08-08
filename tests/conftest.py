@@ -21,6 +21,42 @@ import pytest
 from orquestrador.config import Config
 from orquestrador.ferramentas.processo import SaidaProcesso
 
+# Os três markers de `[tool.pytest.ini_options] markers`. A definição de cada um
+# está lá; aqui vale só a exigência de que exista exatamente um por teste.
+MARKERS_DE_CLASSE = frozenset({"unit", "integration", "e2e"})
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Todo teste declara exatamente um marker de classe, ou a coleta falha.
+
+    Hook e não teste, por duas razões. A exigência passa a valer também em
+    `pytest tests/test_x.py`, então um teste novo sem marker reprova no primeiro
+    `pytest` de quem o escreveu — e não numa linha vermelha da CI três dias depois,
+    quando o contexto já se perdeu. E a falha é de coleta, o que impede a suíte de
+    rodar num estado em que `-m unit` mente sobre o que cobre.
+
+    **Exatamente um**, e não "pelo menos um": dois markers de classe fazem o mesmo
+    teste ser contado duas vezes pelo job de integração, e
+    `.github/scripts/checar_pulos.py` passaria a somar errado. Cuidado com módulo
+    misto — o pytest **soma** `pytestmark` com o decorator da função.
+    """
+    sem_classe = sorted(
+        item.nodeid
+        for item in items
+        if len({marca.name for marca in item.iter_markers()} & MARKERS_DE_CLASSE) != 1
+    )
+    if sem_classe:
+        raise pytest.UsageError(
+            "teste(s) sem exatamente um marker de classe:\n  "
+            + "\n  ".join(sem_classe[:20])
+            + (f"\n  … e mais {len(sem_classe) - 20}" if len(sem_classe) > 20 else "")
+            + "\n\nEscolha um: `unit` (roda com o venv e nada mais), `integration` "
+            "(precisa de Node, dos .mjs da skill, do uv ou de outro executável) ou "
+            "`e2e` (o pipeline inteiro). Módulo homogêneo declara "
+            "`pytestmark = pytest.mark.unit` uma vez; módulo misto usa decorator "
+            "por função, nunca os dois — eles se somam."
+        )
+
 
 @pytest.fixture
 def config_falso(tmp_path: Path) -> Config:

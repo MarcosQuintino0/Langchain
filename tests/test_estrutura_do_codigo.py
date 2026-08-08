@@ -37,6 +37,8 @@ import pytest
 
 from orquestrador.gates.codigos import CODIGOS_DO_ORQUESTRADOR
 
+pytestmark = pytest.mark.unit
+
 # `Path(__file__)` aqui não contraria a regra do `raiz.py`: aquela regra protege o
 # **pacote**, que não pode calcular a raiz do projeto por conta própria. Este
 # módulo precisa da árvore de fontes ao lado dele, não da raiz configurável — que

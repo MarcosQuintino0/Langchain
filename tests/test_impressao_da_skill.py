@@ -20,6 +20,8 @@ import pytest
 from orquestrador.config import Config
 from orquestrador.excecoes import ErroDeConfiguracao
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def skill(config_falso: Config) -> Config:

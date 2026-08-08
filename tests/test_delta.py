@@ -18,6 +18,8 @@ from orquestrador.contratos import Delta, ResultadoGate, VereditoDeGate, Violaca
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.llm.montagem import montar_entrada_reparo
 
+pytestmark = pytest.mark.unit
+
 
 def violacao(codigo: str, mensagem: str = "detalhe", **extra) -> Violacao:
     return Violacao(codigo=codigo, mensagem=mensagem, **extra)

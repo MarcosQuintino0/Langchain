@@ -21,6 +21,8 @@ from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import lacunas as gate_lacunas
 from orquestrador.gates.codigos import CODIGOS_DO_ORQUESTRADOR
 
+pytestmark = pytest.mark.unit
+
 MANIFESTO = Manifesto.model_validate(
     {
         "recurso": "pedidos",

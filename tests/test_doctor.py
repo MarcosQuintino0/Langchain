@@ -35,6 +35,8 @@ from orquestrador.cli import (
 from orquestrador.excecoes import ExecutavelAusente
 from orquestrador.ferramentas.processo import SaidaProcesso, executar
 
+pytestmark = pytest.mark.unit
+
 VERSAO_DO_GRAPHIFY = "0.9.26"
 CHAVE = "OPENROUTER_API_KEY"
 
@@ -122,7 +124,6 @@ def sem_chave_no_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 def test_ambiente_completo_nao_reprova_nada(
     projeto: Path, versoes: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ):
@@ -137,7 +138,6 @@ def test_ambiente_completo_nao_reprova_nada(
     assert veredito_de(itens, "Graphify").veredito is Veredito.OK
 
 
-@pytest.mark.unit
 def test_impressao_da_skill_desligada_e_aviso_com_o_hash_para_colar(
     projeto: Path, versoes: Callable[..., None]
 ):
@@ -154,7 +154,6 @@ def test_impressao_da_skill_desligada_e_aviso_com_o_hash_para_colar(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 def test_node_antigo_reprova_dizendo_a_versao_minima(projeto: Path, versoes: Callable[..., None]):
     versoes(node="v20.11.0")
     item = veredito_de(diagnosticar(projeto / "config.toml"), "Node")
@@ -163,7 +162,6 @@ def test_node_antigo_reprova_dizendo_a_versao_minima(projeto: Path, versoes: Cal
     assert "24" in item.conserto
 
 
-@pytest.mark.unit
 def test_graphify_divergente_do_manifesto_reprova(projeto: Path, versoes: Callable[..., None]):
     """A comparação é exata porque a do `qa-reindex.mjs` também é.
 
@@ -177,7 +175,6 @@ def test_graphify_divergente_do_manifesto_reprova(projeto: Path, versoes: Callab
     assert VERSAO_DO_GRAPHIFY in item.detalhe and "0.9.27" in item.detalhe
 
 
-@pytest.mark.unit
 def test_graphify_ausente_reprova_com_a_receita_de_instalacao(
     projeto: Path, versoes: Callable[..., None]
 ):
@@ -188,7 +185,6 @@ def test_graphify_ausente_reprova_com_a_receita_de_instalacao(
     assert "uv tool install graphifyy" in item.conserto
 
 
-@pytest.mark.unit
 def test_projeto_sem_modulos_compartilhados_reprova(projeto: Path, versoes: Callable[..., None]):
     versoes()
     for arquivo in (projeto / "projeto-de-testes" / "cypress" / "support" / "api").iterdir():
@@ -200,7 +196,6 @@ def test_projeto_sem_modulos_compartilhados_reprova(projeto: Path, versoes: Call
     assert "preparar-projeto" in item.conserto
 
 
-@pytest.mark.unit
 def test_skill_ausente_reprova_antes_de_tentar_a_impressao(
     projeto: Path, versoes: Callable[..., None]
 ):
@@ -221,7 +216,6 @@ def test_skill_ausente_reprova_antes_de_tentar_a_impressao(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 def test_chave_ausente_reprova_dizendo_o_nome_da_variavel(
     projeto: Path, versoes: Callable[..., None]
 ):
@@ -232,7 +226,6 @@ def test_chave_ausente_reprova_dizendo_o_nome_da_variavel(
     assert CHAVE in item.detalhe
 
 
-@pytest.mark.unit
 def test_o_valor_da_chave_nunca_aparece_no_diagnostico(
     projeto: Path,
     versoes: Callable[..., None],
@@ -260,7 +253,6 @@ def test_o_valor_da_chave_nunca_aparece_no_diagnostico(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 def test_sem_config_o_doctor_ainda_diagnostica_o_que_nao_depende_dela(tmp_path: Path):
     """Encurtar a lista é aceitável; virar uma linha de erro, não.
 
@@ -277,12 +269,10 @@ def test_sem_config_o_doctor_ainda_diagnostica_o_que_nao_depende_dela(tmp_path: 
     assert "orquestrador init" in configuracao.conserto
 
 
-@pytest.mark.unit
 def test_o_codigo_de_saida_acompanha_o_pior_veredito(tmp_path: Path):
     assert main(["doctor", "--config", str(tmp_path / "nao-existe.toml")]) == ERRO_DE_USO
 
 
-@pytest.mark.unit
 def test_todo_item_reprovado_diz_o_que_fazer(projeto: Path, versoes: Callable[..., None]):
     """Diagnóstico sem conserto obriga quem lê a descobrir sozinho o que instalar.
 
@@ -301,7 +291,6 @@ def test_todo_item_reprovado_diz_o_que_fazer(projeto: Path, versoes: Callable[..
     assert not sem_conserto, f"item(ns) sem instrução de conserto: {sem_conserto}"
 
 
-@pytest.mark.unit
 def test_diretorio_nao_preenchido_e_diferente_de_diretorio_inexistente(
     projeto: Path, versoes: Callable[..., None]
 ):
@@ -327,7 +316,6 @@ def test_diretorio_nao_preenchido_e_diferente_de_diretorio_inexistente(
     assert item.detalhe == "[caminhos].backend não preenchido"
 
 
-@pytest.mark.unit
 def test_diretorio_inexistente_mostra_o_caminho_procurado(
     projeto: Path, versoes: Callable[..., None]
 ):
@@ -346,7 +334,6 @@ def test_diretorio_inexistente_mostra_o_caminho_procurado(
     assert "não encontrado" in item.detalhe
 
 
-@pytest.mark.unit
 def test_estagio_sem_modelo_reprova(projeto: Path, versoes: Callable[..., None]):
     """Princípio 6 tem um custo: sem modelo no código, o arquivo precisa trazê-lo."""
     versoes()
@@ -368,7 +355,6 @@ def test_estagio_sem_modelo_reprova(projeto: Path, versoes: Callable[..., None])
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 def test_o_duplo_de_executar_espelha_a_chamada_real():
     """Guarda contra o duplo divergir de `processo.executar` e mascarar a falha.
 

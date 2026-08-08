@@ -109,27 +109,30 @@ jobs:
     timeout-minutes: 25
 
     # ┌───────────────────────────────────────────────────────────────────────┐
-    # │ PRÉ-REQUISITOS — leia antes de mexer                                  │
+    # │ ESTE JOB NÃO RODA A CADA PUSH — e isso está declarado, não escondido.  │
     # ├───────────────────────────────────────────────────────────────────────┤
-    # │ Este job precisa de duas coisas que NÃO vivem neste repositório:      │
+    # │ Ele precisa da skill `qa-api`, que é OUTRO PROJETO e hoje só existe    │
+    # │ na máquina de quem desenvolve. Não há repositório para a CI alcançar,  │
+    # │ então o contrato com os `.mjs` é verificado localmente — ver a seção   │
+    # │ "Como verificar" do AGENTS.md.                                         │
     # │                                                                       │
-    # │   1. Node 24 — resolvido aqui mesmo, por actions/setup-node.          │
-    # │   2. O repositório da skill `qa-api`, com                             │
-    # │      `scripts/validar-suite-gerada.mjs`. Ele é outro projeto          │
-    # │      (`C:\agentesQualidade\qa-agent-skills`) e é apenas CONSUMIDO —   │
-    # │      ver `[caminhos].skill` no config.toml.                           │
+    # │ Antes, o job era condicionado a `vars.SKILL_REPO != ''`, uma variável  │
+    # │ que nunca foi definida. O efeito era pior que não existir: o job       │
+    # │ aparecia como `skipped` ao lado dos verdes, e "a CI está passando"     │
+    # │ passou a significar algo diferente do que parecia. Um job que nunca    │
+    # │ roda não deve ficar num gatilho automático.                           │
     # │                                                                       │
-    # │ Para ligar o job, defina no repositório:                              │
+    # │ PARA LIGAR (o gatilho para rever o ADR 0014): publique a skill num     │
+    # │ repositório, defina as variáveis abaixo e devolva `push` e             │
+    # │ `pull_request` ao `on:` deste job.                                     │
     # │   - variable  SKILL_REPO   ex.: "minha-org/qa-agent-skills"           │
     # │   - variable  SKILL_REF    (opcional) tag/branch; padrão "main"       │
     # │   - secret    SKILL_TOKEN  se o repositório da skill for privado      │
     # │                                                                       │
-    # │ Sem SKILL_REPO o job não roda. Isso é deliberado: um job que falha por │
-    # │ falta de configuração vira vermelho permanente, e vermelho permanente  │
-    # │ é ignorado. O que NÃO é aceitável é o job rodar e passar com os testes │
-    # │ pulados — é exatamente contra isso que existe o passo final.          │
+    # │ Enquanto isso, `workflow_dispatch` permite rodá-lo à mão quando as     │
+    # │ variáveis existirem. Sem elas, ele reprova em vez de fingir que passou.│
     # └───────────────────────────────────────────────────────────────────────┘
-    if: ${{ vars.SKILL_REPO != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -193,15 +196,22 @@ jobs:
           test -f ../skill/scripts/validar-suite-gerada.mjs \
             || { echo "::error::skill sem scripts/validar-suite-gerada.mjs"; exit 1; }
 
-      - name: Testes de integração
+      - name: Instalar o uv
+        # `test_wheel_limpo` constrói o wheel e o instala num ambiente vazio, e
+        # pula sozinho sem o `uv`. Aqui pulo é anomalia — é o que o passo final
+        # cobra —, então o `uv` deixa de ser opcional neste job.
+        run: python -m pip install uv
+
+      - name: Testes de integração e ponta a ponta
         working-directory: orquestrador
         # `-rs` lista o motivo de cada pulo no log — é o que se lê quando o
         # passo seguinte reprova.
         #
-        # O alvo é o arquivo, e não `-m integration`, porque os markers ainda
-        # não foram aplicados aos testes (é passada futura, de dono único).
-        # Quando forem, troque por `-m integration` e apague o caminho.
-        run: python -m pytest tests/test_dry_run.py -rs --junitxml=junit-integracao.xml
+        # Seleção por marker, e não por caminho de arquivo: renomear um arquivo
+        # de teste passaria a esvaziar a seleção em silêncio. `e2e` entra junto
+        # porque é ele que precisa do Node e dos `.mjs`; `integration` sozinho
+        # traria só o teste do wheel.
+        run: python -m pytest -m "integration or e2e" -rs --junitxml=junit-integracao.xml
 
       - name: Nenhum teste de integração pode ter sido pulado
         if: always()

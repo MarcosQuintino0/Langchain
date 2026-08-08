@@ -16,6 +16,8 @@ from orquestrador.agentes.mapeador import criar_ferramentas
 from orquestrador.ferramentas import graphify
 from orquestrador.observabilidade.telemetria import Telemetria
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def backend(config_falso) -> Path:

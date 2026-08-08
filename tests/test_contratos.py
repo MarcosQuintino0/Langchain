@@ -23,6 +23,8 @@ from orquestrador.contratos import (
     normalizar_endpoint,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def manifesto_minimo(**extra) -> dict:
     return {

@@ -66,6 +66,7 @@ def subpacotes_reais() -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_todo_subpacote_real_esta_declarado_no_pyproject():
     """`packages.find` não vê `prompts/`; o preço é uma lista que pode envelhecer.
 
@@ -91,6 +92,7 @@ def test_todo_subpacote_real_esta_declarado_no_pyproject():
     )
 
 
+@pytest.mark.unit
 def test_prompts_sao_empacotados_a_partir_da_raiz():
     setuptools = setuptools_do_pyproject()
 
@@ -105,6 +107,7 @@ def test_prompts_sao_empacotados_a_partir_da_raiz():
     )
 
 
+@pytest.mark.unit
 def test_fixtures_e_config_ficam_fora_do_pacote():
     """O que NÃO vai no wheel é decisão, e decisão não declarada volta atrás sozinha.
 
@@ -119,6 +122,7 @@ def test_fixtures_e_config_ficam_fora_do_pacote():
     assert not any(nome.endswith("fixtures") for nome in setuptools["packages"])
 
 
+@pytest.mark.unit
 def test_existe_uma_unica_copia_dos_prompts():
     """A tensão do AGENTS.md resolvida: editável fora de `src/`, e só uma versão.
 
@@ -139,11 +143,13 @@ def test_existe_uma_unica_copia_dos_prompts():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_o_padrao_dos_prompts_aponta_para_a_arvore_de_fontes_no_checkout():
     assert ARVORE_DE_FONTES == RAIZ_DO_REPOSITORIO
     assert DIR_PROMPTS_PADRAO == RAIZ_DO_REPOSITORIO / "prompts"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("nome", PROMPTS_EXIGIDOS)
 def test_cada_prompt_exigido_carrega_do_padrao(nome: str):
     assert carregar_prompt(nome).strip()

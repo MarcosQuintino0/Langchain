@@ -23,6 +23,8 @@ from orquestrador.excecoes import ErroDeConfiguracao, FalhaDeGate
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.pipeline import Pipeline
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def pipeline(config_falso, tmp_path: Path) -> Pipeline:

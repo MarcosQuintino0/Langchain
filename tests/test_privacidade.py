@@ -31,6 +31,8 @@ from orquestrador.ferramentas.privacidade import (
     redigir_texto,
 )
 
+pytestmark = pytest.mark.unit
+
 CHAVE_PRIVADA = """-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEA0m3vQ7hL9xN2pR4sT6uV8wY1zA3bC5dE7fG9hI0jK2lM4nO6
 pQ8rS0tU2vW4xY6zA8bC0dE2fG4hI6jK8lM0nO2pQ4rS6tU8vW0xY2zA4bC6dE8f
@@ -94,7 +96,6 @@ def confinado(backend: Path, contagem: Contagem) -> Confinamento:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "relativo",
     [
@@ -130,7 +131,6 @@ def test_denylist_recusa_material_de_credencial(relativo: str):
     assert motivo_da_denylist(relativo) is not None
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "relativo",
     [
@@ -154,7 +154,6 @@ def test_denylist_deixa_passar_codigo_legitimo(relativo: str):
     assert motivo_da_denylist(relativo) is None
 
 
-@pytest.mark.unit
 def test_env_do_backend_nunca_e_lido(confinado: Confinamento):
     saida = ler_arquivo(confinado, ".env")
     assert saida.startswith("ERRO")
@@ -162,7 +161,6 @@ def test_env_do_backend_nunca_e_lido(confinado: Confinamento):
     assert "JWT_SECRET" not in saida
 
 
-@pytest.mark.unit
 def test_env_do_backend_nao_aparece_em_busca(confinado: Confinamento):
     # A busca é o furo mais fácil de esquecer: recusar `ler_arquivo` e deixar a
     # varredura por regex abrir o mesmo arquivo devolve o conteúdo linha a linha.
@@ -171,27 +169,23 @@ def test_env_do_backend_nao_aparece_em_busca(confinado: Confinamento):
     assert ".env" not in saida
 
 
-@pytest.mark.unit
 def test_env_do_backend_nao_aparece_na_listagem(confinado: Confinamento):
     saida = listar_diretorio(confinado, ".")
     assert ".env" not in saida
     assert "src/" in saida
 
 
-@pytest.mark.unit
 def test_chave_privada_em_pem_nunca_e_lida(confinado: Confinamento):
     saida = ler_arquivo(confinado, "chave-producao.pem")
     assert saida.startswith("ERRO")
     assert "MIIEpAIBAAKCAQEA" not in saida
 
 
-@pytest.mark.unit
 def test_chave_privada_em_pem_nao_aparece_em_busca(confinado: Confinamento):
     saida = buscar(confinado, r"PRIVATE KEY|MIIEpAIBAAKCAQEA")
     assert "nenhuma ocorrência" in saida
 
 
-@pytest.mark.unit
 def test_diretorio_de_segredo_nao_e_percorrido(backend: Path, confinado: Confinamento):
     (backend / ".ssh").mkdir()
     (backend / ".ssh" / "id_rsa").write_text(CHAVE_PRIVADA, encoding="utf-8")
@@ -201,7 +195,6 @@ def test_diretorio_de_segredo_nao_e_percorrido(backend: Path, confinado: Confina
     assert ".ssh" not in listar_diretorio(confinado, ".")
 
 
-@pytest.mark.unit
 def test_codigo_legitimo_continua_legivel(confinado: Confinamento):
     saida = ler_arquivo(confinado, "src/api/PedidoController.java")
     assert "@GetMapping" in saida
@@ -218,7 +211,6 @@ def com_llmignore(backend: Path, contagem: Contagem, texto: str) -> Confinamento
     return Confinamento(backend, politica=PoliticaDePrivacidade(backend, contagem=contagem))
 
 
-@pytest.mark.unit
 def test_llmignore_do_cliente_e_respeitado(backend: Path, contagem: Contagem):
     (backend / "dumps").mkdir()
     (backend / "dumps" / "clientes.sql").write_text("INSERT INTO cpf ...\n", encoding="utf-8")
@@ -232,7 +224,6 @@ def test_llmignore_do_cliente_e_respeitado(backend: Path, contagem: Contagem):
     assert "@GetMapping" in ler_arquivo(confinado, "src/api/PedidoController.java")
 
 
-@pytest.mark.unit
 def test_llmignore_ausente_deixa_valer_so_a_denylist(backend: Path, contagem: Contagem):
     confinado = Confinamento(backend, politica=PoliticaDePrivacidade(backend, contagem=contagem))
     assert not (backend / ".llmignore").exists()
@@ -240,7 +231,6 @@ def test_llmignore_ausente_deixa_valer_so_a_denylist(backend: Path, contagem: Co
     assert ler_arquivo(confinado, ".env").startswith("ERRO")
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("regras", "alvo", "ignorado"),
     [
@@ -263,7 +253,6 @@ def test_sintaxe_de_gitignore_do_llmignore(regras: str, alvo: str, ignorado: boo
     assert (resultado is not None) is ignorado
 
 
-@pytest.mark.unit
 def test_negacao_do_llmignore_nao_reabre_a_denylist(backend: Path, contagem: Contagem):
     """A denylist é a camada que não se desliga.
 
@@ -281,7 +270,6 @@ def test_negacao_do_llmignore_nao_reabre_a_denylist(backend: Path, contagem: Con
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 def test_chave_de_api_no_meio_de_arquivo_legitimo_e_redigida(
     backend: Path, confinado: Confinamento
 ):
@@ -309,7 +297,6 @@ def test_chave_de_api_no_meio_de_arquivo_legitimo_e_redigida(
     assert "1 trecho(s) redigido(s)" in saida
 
 
-@pytest.mark.unit
 def test_bloco_pem_dentro_de_arquivo_legitimo_preserva_a_numeracao(
     backend: Path, confinado: Confinamento
 ):
@@ -332,7 +319,6 @@ def test_bloco_pem_dentro_de_arquivo_legitimo_preserva_a_numeracao(
     assert "     8\t}" in saida
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "linha",
     [
@@ -364,7 +350,6 @@ def test_falso_positivo_nao_e_redigido(linha: str):
     assert redacao.texto == linha
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("linha", "vazado"),
     [
@@ -393,7 +378,6 @@ def test_credencial_de_verdade_e_redigida(linha: str, vazado: str):
     assert "[redigido:" in redacao.texto
 
 
-@pytest.mark.unit
 def test_a_senha_da_uri_sai_e_o_resto_da_uri_fica():
     """Redigir a URI inteira apagaria host, porta e nome do banco.
 
@@ -406,7 +390,6 @@ def test_a_senha_da_uri_sai_e_o_resto_da_uri_fica():
     assert "orderflow:" in redacao.texto
 
 
-@pytest.mark.unit
 def test_busca_redige_a_linha_do_resultado(backend: Path, confinado: Confinamento):
     """O furo simétrico: recusar o arquivo e devolver a linha crua na busca."""
     (backend / "src" / "api" / "Integracao.java").write_text(
@@ -425,7 +408,6 @@ def test_busca_redige_a_linha_do_resultado(backend: Path, confinado: Confinament
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 def test_a_contagem_aparece_no_relatorio(backend: Path, confinado: Confinamento):
     (backend / "src" / "api" / "Integracao.java").write_text(
         f'class Integracao {{ static final String K = "{CHAVE_DE_API}"; }}\n', encoding="utf-8"
@@ -445,7 +427,6 @@ def test_a_contagem_aparece_no_relatorio(backend: Path, confinado: Confinamento)
     assert resumo.para_log()["trechos_redigidos"] == 1
 
 
-@pytest.mark.unit
 def test_o_mesmo_arquivo_recusado_duas_vezes_conta_uma(confinado: Confinamento):
     """Contagem por caminho, não por tentativa.
 
@@ -461,7 +442,6 @@ def test_o_mesmo_arquivo_recusado_duas_vezes_conta_uma(confinado: Confinamento):
     assert confinado.politica.resumo().arquivos_recusados == 2
 
 
-@pytest.mark.unit
 def test_relatorio_zerado_ainda_diz_que_a_politica_rodou(contagem: Contagem):
     """Silêncio não distingue política limpa de política desligada."""
     linha = contagem.resumo().linha()
@@ -469,7 +449,6 @@ def test_relatorio_zerado_ainda_diz_que_a_politica_rodou(contagem: Contagem):
     assert "0 trecho(s) redigido(s)" in linha
 
 
-@pytest.mark.unit
 def test_a_listagem_diz_quantas_entradas_ocultou(confinado: Confinamento):
     saida = listar_diretorio(confinado, ".")
     assert "[política de privacidade: 2 entrada(s) ocultada(s)]" in saida

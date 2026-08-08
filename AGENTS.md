@@ -163,6 +163,24 @@ python -m orquestrador --dry-run --recurso pedidos
 O dry-run substitui **apenas a resposta do modelo**; tools, scripts `.mjs`, gates e
 deltas são reais. Ele não prova compatibilidade com provedor real.
 
+**Todo teste declara exatamente um marker**: `unit` (roda com o venv e nada mais),
+`integration` (precisa de Node, dos `.mjs` da skill, do `uv` ou de outro executável)
+ou `e2e` (o pipeline inteiro). A coleta reprova sem ele — ver
+`pytest_collection_modifyitems` em [`tests/conftest.py`](tests/conftest.py).
+
+**A CI não verifica o contrato com a skill.** Ela roda lint, tipagem e
+`pytest --cov`; o job de integração ficou em `workflow_dispatch` porque `qa-api`
+mora fora deste repositório e não há cópia que o runner alcance. Quem prova esse
+contrato é você, nesta máquina:
+
+```powershell
+python -m pytest -m "integration or e2e" -rs
+```
+
+Se esses testes **pularem**, você não os rodou — o `-rs` diz o motivo. Enquanto o
+job estiver desligado, a única defesa contra a skill mudar por baixo é a impressão
+digital dela (`config.py`), que detecta mudança, não incompatibilidade.
+
 **Toda correção de bug inclui um teste que falha antes e passa depois.** Escreva o
 teste primeiro e veja-o falhar — teste escrito depois costuma provar o código, não o
 comportamento.

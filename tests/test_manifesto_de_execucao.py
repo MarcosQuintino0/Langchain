@@ -30,6 +30,8 @@ from orquestrador.ferramentas.processo import SaidaProcesso
 from orquestrador.observabilidade import manifesto_de_execucao
 from orquestrador.observabilidade.manifesto_de_execucao import REDIGIDO, coletar, escrever, redigir
 
+pytestmark = pytest.mark.unit
+
 CHAVE_FALSA = "sk-" + "or-v1-" + "0123456789abcdef0123456789abcdef"
 
 

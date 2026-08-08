@@ -27,6 +27,8 @@ from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.raiz import DIR_FIXTURES
 from orquestrador.simulacao import ModeloSimulado, Roteiros
 
+pytestmark = pytest.mark.unit
+
 FIXTURES = DIR_FIXTURES
 
 
