@@ -61,14 +61,3 @@ def auditar(
         oraculos_fracos=[],
         veredito="revisar",
     )
-
-
-def descrever(caminho_backend: Path, caminho_manifesto: Path, amostra_specs: list[Path]) -> str:
-    """Texto de console explicando por que o veredito veio vazio."""
-    return (
-        "auditor semântico: STUB da Fase 1 (nada foi auditado).\n"
-        f"  backend:   {caminho_backend}\n"
-        f"  manifesto: {caminho_manifesto}\n"
-        f"  specs na amostra: {len(amostra_specs)}\n"
-        '  veredito: "revisar" — por construção, para não parecer auditoria cumprida.'
-    )

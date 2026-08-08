@@ -1,18 +1,22 @@
-# Orquestrador multi-agente da skill `qa-api` — Fase 1
+# Orquestrador multi-agente da skill `qa-api`
 
 Orquestrador em Python que coordena três estágios (dois com LLM, um determinístico)
 para gerar suítes de teste Cypress de API, dirigido pela skill `qa-api`.
 
-Este projeto (`C:\LangChainTestes`) é **independente** do repositório da skill
-(`C:\agentesQualidade\qa-agent-skills`). Ele apenas **consome** a skill: invoca os
-scripts `.mjs` dela por subprocess e nunca modifica nada dentro de
-`skills/qa-api/`. O caminho da skill é configuração — veja `[caminhos].skill` em
+Este projeto é **independente** do repositório da skill. Ele apenas **consome** a
+skill: invoca os scripts `.mjs` dela por subprocess e nunca modifica nada dentro
+dela. O caminho é configuração — veja `[caminhos].skill` em
 [`config.toml`](config.toml).
 
-> **Esta é a Fase 1: arquitetura e esqueleto executável.** Toda a fiação existe e
-> roda ponta a ponta; o **conteúdo dos prompts dos agentes é Fase 2**. Onde eles
-> entrariam há arquivos-placeholder com a interface já definida. Veja
-> [O que é stub](#o-que-é-stub-nesta-fase).
+A integração é um contrato **implícito**: formato dos argumentos, código de saída,
+forma do JSON e semântica dos códigos `QAAPI-`. E os prompts em `prompts/` são
+condensação **manual** das `references/` dela. Por isso
+`[skill].impressao_esperada` fixa o hash dos `.mjs` invocados — se a skill mudar,
+o pipeline recusa rodar até alguém conferir o contrato.
+
+> **O que ainda é stub:** o diff grafo × manifesto do Gate A e o auditor
+> semântico. Veja [O que é stub](#o-que-é-stub). O resto do fluxo roda ponta a
+> ponta, com escrita transacional e verificação determinística em cada gate.
 
 ---
 
@@ -69,7 +73,7 @@ BLOCO 1  MAPEADOR (LLM + tools, ReAct)           um recurso por vez
          reprova → delta → volta ao mapeador
 BLOCO 2  EXECUTOR (LLM, sem tools)               um recurso por vez
          → specs *.cy.js com tags @endpoint @cat @campo
-         GATE B: prettier + eslint + validar-suite-gerada
+         GATE B: prettier + eslint + validar-suite-gerada + lacuna (QAORQ-030)
          reprova → delta (QAAPI-0xx) → volta ao executor
 BLOCO 3  Cypress + qa-cobertura.mjs --json       determinístico
          AUDITOR SEMÂNTICO [STUB] — sob demanda, fora do loop
@@ -79,16 +83,16 @@ BLOCO 3  Cypress + qa-cobertura.mjs --json       determinístico
 projeto de testes, nunca o backend — limite deliberado, documentado em
 `skills/qa-api/scripts/cobertura/handlers.mjs:15`. Ele prova *"entreguei o que
 planejei"*, nunca *"planejei tudo que existe"*. O diff grafo × manifesto é o que
-fecharia esse elo, e é **stub nesta fase**.
+fecharia esse elo, e continua **stub** — é o item que ainda não fecha o defeito
+de completude que originou o projeto.
 
 ---
 
 ## Instalação
 
-Requer Python 3.12+, Node 24+ e Git já instalados. Sem Docker, sem container.
+Requer Python 3.13, Node 24+ e Git já instalados. Sem Docker, sem container.
 
 ```bash
-cd C:\LangChainTestes
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
@@ -96,7 +100,7 @@ pip install -e ".[dev]"
 
 O projeto é instalável (`src/orquestrador`), então `orquestrador` fica importável
 de qualquer diretório de trabalho — é o que permite rodar `pytest` de onde for.
-Sem o extra `[dev]` você fica sem o `pytest`. Dependências e configuração de teste
+Sem o extra `[dev]` você fica sem `pytest`, `ruff` e `pyright`. Dependências e configuração de teste
 vivem num arquivo só: [`pyproject.toml`](pyproject.toml).
 
 Confira também `[caminhos].skill` no `config.toml`: ele aponta para o repositório
@@ -144,12 +148,13 @@ diretório do próprio arquivo.
 | `[caminhos]` | skill, backend, projeto de testes, `graph.json`, `prompts/`, onde vão os logs |
 | `[openrouter]` | `base_url`, nome da variável de ambiente da chave, timeout |
 | `[estagios.*]` | **modelo por estágio**, temperatura, modo de saída estruturada, tentativas de schema |
-| `[gates.a]` / `[gates.b]` | flags do validador e `max_tentativas` de cada gate |
+| `[gates.a]` / `[gates.b]` | flags do validador, `max_tentativas` e `exigir_cobertura` |
+| `[skill]` | `impressao_esperada`: hash dos `.mjs` invocados; vazio desliga a trava |
 | `[execucao]` | executáveis (node, graphify, prettier, eslint, cypress) e limites |
 
 Antes do primeiro uso real, ajuste `backend`, `projeto_testes` e os três
-`estagios.*.modelo` (vêm com placeholder `<defina: ...>`; o pipeline recusa rodar
-com ele e diz qual estágio corrigir).
+`estagios.*.modelo`. O `config.toml` versionado aponta para o backend e o projeto
+de exemplo desta máquina — troque pelos seus.
 
 **Escolha de modelo por estágio.** O mapeador tem o julgamento mais difícil
 (inferir regra implícita, decidir honestamente o que é `naoAplica`) e o menor
@@ -218,21 +223,30 @@ python -m orquestrador --recurso pedidos
 | `--max-tentativas <n>` | sobrescreve o limite de todos os gates |
 | `--rodar-cypress` | executa o Cypress no Bloco 3 (por padrão é pulado) |
 | `--auditor` | **indisponível** — recusa com código 2 |
-| `--remover-reprovados` | **indisponível** — recusa com código 2 |
+| `--remover-reprovados` | apaga o que criamos nos recursos não aprovados |
 
 Códigos de saída: `0` sucesso, `1` algum gate esgotou as tentativas, `2` erro de
-configuração, indisponibilidade de ferramenta ou flag recusada.
+configuração ou indisponibilidade de ferramenta, `3` algum recurso encerrou em
+`REQUER_REVISAO`. O pior desfecho manda: reprovado > requer revisão > aprovado.
 
-**Por que as duas flags recusam em vez de sumir.** Continuam reconhecidas pelo
-argparse para não quebrar script existente em silêncio, mas encerram com código 2 e
-uma mensagem dizendo o que falta.
+**Por que `--auditor` recusa em vez de sumir.** Continua reconhecida pelo argparse
+para não quebrar script existente em silêncio, mas encerra com código 2 e uma
+mensagem dizendo o que falta. Antes ela imprimia o veredito do stub e saía com
+**0**; em CI isso é indistinguível de auditoria feita — e o auditor não existe.
 
-O `--auditor` imprimia o veredito do stub e saía com **0**. Em CI, isso é
-indistinguível de auditoria feita — e o auditor não existe. O
-`--remover-reprovados` apagava todo caminho da lista de reprovados sem distinguir
-arquivo que criamos de arquivo que já era do cliente. Ele volta quando existir o
-diário de propriedade da Etapa 2, que registra por arquivo se ele foi criado,
-modificado ou preexistente.
+**Por que `--remover-reprovados` voltou.** Ela apagava todo caminho da lista de
+reprovados sem distinguir arquivo que criamos de arquivo que já era do cliente, e
+por isso ficou desligada até existir o diário de propriedade. Com o diário, a
+remoção é restrita à classificação `criado` **e** ao hash inalterado desde que o
+gravamos: um spec que nasceu conosco e o desenvolvedor editou à mão deixa de ser
+descartável no instante em que ele o salva.
+
+**O terceiro estado do recurso.** `REQUER_REVISAO` é o desfecho de quem passou nos
+gates mas encontrou, no backend, campo que o schema preexistente do consumidor não
+declara. O schema **não** é atualizado — o contrato dele tem precedência, e mexer
+nele para fazer teste passar seria trocar a régua independente pela régua de quem é
+medido. O diff sai legível por máquina em
+`.execucoes/<ts>/artefatos/<recurso>/divergencias-de-schema.json`.
 
 ### Executar o Cypress
 
@@ -344,7 +358,7 @@ afirmações — e quebram se alguém concatenar histórico "para dar mais conte
 ```
 pyproject.toml       deps + configuração de pytest, num arquivo só
 config.toml          configuração de execução — é do usuário, fica na raiz
-prompts/             PLACEHOLDERS — conteúdo é Fase 2
+prompts/             instrução fixa de cada estágio (conteúdo editorial)
 fixtures/            artefatos do --dry-run
 tests/
 src/orquestrador/
@@ -383,6 +397,7 @@ src/orquestrador/
     processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
     graphify.py      wrappers query/affected/reindex
     arquivos.py      ler/listar/buscar com confinamento de caminho
+    publicacao.py    staging por recurso, diário de propriedade, publicação atômica
     scripts_qa.py    wrappers dos .mjs da skill
     json_externo.py  extrair_json tolerante de stdout de ferramenta (única impl.)
   gates/
@@ -414,8 +429,33 @@ cobertura por campo, e denominador pertence ao plano. Se o executor o escrevesse
 estaria escrevendo a própria régua — a circularidade que esta arquitetura existe para
 eliminar. O confinamento do executor ao diretório do recurso continua intacto.
 
+**Quando o projeto do consumidor é tocado.** Uma vez por recurso, depois que os
+dois gates aprovaram. Até lá, cada tentativa do loop escreve numa **área de
+staging** da execução, e é o staging que os gates validam — validar uma coisa e
+publicar outra era o buraco por onde uma tentativa ruim sobrescrevia a suíte de
+quem paga pela ferramenta.
+
+O staging do recurso é um irmão do diretório real, no mesmo nível
+(`cypress/e2e/apis/.qa-staging-<execucao>-<recurso>`). Precisa ser ali, e não em
+`.execucoes/`, por duas resoluções de caminho da skill: os specs importam os
+módulos compartilhados por caminho relativo (`../../../../support/api/...`), que o
+validador resolve a partir do arquivo, e o `cobertura/handlers.mjs` **sobe** do
+recurso procurando `.agents/config/qa-api/handlers.json`. Os schemas, esses, ficam
+em `.execucoes/<ts>/staging/`, porque as duas ferramentas aceitam o diretório
+pronto (`--schemas`). O ponto inicial do nome mantém o staging fora do
+`specPattern` padrão do Cypress.
+
+A publicação é atômica por recurso, com verificação de conflito antes e rollback
+em caso de falha no meio: uma interrupção deixa o projeto byte a byte como estava.
+Cada arquivo tocado vira uma linha no **diário de propriedade**
+(`.execucoes/diario-de-propriedade.json`) com caminho, hash anterior, hash novo e
+classificação `criado` / `modificado` / `preexistente`. É esse diário que devolve
+o `--remover-reprovados`, restrito ao que **nós** criamos e que ninguém editou
+desde então — e que autoriza remover spec obsoleto de execução anterior sob a
+mesma regra. Sem diário, nada é removido.
+
 **Por que `prompts/`, `fixtures/` e `config.toml` ficam fora do pacote.** Prompt é
-conteúdo, não código: a Fase 2 é trabalho editorial, iterado por quem não
+conteúdo, não código: prompt é trabalho editorial, iterado por quem não
 necessariamente mexe em Python. O caminho vem da configuração
 (`[caminhos].prompts`), com padrão na raiz.
 
@@ -471,6 +511,7 @@ para nunca colidir:
 | `QAORQ-020` / `-021` | prettier / eslint reprovaram |
 | `QAORQ-022` | formatador configurado mas ausente do PATH |
 | `QAORQ-030` | categoria declarada em `cats` sem nenhum `it` que a cubra |
+| `QAORQ-040` | schema preservado do consumidor não declara campo que o mapeador achou |
 
 ### A lacuna é um gate, não só um número no relatório
 
@@ -526,11 +567,10 @@ que uma refatoração quebraria em silêncio:
 
 ---
 
-## O que é stub nesta fase
+## O que é stub
 
 | Item | Estado | Onde |
 | --- | --- | --- |
-| Conteúdo dos prompts dos agentes | placeholder com a interface definida | `prompts/*.md` |
 | Diff grafo × manifesto (Gate A) | stub documentado; emite aviso `QAORQ-001` e **não** reprova | `gates/gate_a.py::diff_grafo_manifesto` |
 | Auditor semântico | stub; `auditar(..., permitir_stub=True)` devolve veredito vazio marcado `"revisar"` | `agentes/auditor.py` |
 | Prettier / ESLint | implementados e testados, **desligados por padrão** | `[execucao]` no `config.toml` |
