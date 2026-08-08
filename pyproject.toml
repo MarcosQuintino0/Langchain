@@ -68,6 +68,15 @@ dev = [
   "pytest==9.1.1",
   "iniconfig==2.3.0",
   "pluggy==1.6.0",
+  # Ferramental da Etapa 3. Mesma política das dependências de runtime: versão
+  # exata, transitivas pinadas junto, para o ambiente de todo mundo (e o da CI)
+  # ser o mesmo que foi validado aqui.
+  "ruff==0.16.2",
+  "pyright==1.1.411",
+  "pytest-cov==7.1.0",
+  # Transitivas do bloco acima
+  "coverage==7.15.4",  # de pytest-cov
+  "nodeenv==1.10.0",   # de pyright: é ele que baixa o Node do binário do Pyright
 ]
 
 [project.scripts]
@@ -81,10 +90,128 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# `--strict-markers`: marker escrito errado vira erro, não silêncio. Sem isso um
+# `@pytest.mark.integracao` (em vez de `integration`) simplesmente não seleciona
+# nada, e o filtro da CI passa a rodar zero teste sem reclamar.
+#
+# `--cov` NÃO entra aqui de propósito: o piso de cobertura é global e a suíte é
+# rodada em fatias o tempo todo durante o desenvolvimento (`pytest tests/x.py`).
+# Um piso no addopts faria toda execução parcial falhar por motivo alheio ao que
+# se está testando. O `--cov` fica na linha de comando da CI, onde a suíte é
+# sempre inteira.
+addopts = "-q --strict-markers"
 filterwarnings = [
   # langgraph.prebuilt.create_react_agent segue disponível até a v2.0 do LangGraph.
   # O sucessor é langchain.agents.create_agent (pacote `langchain`, não instalado
   # aqui). Ver a nota em orquestrador/agentes/mapeador.py::_criar_agente.
   "ignore::DeprecationWarning:orquestrador.agentes.mapeador",
 ]
+markers = [
+  "unit: unidade pura — sem I/O, sem subprocesso, sem rede.",
+  "integration: toca disco, subprocesso ou os scripts .mjs da skill; pula sozinho se o Node ou a skill faltarem.",
+  "e2e: pipeline ponta a ponta (hoje, o --dry-run completo).",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+# `src` faz o isort (regras `I`) reconhecer `orquestrador` e os módulos de teste
+# como primeira-parte, em vez de jogá-los no bloco de terceiros.
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E4",      # pycodestyle: imports
+  "E7",      # pycodestyle: statements
+  "E9",      # pycodestyle: erro de sintaxe / IO
+  "F",       # pyflakes
+  "I",       # isort
+  "UP",      # pyupgrade
+  "B",       # flake8-bugbear
+  "C4",      # flake8-comprehensions
+  "PIE",     # flake8-pie
+  "RUF",     # regras do próprio Ruff
+  "S",       # flake8-bandit — subprocesso e caminho são o coração deste projeto
+  "PTH",     # flake8-use-pathlib
+  "ARG",     # flake8-unused-arguments
+  "TID252",  # import relativo
+  "PLC0415", # import fora do topo do arquivo
+]
+
+# Regras deliberadamente FORA do `select`, com o porquê. Sem isto, a próxima
+# pessoa (ou o próximo agente) "conserta" a configuração ligando-as de novo.
+#
+# N818 — exige que toda exceção termine em `Error`. Quebraria a taxonomia
+#   `ErroDe...` / `FalhaDe...` de excecoes.py, que é deliberada e em português.
+#   O sufixo carrega significado aqui: `FalhaDe*` é reprovação prevista do
+#   pipeline, `ErroDe*` é defeito de configuração ou de invocação.
+#
+# D101 / D103 — docstring obrigatória em classe e função pública. Com IA
+#   escrevendo o código, o resultado não é documentação: é uma linha que repete
+#   o nome da função e envelhece sem ninguém notar.
+#
+# N815 (mixedCase em atributo de classe) sobre os modelos que espelham JSON
+#   externo — `naoAplica`, `schemaEntrada` e afins são o contrato da skill
+#   `qa-api`, definido por ela, não desleixo de nomenclatura nosso. Renomear
+#   quebraria a serialização; um `noqa` por campo seria pior que a regra.
+#
+# C901 / PLR0912 / PLR0915 (complexidade) e qualquer limite automático de
+#   linhas — dividiriam `config.py` e `ferramentas/arquivos.py`, que são coesos.
+#   Módulo grande e coeso é melhor que cinco módulos que só existem para caber
+#   num número. Quem julga isso é revisão, não contador.
+
+[tool.ruff.lint.per-file-ignores]
+# S101 é `assert`, que é justamente como o pytest afirma. Só ele: o resto do
+# flake8-bandit continua valendo em tests/ — teste também abre subprocesso e
+# monta caminho, e é ali que mora metade do risco deste projeto.
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.format]
+# LF no repositório inteiro, inclusive no Windows. Ver .gitattributes.
+line-ending = "lf"
+
+# ---------------------------------------------------------------------------
+# Pyright
+# ---------------------------------------------------------------------------
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [".venv", ".execucoes", "**/__pycache__"]
+pythonVersion = "3.13"
+pythonPlatform = "Windows"
+# `standard` no repositório todo e `strict` só em `src`: teste pode usar um
+# duplo de teste meia-boca sem virar dívida de tipagem; código de produção, não.
+typeCheckingMode = "standard"
+strict = ["src"]
+# Sem baseline de ignores: um `# type: ignore` que deixou de ser necessário é
+# erro. É o que impede a lista de silenciamentos de crescer para sempre.
+reportUnnecessaryTypeIgnoreComment = "error"
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+
+[tool.coverage.run]
+# Branch coverage: sem ela, um `if` cujo ramo falso nunca roda conta como
+# coberto. Neste projeto os ramos falsos são justamente os caminhos de
+# reprovação de gate — o que mais importa medir.
+branch = true
+# `source_pkgs` (não `source`) porque o pacote é instalado em modo editável a
+# partir de `src/`: medir pelo nome do pacote acha o código onde quer que o
+# `pip install -e` o tenha deixado.
+source_pkgs = ["orquestrador"]
+
+[tool.coverage.report]
+# 85 com 86% medido hoje: piso é rede de segurança contra regressão, não meta.
+# Colar o piso no valor atual transforma qualquer refatoração em falha de CI.
+fail_under = 85
+precision = 1
+show_missing = true
+skip_covered = true

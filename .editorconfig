@@ -1,0 +1,44 @@
+# https://editorconfig.org
+#
+# Companheiro do .gitattributes: aquele decide o que entra no repositório, este
+# decide o que o editor escreve em disco. Os dois precisam concordar, senão o
+# editor salva CRLF e o Git converte de volta em todo commit.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+# 100 é o mesmo `line-length` do Ruff. Guia visual, não regra: quem reprova é
+# o Ruff format.
+max_line_length = 100
+
+[*.py]
+indent_size = 4
+
+[*.{toml,json,yml,yaml,js,mjs,cjs,ts}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+# Em Markdown, dois espaços no fim da linha são quebra de linha significativa.
+trim_trailing_whitespace = false
+
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+[Makefile]
+indent_style = tab
+
+# Nada de reformatar artefato de terceiro nem saída de execução.
+[{.venv,.execucoes}/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset

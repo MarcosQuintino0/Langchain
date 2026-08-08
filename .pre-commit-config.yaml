@@ -1,0 +1,49 @@
+# Hook lento é hook ignorado, e hook ignorado é pior que hook nenhum: dá a
+# sensação de rede sem a rede. Aqui entra só o que roda em menos de um segundo
+# sobre os arquivos em stage.
+#
+# O que NÃO entra, de propósito:
+#   - pytest  — a suíte inteira num commit é tempo demais; quem roda é a CI.
+#   - Pyright — precisa baixar o Node na primeira execução e checa o projeto
+#               todo, não só o que está em stage. É job de CI.
+#   - auditoria de dependência / scanner de segredo — dependem de rede. Um hook
+#     que falha offline treina todo mundo a usar `--no-verify`.
+#
+# Instalação (o `pre-commit` fica fora do extra `dev`: é ferramenta de máquina,
+# não dependência do projeto):
+#   pipx install pre-commit
+#   pre-commit install
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        # Markdown usa dois espaços no fim da linha como quebra de linha.
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        # Mesma decisão do .gitattributes e do `line-ending = "lf"` do Ruff.
+        args: [--fix=lf]
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      # Hooks locais, e não o mirror do Ruff: assim a versão que roda no commit
+      # é exatamente a `ruff==` do extra `dev`, e não um `rev:` deste arquivo
+      # que envelhece em silêncio e diverge da CI.
+      - id: ruff-check
+        name: ruff check --fix
+        entry: ruff
+        args: [check, --fix, --force-exclude]
+        language: system
+        types_or: [python, pyi]
+
+      - id: ruff-format
+        name: ruff format
+        entry: ruff
+        args: [format, --force-exclude]
+        language: system
+        types_or: [python, pyi]

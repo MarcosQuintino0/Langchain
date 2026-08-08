@@ -1,0 +1,51 @@
+# Fim de linha: LF no repositório, sempre.
+#
+# Por que este arquivo existe: o `core.autocrlf=true` desta máquina fazia o
+# `git add` avisar que arquivos com LF seriam convertidos para CRLF. Sem uma
+# política no repositório, o fim de linha vira função da configuração de cada
+# clone — e o diff de um arquivo passa a depender de quem o salvou por último.
+# Aqui a decisão fica versionada, e o `core.autocrlf` de cada um deixa de
+# importar: `eol=lf` vence a configuração local, tanto no checkout quanto no
+# commit. É a mesma escolha do `line-ending = "lf"` do Ruff format.
+
+* text=auto eol=lf
+
+# Explícitos para os tipos que o projeto realmente tem. Redundante com a linha
+# acima, mas serve de documentação e sobrevive a alguém afrouxar o `text=auto`.
+*.py      text eol=lf
+*.pyi     text eol=lf
+*.toml    text eol=lf
+*.cfg     text eol=lf
+*.ini     text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.js      text eol=lf
+*.mjs     text eol=lf
+*.cjs     text eol=lf
+*.sh      text eol=lf
+*.txt     text eol=lf
+.env.exemplo   text eol=lf
+.editorconfig  text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# Scripts de shell do Windows precisam de CRLF: o `cmd.exe` não lê um `.bat`
+# com LF de forma confiável.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binários: nunca converter, nunca tentar fazer diff de texto.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.exe  binary
+*.dll  binary
+*.whl  binary
