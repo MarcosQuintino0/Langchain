@@ -10,7 +10,7 @@ praticamente grátis em contexto.
 from __future__ import annotations
 
 import time
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -22,6 +22,7 @@ from orquestrador.excecoes import FalhaDeEstagio
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.mensagens import medir_mensagens, texto_da_mensagem, uso_da_mensagem
 from orquestrador.llm.montagem import montar_entrada_reparo
+from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
 
 T = TypeVar("T", bound=BaseModel)
@@ -58,7 +59,7 @@ class GeradorEstruturado:
         estagio: str,
         parametros: ConfigEstagio,
         telemetria: Telemetria,
-        registro=None,
+        registro: RegistradorDeEventos | None = None,
     ) -> None:
         self.modelo = modelo
         self.estagio = estagio
@@ -141,13 +142,21 @@ class GeradorEstruturado:
                     tipo, method=_METODOS[modo], include_raw=True
                 )
                 retorno = estruturado.invoke(mensagens)
-                resposta = retorno.get("raw")
-                objeto = retorno.get("parsed")
+                # Com `include_raw=True` o LangChain devolve sempre o envelope
+                # `{"raw", "parsed", "parsing_error"}`. O `BaseModel` solto que a
+                # assinatura também admite é o caso `include_raw=False`, que este
+                # código não pede: se aparecer, o que chegou já é o objeto parseado e
+                # não existe mensagem crua para a telemetria medir.
+                envelope: dict[str, Any] = (
+                    retorno if isinstance(retorno, dict) else {"parsed": retorno}
+                )
+                resposta = envelope.get("raw")
+                objeto = envelope.get("parsed")
                 if objeto is None:
                     problemas = [
                         Violacao(
                             codigo="QAORQ-011",
-                            mensagem=str(retorno.get("parsing_error") or "saída não parseável"),
+                            mensagem=str(envelope.get("parsing_error") or "saída não parseável"),
                         )
                     ]
             except NotImplementedError:

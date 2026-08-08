@@ -82,7 +82,7 @@ class FalhaComArtefatos(RuntimeError):
     ) -> None:
         super().__init__(mensagem)
         self.arquivos: list[Path] = list(arquivos or ())
-        self.violacoes: list = list(violacoes or ())
+        self.violacoes: list[Violacao] = list(violacoes or ())
 
     @property
     def codigos(self) -> list[str]:

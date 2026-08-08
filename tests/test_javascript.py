@@ -176,7 +176,8 @@ def test_comentario_acima_acompanha_o_export():
 
 def test_jsdoc_acima_acompanha_o_export():
     fonte = "/**\n * Client HTTP.\n */\nexport function apiRequest(o) {}\n"
-    assert "Client HTTP" in extrair_exports(fonte)[0].comentario
+    comentario = extrair_exports(fonte)[0].comentario
+    assert comentario is not None and "Client HTTP" in comentario
 
 
 def test_declaracao_longa_leva_marcador_de_truncamento():

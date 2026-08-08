@@ -19,7 +19,7 @@ from orquestrador.excecoes import FalhaDeGate
 from orquestrador.gates import gate_a
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.pipeline import Pipeline, nomes_de_campos
-from orquestrador.simulacao import ModeloSimulado
+from orquestrador.simulacao import ModeloSimulado, PassoFinal
 
 SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -86,13 +86,13 @@ def preparar(pipeline: Pipeline, monkeypatch, veredito: ResultadoGate) -> None:
     monkeypatch.setattr(
         pipeline,
         "modelo",
-        lambda *_a, **_k: ModeloSimulado(passos=[{"tipo": "final", "artefato": ARTEFATO}]),
+        lambda *_a, **_k: ModeloSimulado(passos=[PassoFinal(tipo="final", artefato=ARTEFATO)]),
     )
     monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: veredito)
 
 
 def test_bloco1_grava_o_schema_na_raiz_de_schemas(pipeline, recurso, monkeypatch):
-    preparar(pipeline, monkeypatch, ResultadoGate(aprovado=True))
+    preparar(pipeline, monkeypatch, ResultadoGate.aprovado_por())
 
     saida, _resultado, tentativas = pipeline.bloco1(recurso)
 
@@ -111,10 +111,7 @@ def test_o_schema_entra_na_conta_do_que_ficou_reprovado(pipeline, recurso, monke
     preparar(
         pipeline,
         monkeypatch,
-        ResultadoGate(
-            aprovado=False,
-            violacoes=[Violacao(codigo="QAAPI-021", mensagem="cat faltando")],
-        ),
+        ResultadoGate.reprovado_por([Violacao(codigo="QAAPI-021", mensagem="cat faltando")]),
     )
 
     with pytest.raises(FalhaDeGate) as erro:
@@ -127,7 +124,7 @@ def test_o_schema_entra_na_conta_do_que_ficou_reprovado(pipeline, recurso, monke
 
 
 def test_o_evento_artefatos_registra_o_schema(pipeline, recurso, monkeypatch, tmp_path):
-    preparar(pipeline, monkeypatch, ResultadoGate(aprovado=True))
+    preparar(pipeline, monkeypatch, ResultadoGate.aprovado_por())
     pipeline.bloco1(recurso)
     pipeline.registro.fechar()
 
@@ -181,7 +178,7 @@ def artefato_com_schema(esquema: dict) -> dict:
 
 def test_schema_preexistente_do_cliente_nao_e_sobrescrito(pipeline, recurso, monkeypatch):
     alvo = semear_schema_do_cliente(recurso)
-    preparar(pipeline, monkeypatch, ResultadoGate(aprovado=True))
+    preparar(pipeline, monkeypatch, ResultadoGate.aprovado_por())
 
     pipeline.bloco1(recurso)
 
@@ -195,10 +192,7 @@ def test_schema_preservado_fica_fora_da_conta_de_reprovado(pipeline, recurso, mo
     preparar(
         pipeline,
         monkeypatch,
-        ResultadoGate(
-            aprovado=False,
-            violacoes=[Violacao(codigo="QAAPI-021", mensagem="cat faltando")],
-        ),
+        ResultadoGate.reprovado_por([Violacao(codigo="QAAPI-021", mensagem="cat faltando")]),
     )
 
     with pytest.raises(FalhaDeGate) as erro:
@@ -217,10 +211,10 @@ def test_divergencia_com_o_schema_preservado_vira_aviso(pipeline, recurso, monke
         pipeline,
         "modelo",
         lambda *_a, **_k: ModeloSimulado(
-            passos=[{"tipo": "final", "artefato": artefato_com_schema(com_campo_a_mais)}]
+            passos=[PassoFinal(tipo="final", artefato=artefato_com_schema(com_campo_a_mais))]
         ),
     )
-    monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: ResultadoGate(aprovado=True))
+    monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: ResultadoGate.aprovado_por())
     avisos: list[str] = []
     monkeypatch.setattr(pipeline.registro, "aviso", avisos.append)
 
@@ -242,15 +236,14 @@ def test_schema_desta_execucao_e_reescrito_no_reparo(pipeline, recurso, monkeypa
 
     def modelo(_estagio: str, _recurso: str, tentativa: int) -> ModeloSimulado:
         esquema = corrigido if tentativa > 1 else SCHEMA
-        return ModeloSimulado(passos=[{"tipo": "final", "artefato": artefato_com_schema(esquema)}])
+        return ModeloSimulado(
+            passos=[PassoFinal(tipo="final", artefato=artefato_com_schema(esquema))]
+        )
 
     vereditos = iter(
         [
-            ResultadoGate(
-                aprovado=False,
-                violacoes=[Violacao(codigo="QAAPI-021", mensagem="cat faltando")],
-            ),
-            ResultadoGate(aprovado=True),
+            ResultadoGate.reprovado_por([Violacao(codigo="QAAPI-021", mensagem="cat faltando")]),
+            ResultadoGate.aprovado_por(),
         ]
     )
     monkeypatch.setattr(pipeline, "modelo", modelo)

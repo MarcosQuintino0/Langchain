@@ -92,7 +92,7 @@ def executar(
 
     lacunas = int(contadores.get("lacunas", 0))
     if lacunas <= 0:
-        return ResultadoGate(aprovado=True, saida_bruta=saida.stdout, gate=gate)
+        return ResultadoGate.aprovado_por(saida_bruta=saida.stdout, gate=gate)
 
     faltando = _reconstruir_faltantes(recurso, manifesto)
     if faltando is not None and len(faltando) != lacunas:
@@ -100,9 +100,8 @@ def executar(
         # script. O veredito continua sendo o dele; o detalhe vai fora.
         faltando = None
 
-    return ResultadoGate(
-        aprovado=False,
-        violacoes=_violacoes(recurso, lacunas, faltando),
+    return ResultadoGate.reprovado_por(
+        _violacoes(recurso, lacunas, faltando),
         saida_bruta=saida.stdout,
         gate=gate,
     )

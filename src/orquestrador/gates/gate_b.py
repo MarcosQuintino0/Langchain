@@ -80,14 +80,13 @@ def _formatador(
                 f"exigir_formatadores, mas não foi encontrado: {erro}",
                 gate=NOME,
             )
-        return ResultadoGate(
-            aprovado=True,
+        return ResultadoGate.aprovado_por(
             avisos=[Violacao(codigo="QAORQ-022", mensagem=f"{nome} indisponível: {erro}")],
             gate=NOME,
         )
 
     if saida.codigo == 0:
-        return ResultadoGate(aprovado=True, saida_bruta=saida.texto, gate=NOME)
+        return ResultadoGate.aprovado_por(saida_bruta=saida.texto, gate=NOME)
 
     violacoes = violacoes_do_eslint(saida.stdout) if nome == "eslint" else []
     if not violacoes:
@@ -100,7 +99,7 @@ def _formatador(
                 ),
             )
         ]
-    return ResultadoGate(aprovado=False, violacoes=violacoes, saida_bruta=saida.texto, gate=NOME)
+    return ResultadoGate.reprovado_por(violacoes, saida_bruta=saida.texto, gate=NOME)
 
 
 def _relativo_ao_projeto(alvo: Path, projeto: Path) -> str:

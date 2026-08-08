@@ -176,6 +176,7 @@ def test_eslint_json_vira_violacao_com_arquivo_e_linha():
     assert len(violacoes) == 1  # severidade 1 é aviso, não reprova
     assert violacoes[0].codigo == "QAORQ-021"
     assert violacoes[0].linha == 12
+    assert violacoes[0].arquivo is not None
     assert violacoes[0].arquivo.endswith("crud.cy.js")
 
 

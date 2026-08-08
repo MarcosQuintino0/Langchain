@@ -24,7 +24,7 @@ import json
 import re
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     AfterValidator,
@@ -129,14 +129,22 @@ class Violacao(BaseModel):
 
     Os aliases espelham o JSON dos scripts `.mjs` (`{code, message, file, line}`),
     então `Violacao.model_validate(item)` consome a saída deles sem tradução manual.
+
+    Os apelidos são declarados como `validation_alias` + `serialization_alias`, e não
+    como o `alias=` que faz as duas coisas de uma vez. O motivo é estático: o
+    verificador de tipo deriva a assinatura de `__init__` do `alias=` e **não lê**
+    `populate_by_name`, então com `alias="code"` todo `Violacao(codigo=...)` do
+    projeto — que roda perfeitamente — vira "No parameter named". Separar os dois
+    apelidos deixa a assinatura em português, que é como o código constrói, e mantém
+    o JSON da skill igual na entrada e na saída.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    codigo: str = Field(alias="code")
-    mensagem: str = Field(alias="message")
-    arquivo: str | None = Field(default=None, alias="file")
-    linha: int | None = Field(default=None, alias="line")
+    codigo: str = Field(validation_alias="code", serialization_alias="code")
+    mensagem: str = Field(validation_alias="message", serialization_alias="message")
+    arquivo: str | None = Field(default=None, validation_alias="file", serialization_alias="file")
+    linha: int | None = Field(default=None, validation_alias="line", serialization_alias="line")
 
     def render(self) -> str:
         """Linha única para o prompt de reparo e para o console."""
@@ -163,35 +171,39 @@ class VereditoDeGate(StrEnum):
 
 
 class ResultadoGate(BaseModel):
-    """Veredito de um gate determinístico sobre um artefato."""
+    """Veredito de um gate determinístico sobre um artefato.
+
+    **Construa por `aprovado_por`, `reprovado_por` ou `erro_da_ferramenta`**, nunca
+    pelo construtor cru. Os três estados de `VereditoDeGate` não são simétricos —
+    reprovar pede violações, erro de ferramenta pede motivo e nenhum dos dois vale
+    para o outro —, e um construtor único aceita todas as combinações inclusive as
+    que `_veredito_coerente` depois rejeita em tempo de execução. Nomear o estado no
+    sítio de chamada move essa checagem para o verificador de tipo, e a leitura de
+    `reprovado_por(violacoes=[...])` diz o desfecho sem precisar avaliar um booleano.
+
+    `extra="forbid"` fecha a porta do apelido que existia aqui: até a Etapa 3.5 um
+    validador `mode="before"` traduzia `aprovado=True/False` para o veredito. Sem o
+    `forbid`, remover o validador faria `ResultadoGate(aprovado=False)` continuar
+    construindo — em silêncio, com o padrão `APROVADO`. Aprovação por descuido é
+    exatamente o falso sucesso que o gate existe para impedir.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     veredito: VereditoDeGate = VereditoDeGate.APROVADO
-    violacoes: list[Violacao] = Field(default_factory=list)
-    avisos: list[Violacao] = Field(default_factory=list)
+    # `list[Violacao]` e não `list` como fábrica, aqui e nos outros modelos deste
+    # módulo: o verificador de tipo não propaga a anotação do campo para dentro do
+    # `default_factory` quando o elemento não é primitivo, e infere `list[Unknown]`
+    # — o que apaga o tipo de `resultado.violacoes` em todo consumidor. Chamar
+    # `list[Violacao]()` devolve exatamente a mesma lista vazia.
+    violacoes: list[Violacao] = Field(default_factory=list[Violacao])
+    avisos: list[Violacao] = Field(default_factory=list[Violacao])
     # Preenchido só no `ERRO_DA_FERRAMENTA`: é a mensagem que quem opera precisa ler
     # para consertar o ambiente. Não é violação, e por isso mora fora de `violacoes`
     # — o que está em `violacoes` vira delta e volta para o modelo.
     motivo: str = ""
     saida_bruta: str = ""
     gate: str = ""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _aprovado_vira_veredito(cls, dados: Any) -> Any:
-        """Traduz `aprovado=` para os dois vereditos binários.
-
-        `veredito` é a fonte de verdade — só ele comporta os três estados —, mas a
-        maioria das checagens é binária mesmo, e escrever `aprovado=False` continua
-        sendo a forma mais curta e mais clara de dizer "reprovei".
-        """
-        if not isinstance(dados, dict) or "aprovado" not in dados:
-            return dados
-        campos = dict(dados)
-        aprovado = campos.pop("aprovado")
-        if "veredito" in campos:
-            raise ValueError("informe `aprovado` ou `veredito`, nunca os dois")
-        campos["veredito"] = VereditoDeGate.APROVADO if aprovado else VereditoDeGate.REPROVADO
-        return campos
 
     @model_validator(mode="after")
     def _veredito_coerente(self) -> ResultadoGate:
@@ -216,6 +228,51 @@ class ResultadoGate(BaseModel):
     @property
     def codigos(self) -> list[str]:
         return [violacao.codigo for violacao in self.violacoes]
+
+    @classmethod
+    def aprovado_por(
+        cls,
+        *,
+        gate: str = "",
+        avisos: list[Violacao] | None = None,
+        saida_bruta: str = "",
+    ) -> ResultadoGate:
+        """Checagem que rodou e nada encontrou.
+
+        Não recebe `violacoes` de propósito: aprovar com violação é a contradição que
+        `_veredito_coerente` recusa, e aqui ela nem chega a ser escrevível. Aviso é
+        outra coisa — vai para o log e para o console, nunca para o delta.
+        """
+        return cls(
+            veredito=VereditoDeGate.APROVADO,
+            avisos=avisos or [],
+            saida_bruta=saida_bruta,
+            gate=gate,
+        )
+
+    @classmethod
+    def reprovado_por(
+        cls,
+        violacoes: list[Violacao],
+        *,
+        gate: str = "",
+        avisos: list[Violacao] | None = None,
+        saida_bruta: str = "",
+    ) -> ResultadoGate:
+        """Checagem que rodou e reprovou o artefato; `violacoes` vira o delta de reparo.
+
+        A lista é posicional e obrigatória porque é ela que dá ao modelo o que
+        consertar. Vazia é aceito — o validador da skill pode reprovar sem enumerar —,
+        mas então a decisão de reprovar sem dizer o quê fica explícita em `[]`, não
+        escondida num argumento omitido.
+        """
+        return cls(
+            veredito=VereditoDeGate.REPROVADO,
+            violacoes=violacoes,
+            avisos=avisos or [],
+            saida_bruta=saida_bruta,
+            gate=gate,
+        )
 
     @classmethod
     def erro_da_ferramenta(cls, motivo: str, *, gate: str, saida_bruta: str = "") -> ResultadoGate:
@@ -318,7 +375,7 @@ class Recurso(BaseModel):
     # (`campos/schema.mjs`), e repetir a busca criaria uma segunda fonte de verdade
     # para o mesmo diretório.
     raiz_schemas: Path | None = None
-    caminhos_backend: list[Path] = Field(default_factory=list)
+    caminhos_backend: list[Path] = Field(default_factory=list[Path])
 
     @property
     def manifesto_path(self) -> Path:
@@ -400,7 +457,7 @@ class Inventario(BaseModel):
 
     recurso: NomeDeRecurso
     endpoints: list[Endpoint] = Field(min_length=1)
-    rotas_dinamicas_nao_resolvidas: list[RotaDinamica] = Field(default_factory=list)
+    rotas_dinamicas_nao_resolvidas: list[RotaDinamica] = Field(default_factory=list[RotaDinamica])
 
     @model_validator(mode="after")
     def _sem_endpoint_duplicado(self) -> Inventario:
@@ -436,9 +493,17 @@ class EndpointManifesto(BaseModel):
 
     endpoint: str
     cats: list[Cat] = Field(default_factory=list)
-    nao_aplica: dict[Cat, str] = Field(default_factory=dict, alias="naoAplica")
-    schema_entrada: str | None = Field(default=None, alias="schemaEntrada")
-    sem_corpo: str | None = Field(default=None, alias="semCorpo")
+    # Sobre `validation_alias` + `serialization_alias` em vez de `alias`, ver a
+    # docstring de `Violacao`.
+    nao_aplica: dict[Cat, str] = Field(
+        default_factory=dict, validation_alias="naoAplica", serialization_alias="naoAplica"
+    )
+    schema_entrada: str | None = Field(
+        default=None, validation_alias="schemaEntrada", serialization_alias="schemaEntrada"
+    )
+    sem_corpo: str | None = Field(
+        default=None, validation_alias="semCorpo", serialization_alias="semCorpo"
+    )
     campos: dict[str, str | dict[str, str]] | None = None
 
     @field_validator("endpoint")
@@ -484,9 +549,17 @@ class Manifesto(BaseModel):
     # como diretório (`caminho_de_schema`), e quem o preenche é um LLM.
     recurso: NomeDeRecurso
     profundidade: Literal["completa", "contrato"] | None = None
-    handler_compartilhado: str | None = Field(default=None, alias="handlerCompartilhado")
-    handler_coberto_por: str | None = Field(default=None, alias="handlerCobertoPor")
-    sub_dominios: dict[str, SubDominio] | None = Field(default=None, alias="subDominios")
+    handler_compartilhado: str | None = Field(
+        default=None,
+        validation_alias="handlerCompartilhado",
+        serialization_alias="handlerCompartilhado",
+    )
+    handler_coberto_por: str | None = Field(
+        default=None, validation_alias="handlerCobertoPor", serialization_alias="handlerCobertoPor"
+    )
+    sub_dominios: dict[str, SubDominio] | None = Field(
+        default=None, validation_alias="subDominios", serialization_alias="subDominios"
+    )
     endpoints: list[EndpointManifesto] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -577,7 +650,7 @@ class SaidaMapeador(BaseModel):
 
     inventario: Inventario
     manifesto: Manifesto
-    schemas: list[ArquivoSchema] = Field(default_factory=list)
+    schemas: list[ArquivoSchema] = Field(default_factory=list[ArquivoSchema])
 
     @model_validator(mode="after")
     def _mesmo_recurso(self) -> SaidaMapeador:
@@ -686,7 +759,7 @@ class ModuloCompartilhado(BaseModel):
     import_do_recurso: str
     import_do_subdominio: str
     import_do_support: str
-    exports: list[ExportCompartilhado] = Field(default_factory=list)
+    exports: list[ExportCompartilhado] = Field(default_factory=list[ExportCompartilhado])
 
 
 class SuperficieDoProjeto(BaseModel):
@@ -700,7 +773,7 @@ class SuperficieDoProjeto(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raiz: str
-    modulos: list[ModuloCompartilhado] = Field(default_factory=list)
+    modulos: list[ModuloCompartilhado] = Field(default_factory=list[ModuloCompartilhado])
 
     @property
     def total_de_exports(self) -> int:
@@ -754,9 +827,11 @@ class ResultadoAuditoria(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     nao_aplica_refutados: list[AchadoAuditoria] = Field(
-        default_factory=list, alias="naoAplica_refutados"
+        default_factory=list[AchadoAuditoria],
+        validation_alias="naoAplica_refutados",
+        serialization_alias="naoAplica_refutados",
     )
-    oraculos_fracos: list[AchadoAuditoria] = Field(default_factory=list)
+    oraculos_fracos: list[AchadoAuditoria] = Field(default_factory=list[AchadoAuditoria])
     veredito: Literal["íntegro", "revisar"]
 
 
@@ -830,13 +905,19 @@ class RegistroDeTool(BaseModel):
 
 
 def dados_para_log(valor: Any) -> Any:
-    """Converte modelos/Path para algo serializável em JSONL."""
+    """Converte modelos/Path para algo serializável em JSONL.
+
+    `Any` na entrada e na saída é o que esta função é: ela recebe os `**campos` de um
+    evento, que vêm de todo canto do pipeline, e devolve algo que o `json.dumps`
+    aceite. Amarrar um tipo aqui só empurraria o `cast` para cada emissor.
+    """
     if isinstance(valor, BaseModel):
         return valor.model_dump(mode="json")
     if isinstance(valor, Path):
         return str(valor)
     if isinstance(valor, (list, tuple)):
-        return [dados_para_log(item) for item in valor]
+        return [dados_para_log(item) for item in cast(list[Any] | tuple[Any, ...], valor)]
     if isinstance(valor, dict):
-        return {chave: dados_para_log(item) for chave, item in valor.items()}
+        itens = cast(dict[Any, Any], valor).items()
+        return {chave: dados_para_log(item) for chave, item in itens}
     return valor

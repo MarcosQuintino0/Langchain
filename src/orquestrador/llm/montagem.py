@@ -71,7 +71,7 @@ def montar_entrada_inicial(secoes: dict[str, str]) -> str:
     """Concatena as seções da entrada da primeira tentativa."""
     partes: list[str] = []
     for titulo, corpo in secoes.items():
-        if corpo is None or str(corpo).strip() == "":
+        if not corpo.strip():
             continue
         partes.append(f"## {titulo}\n\n{corpo}".rstrip())
     return "\n\n".join(partes) + "\n"

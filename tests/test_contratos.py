@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from orquestrador.contratos import (
     CATS,
     ArquivoGerado,
+    ArquivoSchema,
     Endpoint,
     EndpointManifesto,
     Inventario,
@@ -112,42 +113,52 @@ def test_endpoint_do_inventario_normaliza_o_metodo_e_exige_rota_completa():
 
 def test_inventario_nao_duplica_endpoint():
     with pytest.raises(ValidationError, match="duplicado"):
-        Inventario(
-            recurso="pedidos",
-            endpoints=[
-                {"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"},
-                {"metodo": "GET", "rota": "/pedidos", "handler": "b", "arquivo": "y"},
-            ],
+        Inventario.model_validate(
+            {
+                "recurso": "pedidos",
+                "endpoints": [
+                    {"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"},
+                    {"metodo": "GET", "rota": "/pedidos", "handler": "b", "arquivo": "y"},
+                ],
+            }
         )
 
 
 def test_saida_do_mapeador_exige_o_mesmo_recurso_nos_dois_artefatos():
     with pytest.raises(ValidationError, match="mesmo recurso"):
         SaidaMapeador(
-            inventario=Inventario(
-                recurso="pedidos",
-                endpoints=[{"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"}],
+            inventario=Inventario.model_validate(
+                {
+                    "recurso": "pedidos",
+                    "endpoints": [
+                        {"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"}
+                    ],
+                }
             ),
             manifesto=Manifesto.model_validate(manifesto_minimo(recurso="outro")),
         )
 
 
-def saida_do_mapeador(schema_entrada: str | None, schemas: list[dict]) -> SaidaMapeador:
+def saida_do_mapeador(schema_entrada: str | None, schemas: list[ArquivoSchema]) -> SaidaMapeador:
     """Saída com um POST que declara (ou não) `schemaEntrada`."""
     endpoint = {"endpoint": "POST /pedidos"}
     if schema_entrada is not None:
         endpoint["schemaEntrada"] = schema_entrada
     return SaidaMapeador(
-        inventario=Inventario(
-            recurso="pedidos",
-            endpoints=[{"metodo": "POST", "rota": "/pedidos", "handler": "criar", "arquivo": "x"}],
+        inventario=Inventario.model_validate(
+            {
+                "recurso": "pedidos",
+                "endpoints": [
+                    {"metodo": "POST", "rota": "/pedidos", "handler": "criar", "arquivo": "x"}
+                ],
+            }
         ),
         manifesto=Manifesto.model_validate({"recurso": "pedidos", "endpoints": [endpoint]}),
         schemas=schemas,
     )
 
 
-SCHEMA_PEDIDO = {"caminho": "pedidos/entidade.schema.json", "conteudo": "{}"}
+SCHEMA_PEDIDO = ArquivoSchema(caminho="pedidos/entidade.schema.json", conteudo="{}")
 
 
 def test_schema_declarado_sem_arquivo_emitido_e_recusado():
@@ -175,7 +186,9 @@ def test_ponteiro_json_escolhe_o_no_nao_o_arquivo():
 
 def test_schema_repetido_e_recusado():
     with pytest.raises(ValidationError, match="repetido"):
-        saida_do_mapeador("entidade", [SCHEMA_PEDIDO, dict(SCHEMA_PEDIDO, conteudo="{ }")])
+        saida_do_mapeador(
+            "entidade", [SCHEMA_PEDIDO, SCHEMA_PEDIDO.model_copy(update={"conteudo": "{ }"})]
+        )
 
 
 def test_endpoint_sem_schema_entrada_nao_exige_nada():
@@ -273,9 +286,11 @@ def test_nome_de_recurso_tambem_vale_para_o_que_o_modelo_emite():
     with pytest.raises(ValidationError):
         Manifesto.model_validate(manifesto_minimo(recurso="../fora"))
     with pytest.raises(ValidationError):
-        Inventario(
-            recurso="..",
-            endpoints=[{"metodo": "GET", "rota": "/x", "handler": "a", "arquivo": "x"}],
+        Inventario.model_validate(
+            {
+                "recurso": "..",
+                "endpoints": [{"metodo": "GET", "rota": "/x", "handler": "a", "arquivo": "x"}],
+            }
         )
     with pytest.raises(ValidationError):
         SaidaExecutor(recurso="nul", arquivos=[ArquivoGerado(caminho="crud.cy.js", conteudo="x")])

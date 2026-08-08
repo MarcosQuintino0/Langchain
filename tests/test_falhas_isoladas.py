@@ -46,11 +46,13 @@ from orquestrador.pipeline import (
     ResultadoDaExecucaoDeTestes,
     ResultadoDoRecurso,
 )
-from orquestrador.simulacao import ModeloSimulado
+from orquestrador.simulacao import ModeloSimulado, PassoDeTool, PassoDoRoteiro
 
 # Roteiro patológico: o modelo só sabe pedir tool, nunca conclui. É o que um
 # recurso grande demais provoca no mundo real.
-SEM_FIM = [{"tipo": "tool", "nome": "listar_diretorio", "argumentos": {"caminho": "."}}]
+SEM_FIM: list[PassoDoRoteiro] = [
+    PassoDeTool(tipo="tool", nome="listar_diretorio", argumentos={"caminho": "."})
+]
 
 
 def console_de_arquivo(destino: Path, largura: int = 200) -> Console:
@@ -145,12 +147,12 @@ def test_recurso_que_falha_nao_derruba_os_seguintes(pipeline: Pipeline, monkeypa
         processados.append(recurso.nome)
         if recurso.nome == "explode":
             raise FalhaDeEstagio("estourou o limite de passos", arquivos=[])
-        return _saida_qualquer(), ResultadoGate(aprovado=True), 1
+        return _saida_qualquer(), ResultadoGate.aprovado_por(), 1
 
     monkeypatch.setattr(pipeline, "bloco0", lambda: preparacao(ok=True))
     monkeypatch.setattr(pipeline, "bloco1", bloco1_falso)
     monkeypatch.setattr(
-        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate(aprovado=True), 1)
+        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
     monkeypatch.setattr(pipeline, "bloco3", lambda _recurso: execucao_de_testes_falsa())
 
@@ -181,12 +183,12 @@ def test_ferramenta_indisponivel_interrompe_sem_perder_o_que_terminou(
         processados.append(recurso.nome)
         if recurso.nome == "quebra":
             raise ErroDeFerramenta("gate_b não pôde emitir veredito: saída não-JSON")
-        return _saida_qualquer(), ResultadoGate(aprovado=True), 1
+        return _saida_qualquer(), ResultadoGate.aprovado_por(), 1
 
     monkeypatch.setattr(pipeline, "bloco0", lambda: preparacao(ok=True))
     monkeypatch.setattr(pipeline, "bloco1", bloco1_falso)
     monkeypatch.setattr(
-        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate(aprovado=True), 1)
+        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
     monkeypatch.setattr(pipeline, "bloco3", lambda _r: execucao_de_testes_falsa())
 
@@ -234,9 +236,8 @@ def test_falha_de_gate_carrega_os_arquivos_persistidos(pipeline: Pipeline, tmp_p
             recurso=recurso_de(pipeline.config),
             produzir=lambda numero, delta, atual: "artefato",
             persistir=lambda _artefato: [escrito],
-            avaliar=lambda _artefato: ResultadoGate(
-                aprovado=False,
-                violacoes=[Violacao(codigo="QAAPI-025", mensagem="campo sem teste")],
+            avaliar=lambda _artefato: ResultadoGate.reprovado_por(
+                [Violacao(codigo="QAAPI-025", mensagem="campo sem teste")],
             ),
             texto_do_artefato=str,
         )
@@ -337,10 +338,10 @@ def test_bloco0_aprovado_segue_para_os_recursos(pipeline: Pipeline, monkeypatch)
     # O contrapeso do teste acima: o veredito é lido, não ignorado nos dois sentidos.
     monkeypatch.setattr(pipeline, "bloco0", lambda: preparacao(ok=True))
     monkeypatch.setattr(
-        pipeline, "bloco1", lambda _r: (_saida_qualquer(), ResultadoGate(aprovado=True), 1)
+        pipeline, "bloco1", lambda _r: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
     )
     monkeypatch.setattr(
-        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate(aprovado=True), 1)
+        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
     monkeypatch.setattr(pipeline, "bloco3", lambda _r: execucao_de_testes_falsa())
 
@@ -458,10 +459,10 @@ def test_sem_cypress_o_resultado_diz_que_nao_executou(pipeline: Pipeline, monkey
 def test_recurso_que_nao_rodou_cypress_nao_finge_ter_rodado(pipeline: Pipeline, monkeypatch):
     # O estado precisa sobreviver até o resumo do recurso, que é onde alguém lê.
     monkeypatch.setattr(
-        pipeline, "bloco1", lambda _r: (_saida_qualquer(), ResultadoGate(aprovado=True), 1)
+        pipeline, "bloco1", lambda _r: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
     )
     monkeypatch.setattr(
-        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate(aprovado=True), 1)
+        pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
     cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
     pipeline.pular_cypress = True
@@ -551,7 +552,7 @@ def test_ferramenta_indisponivel_nao_apaga_o_resumo_do_que_terminou(
     # anunciados, e o código é 2 — distinto do 1 de gate esgotado, porque aqui o
     # pipeline não chegou a emitir veredito nenhum.
     class PipelineInterrompido(Pipeline):
-        def rodar(self, _recursos):
+        def rodar(self, recursos: list[Recurso]) -> list[ResultadoDoRecurso]:
             self.interrupcao = InterrupcaoDaExecucao(
                 motivo="gate_b não pôde emitir veredito: saída não-JSON",
                 recurso="segundo",

@@ -122,8 +122,12 @@ def nomes_definidos(modulo: ast.Module) -> set[str]:
 def literal_de_all(modulo: ast.Module) -> list[str] | None:
     """Conteúdo de `__all__`, ou `None` se o módulo não declara um."""
     for no in modulo.body:
-        alvos = no.targets if isinstance(no, ast.Assign) else []
-        if not any(isinstance(alvo, ast.Name) and alvo.id == "__all__" for alvo in alvos):
+        # O `isinstance` fica no `if`, e não numa expressão condicional sobre
+        # `no.targets`: só depois dele o nó tem `value`, e é de `Assign` que se lê o
+        # literal.
+        if not isinstance(no, ast.Assign):
+            continue
+        if not any(isinstance(alvo, ast.Name) and alvo.id == "__all__" for alvo in no.targets):
             continue
         valor = no.value
         if isinstance(valor, ast.List | ast.Tuple):

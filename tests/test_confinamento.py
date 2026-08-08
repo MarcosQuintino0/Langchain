@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from orquestrador.agentes.executor import escrever
 from orquestrador.contratos import (
+    ArquivoGerado,
     ArquivoSchema,
     Inventario,
     Manifesto,
@@ -180,14 +181,18 @@ def test_arquivo_schema_normaliza_separador_do_windows():
 
 def saida_com_schema(caminho: str) -> SaidaMapeador:
     return SaidaMapeador(
-        inventario=Inventario(
-            recurso="pedidos",
-            endpoints=[{"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"}],
+        inventario=Inventario.model_validate(
+            {
+                "recurso": "pedidos",
+                "endpoints": [
+                    {"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"}
+                ],
+            }
         ),
         manifesto=Manifesto.model_validate(
             {"recurso": "pedidos", "endpoints": [{"endpoint": "GET /pedidos"}]}
         ),
-        schemas=[{"caminho": caminho, "conteudo": "{}"}],
+        schemas=[ArquivoSchema(caminho=caminho, conteudo="{}")],
     )
 
 
@@ -280,7 +285,7 @@ def recurso_em(caminho: Path) -> Recurso:
 
 def saida_executor(caminho: str) -> SaidaExecutor:
     return SaidaExecutor(
-        recurso="pedidos", arquivos=[{"caminho": caminho, "conteudo": "// spec\n"}]
+        recurso="pedidos", arquivos=[ArquivoGerado(caminho=caminho, conteudo="// spec\n")]
     )
 
 

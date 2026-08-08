@@ -16,9 +16,10 @@ import inspect
 import itertools
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol, TypedDict, cast
 
-from langchain_core.messages import HumanMessage
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field, ValidationError
@@ -45,6 +46,7 @@ from orquestrador.llm.montagem import (
     montar_entrada_inicial,
     montar_entrada_reparo,
 )
+from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
 
 ESTAGIO = "mapeador"
@@ -279,7 +281,34 @@ def criar_ferramentas(
 # ---------------------------------------------------------------------------
 
 
-def _criar_agente(modelo: Any, ferramentas: list[BaseTool], instrucao: str) -> Any:
+class EstadoDoReAct(TypedDict, total=False):
+    """O estado que o grafo ReAct devolve, na parte que este módulo lê.
+
+    `total=False` porque o dicionário do LangGraph carrega mais chaves do que estas
+    (e mais a cada versão), e porque `messages` pode faltar num encerramento
+    anômalo. O que a declaração compra é a única coisa que interessa aqui: que o
+    conteúdo de `messages` seja `BaseMessage`, e não `Unknown` atravessando a
+    telemetria, o parser e a detecção de "acabaram os passos".
+    """
+
+    messages: list[BaseMessage]
+
+
+class GrafoReAct(Protocol):
+    """A fatia do grafo compilado que o mapeador usa: uma invocação, um estado.
+
+    O tipo real é `CompiledStateGraph`, cujos parâmetros genéricos o LangGraph deixa
+    indeterminados — o verificador o lê como `CompiledStateGraph[Unknown, ...]`, e
+    daí em diante tudo que sai dele é `Unknown`. Declarar o que consumimos corta a
+    propagação num ponto só e documenta o acoplamento real com a biblioteca.
+    """
+
+    def invoke(
+        self, input: dict[str, Any], config: dict[str, Any] | None = None
+    ) -> EstadoDoReAct: ...
+
+
+def _criar_agente(modelo: BaseChatModel, ferramentas: list[BaseTool], instrucao: str) -> GrafoReAct:
     """Cria o ReAct do LangGraph, tolerando a troca de nome do parâmetro de prompt.
 
     É o `create_react_agent` do LangGraph (function calling nativo), não o
@@ -294,7 +323,9 @@ def _criar_agente(modelo: Any, ferramentas: list[BaseTool], instrucao: str) -> A
         # Import tardio de propósito: é ele que transforma o
         # sumiço do prebuilt na v2.0 do LangGraph na mensagem de migração abaixo,
         # em vez de um ImportError na carga do módulo, longe da explicação.
-        from langgraph.prebuilt import create_react_agent  # noqa: PLC0415
+        from langgraph.prebuilt import (  # noqa: PLC0415
+            create_react_agent,  # pyright: ignore[reportDeprecated, reportUnknownVariableType]
+        )
     except ImportError as erro:  # pragma: no cover - ambiente incompleto
         raise FalhaDeEstagio(
             "não foi possível importar langgraph.prebuilt.create_react_agent. "
@@ -302,11 +333,23 @@ def _criar_agente(modelo: Any, ferramentas: list[BaseTool], instrucao: str) -> A
             "migre para `from langchain.agents import create_agent` (pacote langchain)."
         ) from erro
 
-    parametros = inspect.signature(create_react_agent).parameters
+    # As supressões deste módulo são só duas — a do import acima e a desta linha —, e
+    # nenhuma delas é sobre este código:
+    #
+    #   reportDeprecated          a migração para `langchain.agents.create_agent` que a
+    #                             docstring explica e que a versão pinada não permite;
+    #   reportUnknownVariableType o LangGraph devolve `CompiledStateGraph[Unknown, ...]`
+    #                             — genéricos que ele mesmo não fecha.
+    #
+    # Elas param aqui: dar um nome tipado ao símbolo faz as três chamadas abaixo
+    # dispensarem supressão, e o `cast` para `GrafoReAct` impede que o `Unknown` do
+    # retorno saia desta função.
+    criar: Callable[..., Any] = create_react_agent  # pyright: ignore[reportDeprecated, reportUnknownVariableType]
+    parametros = inspect.signature(criar).parameters
     for nome in ("prompt", "state_modifier", "messages_modifier"):
         if nome in parametros:
-            return create_react_agent(modelo, ferramentas, **{nome: instrucao})
-    return create_react_agent(modelo, ferramentas)
+            return cast(GrafoReAct, criar(modelo, ferramentas, **{nome: instrucao}))
+    return cast(GrafoReAct, criar(modelo, ferramentas))
 
 
 def instrucao_do_estagio(config: Config, recurso: Recurso) -> str:
@@ -339,9 +382,9 @@ def executar(
     config: Config,
     recurso: Recurso,
     *,
-    modelo: Any,
+    modelo: BaseChatModel,
     telemetria: Telemetria,
-    registro: Any = None,
+    registro: RegistradorDeEventos | None = None,
     tentativa: int = 1,
     delta: Delta | None = None,
     artefato_atual: str | None = None,
@@ -379,7 +422,7 @@ def executar(
             # execução inteira com traceback, em vez de falhar só este recurso.
             raise _sem_passos(parametros.limite_passos, recurso.nome, str(erro)) from erro
 
-        mensagens = estado.get("messages", [])
+        mensagens = estado.get("messages") or []
         uso = uso_das_mensagens(mensagens)
         telemetria.registrar(
             RegistroDeChamada(
@@ -446,7 +489,7 @@ def _sem_passos(limite: int, recurso: str, detalhe: str) -> FalhaDeEstagio:
     )
 
 
-def _acabaram_os_passos(mensagens: list[Any]) -> bool:
+def _acabaram_os_passos(mensagens: list[BaseMessage]) -> bool:
     """O ReAct encerrou por falta de passos, em vez de responder?"""
     if not mensagens:
         return False

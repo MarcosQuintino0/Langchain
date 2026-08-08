@@ -139,7 +139,9 @@ class SaidaProcesso:
     stderr: str
     duracao_s: float
     cwd: str | None = None
-    campos_extras: dict[str, str] = field(default_factory=dict)
+    # `dict[str, str]` como fábrica, não `dict`: o verificador não leva a anotação do
+    # campo para dentro do `default_factory` e inferiria `dict[Unknown, Unknown]`.
+    campos_extras: dict[str, str] = field(default_factory=dict[str, str])
 
     @property
     def texto(self) -> str:

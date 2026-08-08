@@ -13,12 +13,26 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from rich.console import Console
 from rich.markup import escape
 
 from orquestrador.contratos import dados_para_log
+
+
+class RegistradorDeEventos(Protocol):
+    """A fatia de `Registro` que quem só emite evento precisa enxergar.
+
+    `Telemetria` e `GeradorEstruturado` recebem um registrador opcional e chamam
+    exatamente um método nele. Declarar o parâmetro como `Registro` arrastaria
+    console, arquivo aberto e ciclo de vida para dentro de módulos que não são donos
+    de nenhum dos três; declarar como `Any` — que era o que havia — apagava até a
+    existência de `evento` do verificador, e um erro de digitação no nome do método
+    só apareceria em execução, dentro de um `if` que quase nunca roda em teste.
+    """
+
+    def evento(self, tipo: str, **campos: Any) -> None: ...
 
 
 def configurar_console() -> None:
@@ -30,7 +44,13 @@ def configurar_console() -> None:
     """
     for fluxo in (sys.stdout, sys.stderr):
         try:
-            fluxo.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+            # `sys.stdout` é declarado `TextIO`, e `reconfigure` só existe no
+            # `TextIOWrapper` concreto — que é o que está lá quando se roda num
+            # terminal, e não está sob `pytest` ou redirecionamento. Um `isinstance`
+            # não substituiria o `except`: os casos que interessam são o `OSError` do
+            # fluxo não-reconfigurável e o `ValueError` do fluxo fechado, que
+            # acontecem no `TextIOWrapper` de verdade.
+            fluxo.reconfigure(encoding="utf-8", errors="replace")  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
         except (AttributeError, OSError, ValueError):
             pass
 

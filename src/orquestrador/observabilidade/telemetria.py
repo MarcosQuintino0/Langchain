@@ -14,10 +14,18 @@ O que sai daqui para fora é dado: agregados e `resumo_para_log`.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from orquestrador.contratos import RegistroDeChamada, RegistroDeTool, UsoDeTokens
+from orquestrador.observabilidade.registro import RegistradorDeEventos
+
+# A chave de agrupamento muda por método (`str`, `(str, str)`, `(str, str, int)`) e
+# é ela que tipa o dicionário devolvido. Com `Any` no lugar, `por_tentativa()[...]`
+# aceitava qualquer chave e o desempacotamento de três elementos em `resumo_para_log`
+# não era conferido por ninguém.
+Chave = TypeVar("Chave", bound=Hashable)
 
 
 @dataclass
@@ -76,7 +84,7 @@ class AgregadoDeTools:
 class Telemetria:
     """Tokens e tamanho de entrada por chamada, agregados por estágio, recurso e tentativa."""
 
-    def __init__(self, registro: Any = None) -> None:
+    def __init__(self, registro: RegistradorDeEventos | None = None) -> None:
         self.chamadas: list[RegistroDeChamada] = []
         self.tools: list[RegistroDeTool] = []
         self.registro = registro
@@ -110,8 +118,8 @@ class Telemetria:
             soma = soma + chamada.uso
         return soma
 
-    def _agregar(self, chave) -> dict[Any, Agregado]:
-        agregado: dict[Any, Agregado] = {}
+    def _agregar(self, chave: Callable[[RegistroDeChamada], Chave]) -> dict[Chave, Agregado]:
+        agregado: dict[Chave, Agregado] = {}
         for chamada in self.chamadas:
             agregado.setdefault(chave(chamada), Agregado()).somar(chamada)
         return agregado

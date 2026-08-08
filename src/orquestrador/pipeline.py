@@ -23,7 +23,9 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypeVar, cast
+
+from langchain_core.language_models import BaseChatModel
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
@@ -31,6 +33,7 @@ from orquestrador.analise_estatica.extrator_de_superficie import extrair as extr
 from orquestrador.config import Config
 from orquestrador.contratos import (
     Delta,
+    EstagioDelta,
     Manifesto,
     Recurso,
     ResultadoGate,
@@ -66,13 +69,24 @@ NAO_EXECUTADO = "NAO_EXECUTADO"
 # Marca substituída pelo caminho do relatório desta execução no comando do Cypress.
 MARCA_RELATORIO = "{relatorio}"
 
+# Os dois gates que têm loop de reparo. O tipo fecha a porta que o `# type: ignore`
+# de `_ciclo` mantinha aberta: o estágio do delta era montado por interpolação
+# (`f"gate_{gate}"`), e um `gate="c"` produziria a string "gate_c", que nenhum
+# consumidor de `EstagioDelta` reconhece.
+NomeDeGate = Literal["a", "b"]
+_ESTAGIO_DO_GATE: dict[NomeDeGate, EstagioDelta] = {"a": "gate_a", "b": "gate_b"}
+
+# O artefato que atravessa uma volta do loop de reparo: `SaidaMapeador` no Bloco 1,
+# `SaidaExecutor` no Bloco 2.
+Artefato = TypeVar("Artefato")
+
 
 @dataclass(frozen=True)
 class ResultadoDaExecucaoDeTestes:
     """O que o Bloco 3 apurou: os contadores e de onde eles vieram."""
 
     estado: str
-    contadores: dict[str, Any] = field(default_factory=dict)
+    contadores: dict[str, Any] = field(default_factory=dict[str, Any])
     relatorio: Path | None = None
     motivo: str = ""
 
@@ -83,7 +97,7 @@ class InterrupcaoDaExecucao:
 
     motivo: str
     recurso: str
-    recursos_nao_executados: list[str] = field(default_factory=list)
+    recursos_nao_executados: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -94,15 +108,15 @@ class ResultadoDoRecurso:
     tentativas_executor: int = 0
     gate_a: ResultadoGate | None = None
     gate_b: ResultadoGate | None = None
-    cobertura: dict[str, Any] = field(default_factory=dict)
+    cobertura: dict[str, Any] = field(default_factory=dict[str, Any])
     # Nunca começa como "executado": o padrão de um campo é o que vale quando o
     # recurso falha antes do Bloco 3, e o padrão errado aqui é um falso positivo.
     execucao_de_testes: str = NAO_EXECUTADO
     motivo_da_execucao_de_testes: str = "o Bloco 3 não chegou a rodar para este recurso"
     motivo: str = ""
     # A3: o que ficou em disco em estado reprovado. Não é apagado por padrão.
-    arquivos_reprovados: list[Path] = field(default_factory=list)
-    codigos_remanescentes: list[str] = field(default_factory=list)
+    arquivos_reprovados: list[Path] = field(default_factory=list[Path])
+    codigos_remanescentes: list[str] = field(default_factory=list[str])
 
 
 def _unir_caminhos(atuais: list[Path], novos: list[Path] | None) -> list[Path]:
@@ -129,13 +143,17 @@ def nomes_de_campos(esquema: Any, *, profundidade: int = _PROFUNDIDADE_DE_CAMPOS
     """
     if profundidade <= 0 or not isinstance(esquema, dict):
         return set()
+    # `Any` é a anotação certa na entrada: o argumento é um nó qualquer de um JSON
+    # Schema escrito por um LLM, e a função existe justamente para atravessá-lo sem
+    # exigir forma. O que ela devolve, porém, é `set[str]` — o `Any` para aqui.
+    no = cast(dict[str, Any], esquema)
     nomes: set[str] = set()
-    propriedades = esquema.get("properties")
+    propriedades = no.get("properties")
     if isinstance(propriedades, dict):
-        for nome, subesquema in propriedades.items():
+        for nome, subesquema in cast(dict[str, Any], propriedades).items():
             nomes.add(str(nome))
             nomes |= nomes_de_campos(subesquema, profundidade=profundidade - 1)
-    if (itens := esquema.get("items")) is not None:
+    if (itens := no.get("items")) is not None:
         nomes |= nomes_de_campos(itens, profundidade=profundidade - 1)
     return nomes
 
@@ -163,7 +181,7 @@ class Pipeline:
         self.roteiros = roteiros
         self.dir_execucao = dir_execucao
         self.pular_cypress = pular_cypress
-        self._modelos_reais: dict[str, Any] = {}
+        self._modelos_reais: dict[str, BaseChatModel] = {}
         # Schemas que ESTA execução criou. É o que separa "arquivo do cliente", que
         # não pode ser sobrescrito, de "arquivo nosso", que o loop de reparo precisa
         # poder reescrever a cada tentativa.
@@ -178,7 +196,7 @@ class Pipeline:
 
     # -- modelos ------------------------------------------------------------
 
-    def modelo(self, estagio: str, recurso: str, tentativa: int) -> Any:
+    def modelo(self, estagio: str, recurso: str, tentativa: int) -> BaseChatModel:
         """Modelo do estágio: fixture no dry-run, OpenRouter na execução real."""
         if self.dry_run:
             # `assert` de propósito, diferente do caso de config.py: isto é
@@ -553,14 +571,22 @@ class Pipeline:
         self,
         *,
         estagio: str,
-        gate: str,
+        gate: NomeDeGate,
         recurso: Recurso,
-        produzir: Callable[[int, Delta | None, str | None], Any],
-        persistir: Callable[[Any], list[Path]],
-        avaliar: Callable[[Any], ResultadoGate],
-        texto_do_artefato: Callable[[Any], str],
-    ) -> tuple[Any, ResultadoGate, int]:
-        """Gera → persiste → avalia → (delta → repete). O coração da arquitetura."""
+        produzir: Callable[[int, Delta | None, str | None], Artefato],
+        persistir: Callable[[Artefato], list[Path]],
+        avaliar: Callable[[Artefato], ResultadoGate],
+        texto_do_artefato: Callable[[Artefato], str],
+    ) -> tuple[Artefato, ResultadoGate, int]:
+        """Gera → persiste → avalia → (delta → repete). O coração da arquitetura.
+
+        Genérico em `Artefato` porque o laço é o mesmo para o `SaidaMapeador` do
+        Bloco 1 e o `SaidaExecutor` do Bloco 2, e a única coisa que ele faz com o
+        artefato é passá-lo adiante para os quatro callbacks. Com `Any` no lugar do
+        parâmetro de tipo, ninguém conferia que os quatro falam do mesmo artefato — e
+        o tipo devolvido a `bloco1`/`bloco2` era `Any`, o que apagava a checagem de
+        tudo que eles fazem com a saída depois.
+        """
         maximo = self.config.gate(gate).max_tentativas
         delta: Delta | None = None
         artefato_atual: str | None = None
@@ -619,7 +645,7 @@ class Pipeline:
                 self.registro.info(f"    {violacao.render()}")
 
             delta = Delta(
-                estagio=f"gate_{gate}",  # type: ignore[arg-type]
+                estagio=_ESTAGIO_DO_GATE[gate],
                 recurso=recurso.nome,
                 violacoes=resultado.violacoes,
                 tentativa=tentativa,

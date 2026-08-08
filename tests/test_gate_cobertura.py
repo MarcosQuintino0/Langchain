@@ -87,6 +87,7 @@ def test_sem_lacuna_aprova(config_falso, recurso, com_contadores):
 
     resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
+    # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
     assert resultado is not None
     assert resultado.aprovado is True
 
@@ -97,6 +98,8 @@ def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, com_contador
 
     resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
+    # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
+    assert resultado is not None
     assert resultado.aprovado is False
     assert resultado.codigos == ["QAORQ-030"]
     mensagem = resultado.violacoes[0].mensagem
@@ -114,6 +117,8 @@ def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, com_conta
 
     resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
+    # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
+    assert resultado is not None
     assert resultado.aprovado is False
     assert len(resultado.violacoes) == 1
     assert "2 categoria(s)" in resultado.violacoes[0].mensagem
@@ -131,6 +136,8 @@ def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(config_falso, recurso,
 
     resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
+    # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
+    assert resultado is not None
     assert resultado.aprovado is False
     assert "1 categoria(s)" in resultado.violacoes[0].mensagem
 
@@ -145,6 +152,8 @@ def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, com_contador
 
     resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
+    # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
+    assert resultado is not None
     assert resultado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
     assert resultado.aprovado is False
     # Nada aqui pode virar delta: violação é o que volta ao modelo.

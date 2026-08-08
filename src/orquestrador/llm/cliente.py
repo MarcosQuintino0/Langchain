@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from pydantic import SecretStr
 
 from orquestrador.config import Config
 from orquestrador.excecoes import ErroDeConfiguracao
@@ -37,7 +38,10 @@ def criar_modelo(config: Config, estagio: str) -> BaseChatModel:
     return ChatOpenAI(
         model=parametros.modelo,
         base_url=str(config.openrouter.base_url),
-        api_key=config.openrouter.chave(),
+        # `SecretStr` é o tipo que o `ChatOpenAI` declara. Ele aceita a string crua e
+        # embrulha sozinho, mas embrulhar aqui mantém a chave fora de qualquer `repr`
+        # intermediário deste módulo — e é a única forma de o verificador conferir.
+        api_key=SecretStr(config.openrouter.chave()),
         temperature=parametros.temperatura,
         timeout=config.openrouter.timeout_s,
         max_retries=config.openrouter.max_retries,

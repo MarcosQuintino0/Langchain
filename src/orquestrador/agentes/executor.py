@@ -12,7 +12,8 @@ estágio pode ser mais barato que o do mapeador.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+
+from langchain_core.language_models import BaseChatModel
 
 from orquestrador.config import Config
 from orquestrador.contratos import (
@@ -30,6 +31,7 @@ from orquestrador.llm.montagem import (
     montar_entrada_inicial,
     montar_entrada_reparo,
 )
+from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
 
 ESTAGIO = "executor"
@@ -77,9 +79,9 @@ def executar(
     recurso: Recurso,
     manifesto: Manifesto,
     *,
-    modelo: Any,
+    modelo: BaseChatModel,
     telemetria: Telemetria,
-    registro: Any = None,
+    registro: RegistradorDeEventos | None = None,
     tentativa: int = 1,
     delta: Delta | None = None,
     artefato_atual: str | None = None,

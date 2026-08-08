@@ -216,6 +216,13 @@ line-ending = "lf"
 [tool.pyright]
 include = ["src", "tests"]
 exclude = [".venv", ".execucoes", "**/__pycache__"]
+# Sem estas duas linhas o Pyright resolve os imports pelo Python do PATH, não pelo
+# do projeto, e todo pacote instalado só no ambiente virtual — pytest, langgraph,
+# langchain_core — vira `could not be resolved`. O efeito não é só ruído de import:
+# sem os stubs desses pacotes, tudo que vem deles é `Unknown`, e o modo `strict` de
+# `src` transforma cada uso em erro. É a diferença entre 362 e 90 erros.
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.13"
 pythonPlatform = "Windows"
 # `standard` no repositório todo e `strict` só em `src`: teste pode usar um

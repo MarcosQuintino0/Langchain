@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     AnyHttpUrl,
@@ -91,9 +91,15 @@ class ConfigCaminhos(BaseModel):
         `validate_assignment=True`, escrever num campo dentro do validador `after`
         dispara outra rodada de validação do modelo inteiro.
         """
-        if isinstance(bruto, dict) and not bruto.get("scripts") and bruto.get("skill"):
-            return {**bruto, "scripts": Path(str(bruto["skill"])) / "scripts"}
-        return bruto
+        if not isinstance(bruto, dict):
+            return bruto
+        # Um validador `mode="before"` recebe o que quem chamou passou, então `Any` é a
+        # anotação honesta. O `cast` só nomeia o que o `isinstance` acabou de provar
+        # sobre a forma — chave de TOML é string —, sem afirmar nada sobre os valores.
+        dados = cast(dict[str, Any], bruto)
+        if not dados.get("scripts") and dados.get("skill"):
+            return {**dados, "scripts": Path(str(dados["skill"])) / "scripts"}
+        return dados
 
     # -- caminhos derivados -------------------------------------------------
 

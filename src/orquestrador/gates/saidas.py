@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+
 from orquestrador.contratos import ResultadoGate, Violacao
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.ferramentas.processo import SaidaProcesso
@@ -79,7 +81,11 @@ def resultado_do_validador(saida: SaidaProcesso, *, gate: str) -> ResultadoGate:
             saida_bruta=saida.texto,
         )
 
-    violacoes = [Violacao.model_validate(item) for item in dados.get("errors") or []]
+    # A anotação explícita é o que impede o `Any` de `dados.get` de contaminar o
+    # elemento da compreensão: o item continua `Any` — é JSON de terceiro —, mas
+    # `Violacao.model_validate` o converte na mesma linha em que ele aparece.
+    erros: list[Any] = dados.get("errors") or []
+    violacoes = [Violacao.model_validate(item) for item in erros]
     if valido and violacoes:
         return ResultadoGate.erro_da_ferramenta(
             f'validar-suite-gerada.mjs devolveu "valid": true e listou '
@@ -90,13 +96,13 @@ def resultado_do_validador(saida: SaidaProcesso, *, gate: str) -> ResultadoGate:
             saida_bruta=saida.texto,
         )
 
-    return ResultadoGate(
-        aprovado=valido,
-        violacoes=violacoes,
-        avisos=[Violacao.model_validate(item) for item in dados.get("warnings") or []],
-        saida_bruta=saida.texto,
-        gate=gate,
-    )
+    alertas: list[Any] = dados.get("warnings") or []
+    avisos = [Violacao.model_validate(item) for item in alertas]
+    # A checagem acima já eliminou o par `valid: true` com erros listados, então aqui
+    # `valido` e `violacoes` não podem se contradizer.
+    if valido:
+        return ResultadoGate.aprovado_por(avisos=avisos, saida_bruta=saida.texto, gate=gate)
+    return ResultadoGate.reprovado_por(violacoes, avisos=avisos, saida_bruta=saida.texto, gate=gate)
 
 
 def resumo_da_cobertura(saida: SaidaProcesso) -> dict[str, Any]:
@@ -111,25 +117,64 @@ def resumo_da_cobertura(saida: SaidaProcesso) -> dict[str, Any]:
         return {}
 
 
+class _MensagemDoEslint(BaseModel):
+    """Uma entrada de `messages` no `eslint --format json`.
+
+    Os nomes são os do ESLint, não os nossos: este modelo existe para validar o que
+    chega, não para renomear. `extra="ignore"` é deliberado — o ESLint acrescenta
+    campo entre versões (`fix`, `suggestions`, `messageId`), e reprovar por campo
+    novo transformaria atualização de linter em falha de gate.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    severity: int = 0
+    message: str = ""
+    ruleId: str | None = None
+    line: int | None = None
+
+
+class _ArquivoDoEslint(BaseModel):
+    """Um arquivo relatado pelo `eslint --format json`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    filePath: str = ""
+    messages: list[_MensagemDoEslint] = Field(default_factory=list[_MensagemDoEslint])
+
+
+_LISTA_DO_ESLINT = TypeAdapter(list[_ArquivoDoEslint])
+
+# A severidade 2 é "error" no ESLint; 1 é "warn" e não reprova o gate.
+_SEVERIDADE_DE_ERRO = 2
+
+
 def violacoes_do_eslint(stdout: str) -> list[Violacao]:
-    """Converte `eslint --format json` em violações com arquivo e linha."""
+    """Converte `eslint --format json` em violações com arquivo e linha.
+
+    O JSON do ESLint é o exemplo de fronteira deste módulo: entra `Any` de terceiro,
+    sai `list[Violacao]`. A conversão acontece na primeira linha útil — o `Any` não
+    atravessa o laço. Saída ilegível vira lista vazia, e não exceção: quem decide o
+    que fazer com "o linter não falou" é `gate_b`, que já trata o caso.
+    """
     try:
-        arquivos = json.loads(stdout.strip() or "[]")
-    except json.JSONDecodeError:
+        arquivos = _LISTA_DO_ESLINT.validate_json(stdout.strip() or "[]")
+    except ValidationError:
         return []
+
     violacoes: list[Violacao] = []
-    for arquivo in arquivos if isinstance(arquivos, list) else []:
-        caminho = str(arquivo.get("filePath", "")).replace("\\", "/")
-        for mensagem in arquivo.get("messages") or []:
-            if mensagem.get("severity") != 2:
+    for arquivo in arquivos:
+        caminho = arquivo.filePath.replace("\\", "/")
+        for mensagem in arquivo.messages:
+            if mensagem.severity != _SEVERIDADE_DE_ERRO:
                 continue
-            regra = mensagem.get("ruleId") or "eslint"
+            regra = mensagem.ruleId or "eslint"
             violacoes.append(
                 Violacao(
                     codigo="QAORQ-021",
-                    mensagem=f"{regra}: {mensagem.get('message', '').strip()}",
+                    mensagem=f"{regra}: {mensagem.message.strip()}",
                     arquivo=caminho,
-                    linha=mensagem.get("line"),
+                    linha=mensagem.line,
                 )
             )
     return violacoes

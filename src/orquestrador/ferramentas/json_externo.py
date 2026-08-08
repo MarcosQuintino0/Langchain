@@ -18,7 +18,7 @@ Pydantic reclamar de um tipo inesperado três frames adiante.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 
 def extrair_json(texto: str) -> dict[str, Any]:
@@ -53,4 +53,8 @@ def _sem_cerca(texto: str) -> str:
 def _exigir_objeto(dados: Any) -> dict[str, Any]:
     if not isinstance(dados, dict):
         raise ValueError(f"esperava um objeto JSON no topo, veio {type(dados).__name__}")
-    return dados
+    # O `isinstance` só prova `dict`, não `dict[str, Any]` — a chave fica `Unknown`, e
+    # ela vaza para todo consumidor. O `cast` é seguro porque a origem é `json.loads`,
+    # cujo objeto JSON tem chave string por definição do formato. Não é uma promessa
+    # sobre o conteúdo: os valores continuam `Any` e são validados adiante.
+    return cast(dict[str, Any], dados)

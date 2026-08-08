@@ -36,14 +36,13 @@ def pipeline(config_falso, tmp_path: Path) -> Pipeline:
     )
 
 
-def recurso_de(config) -> object:
+def recurso_de(config) -> Recurso:
     return Recurso(nome="pedidos", caminho_testes=config.caminhos.recurso("pedidos"))
 
 
 def reprovado(*codigos: str) -> ResultadoGate:
-    return ResultadoGate(
-        aprovado=False,
-        violacoes=[Violacao(codigo=codigo, mensagem="detalhe") for codigo in codigos],
+    return ResultadoGate.reprovado_por(
+        [Violacao(codigo=codigo, mensagem="detalhe") for codigo in codigos]
     )
 
 
@@ -55,8 +54,8 @@ def test_aprova_de_primeira_nao_monta_delta(pipeline: Pipeline):
         gate="a",
         recurso=recurso_de(pipeline.config),
         produzir=lambda numero, delta, atual: recebidos.append(delta) or "artefato",
-        persistir=lambda _artefato: None,
-        avaliar=lambda _artefato: ResultadoGate(aprovado=True),
+        persistir=lambda _artefato: [],
+        avaliar=lambda _artefato: ResultadoGate.aprovado_por(),
         texto_do_artefato=lambda artefato: str(artefato),
     )
 
@@ -66,7 +65,7 @@ def test_aprova_de_primeira_nao_monta_delta(pipeline: Pipeline):
 
 def test_reprova_uma_vez_e_repara_com_o_delta(pipeline: Pipeline):
     recebidos: list[tuple[Delta | None, str | None]] = []
-    vereditos = [reprovado("QAAPI-021", "QAAPI-022"), ResultadoGate(aprovado=True)]
+    vereditos = [reprovado("QAAPI-021", "QAAPI-022"), ResultadoGate.aprovado_por()]
 
     def produzir(numero: int, delta: Delta | None, atual: str | None) -> str:
         recebidos.append((delta, atual))
@@ -77,7 +76,7 @@ def test_reprova_uma_vez_e_repara_com_o_delta(pipeline: Pipeline):
         gate="a",
         recurso=recurso_de(pipeline.config),
         produzir=produzir,
-        persistir=lambda _artefato: None,
+        persistir=lambda _artefato: [],
         avaliar=lambda _artefato: vereditos.pop(0),
         texto_do_artefato=lambda artefato: f"texto de {artefato}",
     )
@@ -103,7 +102,7 @@ def test_esgotar_as_tentativas_falha_com_os_codigos_remanescentes(pipeline: Pipe
             gate="b",
             recurso=recurso_de(pipeline.config),
             produzir=lambda numero, delta, atual: "artefato",
-            persistir=lambda _artefato: None,
+            persistir=lambda _artefato: [],
             avaliar=lambda _artefato: reprovado("QAAPI-025"),
             texto_do_artefato=lambda artefato: str(artefato),
         )
@@ -119,8 +118,8 @@ def test_o_artefato_e_persistido_antes_de_ser_avaliado(pipeline: Pipeline):
         gate="b",
         recurso=recurso_de(pipeline.config),
         produzir=lambda numero, delta, atual: ordem.append("produzir") or "a",
-        persistir=lambda _artefato: ordem.append("persistir"),
-        avaliar=lambda _artefato: ordem.append("avaliar") or ResultadoGate(aprovado=True),
+        persistir=lambda _artefato: ordem.append("persistir") or [],
+        avaliar=lambda _artefato: ordem.append("avaliar") or ResultadoGate.aprovado_por(),
         texto_do_artefato=str,
     )
     assert ordem == ["produzir", "persistir", "avaliar"]
@@ -128,21 +127,22 @@ def test_o_artefato_e_persistido_antes_de_ser_avaliado(pipeline: Pipeline):
 
 def test_cada_tentativa_recebe_apenas_o_delta_mais_recente(pipeline: Pipeline):
     deltas: list[Delta | None] = []
-    vereditos = [reprovado("QAAPI-021"), reprovado("QAAPI-022"), ResultadoGate(aprovado=True)]
+    vereditos = [reprovado("QAAPI-021"), reprovado("QAAPI-022"), ResultadoGate.aprovado_por()]
 
     pipeline._ciclo(
         estagio="mapeador",
         gate="a",
         recurso=recurso_de(pipeline.config),
         produzir=lambda numero, delta, atual: deltas.append(delta) or "a",
-        persistir=lambda _artefato: None,
+        persistir=lambda _artefato: [],
         avaliar=lambda _artefato: vereditos.pop(0),
         texto_do_artefato=str,
     )
 
-    assert [d.violacoes[0].codigo for d in deltas[1:]] == ["QAAPI-021", "QAAPI-022"]
+    reparos = [delta for delta in deltas[1:] if delta is not None]
+    assert [delta.violacoes[0].codigo for delta in reparos] == ["QAAPI-021", "QAAPI-022"]
     # A terceira tentativa NÃO acumula as violações da primeira.
-    assert len(deltas[2].violacoes) == 1
+    assert len(reparos[1].violacoes) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +206,7 @@ def test_o_limite_da_cli_chega_ao_ciclo(config_falso, tmp_path: Path):
             gate="b",
             recurso=recurso_de(pipeline.config),
             produzir=lambda numero, delta, atual: "artefato",
-            persistir=lambda _artefato: None,
+            persistir=lambda _artefato: [],
             avaliar=lambda _artefato: reprovado("QAAPI-025"),
             texto_do_artefato=str,
         )

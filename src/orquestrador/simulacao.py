@@ -30,12 +30,13 @@ import json
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from pydantic import BaseModel, ConfigDict, Field
 
 from orquestrador.raiz import DIR_FIXTURES
 
@@ -51,10 +52,50 @@ class RoteiroAusente(FileNotFoundError):
     pass
 
 
+class PassoDeTool(BaseModel):
+    """Passo que manda o grafo executar uma tool e devolver o resultado ao modelo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: Literal["tool"]
+    nome: str
+    argumentos: dict[str, Any] = Field(default_factory=dict[str, Any])
+    pensamento: str = ""
+
+
+class PassoFinal(BaseModel):
+    """Passo que encerra a tentativa.
+
+    `artefato` é o objeto do contrato, serializado em JSON; `conteudo` é texto cru,
+    que existe para exercitar o delta de schema com uma resposta malformada. A
+    distinção é entre **declarado** e ausente, não entre valor e vazio: um roteiro
+    com `"artefato": null` está afirmando que o modelo respondeu `null`, e o
+    mini-loop de reparo precisa ver isso em vez de cair no texto cru. Por isso o
+    teste é `model_fields_set`, e não `artefato is None`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: Literal["final"]
+    artefato: Any = None
+    conteudo: str = ""
+
+    def texto(self) -> str:
+        if "artefato" in self.model_fields_set:
+            return json.dumps(self.artefato, ensure_ascii=False, indent=2)
+        return self.conteudo
+
+
+# O `tipo` do roteiro deixa de ser string comparada à mão e vira discriminante: um
+# `"tipo": "tol"` na fixture passa a ser erro de validação com o nome do arquivo,
+# em vez de virar silenciosamente um passo final sem artefato.
+PassoDoRoteiro = Annotated[PassoDeTool | PassoFinal, Field(discriminator="tipo")]
+
+
 class ModeloSimulado(BaseChatModel):
     """Devolve, em ordem, os passos de um roteiro de fixture."""
 
-    passos: list[dict[str, Any]]
+    passos: list[PassoDoRoteiro]
     rotulo: str = "simulado"
     simulado: bool = True
 
@@ -78,16 +119,16 @@ class ModeloSimulado(BaseChatModel):
         # Contar a partir das mensagens mantém o modelo stateless (princípio 3).
         indice = sum(1 for mensagem in messages if isinstance(mensagem, AIMessage))
         passo = self.passos[min(indice, len(self.passos) - 1)]
-        entrada = sum(len(str(getattr(m, "content", ""))) for m in messages)
+        entrada = sum(len(str(mensagem.content)) for mensagem in messages)
 
-        if passo.get("tipo") == "tool":
-            conteudo = str(passo.get("pensamento", ""))
+        if isinstance(passo, PassoDeTool):
+            conteudo = passo.pensamento
             mensagem = AIMessage(
                 content=conteudo,
                 tool_calls=[
                     {
-                        "name": passo["nome"],
-                        "args": passo.get("argumentos", {}),
+                        "name": passo.nome,
+                        "args": passo.argumentos,
                         "id": f"chamada-{indice}",
                         "type": "tool_call",
                     }
@@ -95,7 +136,7 @@ class ModeloSimulado(BaseChatModel):
                 usage_metadata=_uso(entrada, len(conteudo) + 40),
             )
         else:
-            conteudo = _conteudo_final(passo)
+            conteudo = passo.texto()
             mensagem = AIMessage(content=conteudo, usage_metadata=_uso(entrada, len(conteudo)))
 
         return ChatResult(generations=[ChatGeneration(message=mensagem)])
@@ -105,12 +146,6 @@ def _uso(caracteres_entrada: int, caracteres_saida: int) -> dict[str, int]:
     entrada = max(1, caracteres_entrada // CARACTERES_POR_TOKEN)
     saida = max(1, caracteres_saida // CARACTERES_POR_TOKEN)
     return {"input_tokens": entrada, "output_tokens": saida, "total_tokens": entrada + saida}
-
-
-def _conteudo_final(passo: dict[str, Any]) -> str:
-    if "artefato" in passo:
-        return json.dumps(passo["artefato"], ensure_ascii=False, indent=2)
-    return str(passo.get("conteudo", ""))
 
 
 class Roteiros:
@@ -144,7 +179,9 @@ class Roteiros:
 
     def modelo(self, recurso: str, estagio: str, tentativa: int) -> ModeloSimulado:
         roteiro = self.carregar(recurso, estagio, tentativa)
-        passos = roteiro.get("passos") or []
+        # `passos` continua `Any`: é JSON de fixture, e quem lhe dá forma é o
+        # `ModeloSimulado` logo abaixo, validando contra o união discriminada.
+        passos = roteiro.get("passos")
         if not passos:
             raise RoteiroAusente(
                 f'roteiro sem "passos": recurso={recurso!r} estagio={estagio!r} '

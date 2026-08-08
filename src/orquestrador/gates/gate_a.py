@@ -88,4 +88,4 @@ def diff_grafo_manifesto(
         ),
         arquivo=f"{recurso.nome}/_support/cobertura.json",
     )
-    return ResultadoGate(aprovado=True, avisos=[aviso], gate=NOME)
+    return ResultadoGate.aprovado_por(avisos=[aviso], gate=NOME)
