@@ -33,6 +33,26 @@ support_compartilhado = "cypress/support/api"
 # Relativo a este diretório: logs, artefatos e sandbox de cada execução.
 saida = ".execucoes"
 
+# ---------------------------------------------------------------------------
+# Compatibilidade com a skill
+# ---------------------------------------------------------------------------
+# A skill `qa-api` é outro repositório, e a integração com ela é um contrato
+# IMPLÍCITO: formato dos argumentos, código de saída, forma do JSON e semântica
+# dos códigos QAAPI-. Nada disso está declarado em lugar nenhum.
+#
+# Pior: os prompts em `prompts/` são condensação MANUAL das `references/*.md`
+# dela. Se a skill mudar uma regra, nada avisa este orquestrador — são duas
+# fontes de verdade, uma copiando a outra, sem detecção de divergência.
+#
+# A impressão é o hash do conteúdo dos `.mjs` que invocamos. Mudou, o pipeline
+# recusa rodar e diz o hash novo, para você conferir o contrato antes de aceitar.
+# É a mesma proteção que o `qa-reindex.mjs` faz com a versão do Graphify.
+#
+# Deixe vazio para desligar — é o certo para quem edita a skill e o consumidor
+# ao mesmo tempo, onde o hash mudaria a cada salvamento.
+[skill]
+impressao_esperada = "6f004c54afd5b6e3"
+
 [openrouter]
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
