@@ -622,14 +622,31 @@ roteador. Ler quem de fato executou exigiria consumir o `response_metadata` da r
 formato depende do provedor. Chamar o campo de "rota efetiva" seria dizer que temos evidência
 quando temos declaração.
 
-## 5.3 — Orçamento antes, não depois `[M]`
+## 5.3 — Orçamento antes, não depois `[M]` — **CONCLUÍDO**
 
-Tetos duros por execução e por recurso: chamadas, tokens, bytes de ferramenta, tempo e moeda.
-Estimativa em faixa antes de aplicar, interrompendo antes da chamada que estouraria o teto.
-Registrar custo e rota efetiva.
+✅ `[orcamento]` com dois escopos — por execução e por recurso — e quatro tetos em cada:
+chamadas, tokens, caracteres devolvidos por tools e tempo. Campo ausente é sem teto; zero é
+teto legítimo. Sem nada configurado, não há interrupção.
 
-**Barato de começar:** o Bloco 0 é determinístico e conta endpoints. Um `--estimar` que roda
-só ele e devolve uma faixa custa pouco e é diferencial de venda.
+✅ `orquestrador --estimar` roda só o Bloco 0, conta os endpoints e devolve a faixa de token.
+Verificado contra o backend de exemplo: 27 endpoints em 5 classes controladoras. Agrupado por
+classe, e não por recurso — o extrator não sabe a que recurso um endpoint pertence, e essa é
+a decisão do mapeador.
+
+**Duas divergências, as duas por honestidade.**
+
+*"Interrompendo antes da chamada que estouraria o teto"* não é implementável: o custo de uma
+chamada só se conhece **depois** dela. O que existe é "nenhuma chamada nova começa depois que
+o teto foi alcançado", e a última pode ultrapassar. Está escrito no módulo, na referência e no
+template do `init`. Ver o ADR 0015.
+
+*Moeda* ficou de fora. Preço é do modelo, e nenhum nome de modelo aparece em código
+(princípio 6) — uma tabela de preços aqui seria dado de terceiro envelhecendo dentro do
+repositório. `--estimar` devolve token; quem quiser moeda multiplica pelo preço do modelo que
+configurou.
+
+*"Registrar custo e rota efetiva"* foi parcialmente atendido em 5.2: o manifesto carrega a
+política **declarada**. A rota efetiva por chamada continua pendente, e o motivo está lá.
 
 ## 5.4 — Matriz de suporte honesta `[P]`
 

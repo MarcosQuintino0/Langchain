@@ -14,7 +14,8 @@ src/orquestrador/
   raiz.py            resolução da raiz do projeto — único uso de Path(__file__)
   cli/
     __init__.py
-    codigos_de_saida.py  0..4 — o contrato com quem automatiza
+    codigos_de_saida.py  0..5 — o contrato com quem automatiza
+    estimativa.py    `--estimar`: conta endpoints e devolve a faixa de token
     init.py          `orquestrador init`: o config.toml comentado
     doctor.py        `orquestrador doctor`: 14 diagnósticos do ambiente
     principal.py     argumentos, montagem da execução e apresentação
@@ -27,6 +28,7 @@ src/orquestrador/
   dominio/
     __init__.py
     endpoint.py      o vocabulário HTTP que inventário e manifesto compartilham
+    orcamento.py     tetos, consumo e a decisão pura de parar
     recurso.py       Recurso e NomeDeRecurso — a unidade de trabalho e o nome que vira diretório
     inventario.py    o que o backend expõe, segundo quem leu o código
     manifesto.py     o gabarito de cobertura — espelho de _support/cobertura.json
@@ -53,6 +55,7 @@ src/orquestrador/
     __init__.py
     mapeador.py                 a unidade de trabalho do Bloco 1
     ferramentas_do_mapeador.py  as cinco tools e a medição de cada chamada
+    guarda_de_orcamento.py      a checagem que os dois agentes fazem antes de chamar
     grafo_react.py              todo o acoplamento com o LangGraph
     executor.py                 chamada estruturada, sem tools
     auditor.py                  STUB, interface definida

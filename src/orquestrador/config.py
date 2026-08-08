@@ -37,6 +37,7 @@ from pydantic import (
     model_validator,
 )
 
+from orquestrador.dominio.orcamento import Orcamento
 from orquestrador.excecoes import ErroDeConfiguracao
 from orquestrador.raiz import CONFIG_PADRAO, DIR_PROMPTS_PADRAO
 
@@ -316,6 +317,10 @@ class Config(BaseModel):
     gates: dict[str, ConfigGate]
     execucao: ConfigExecucao = Field(default_factory=ConfigExecucao)
     skill: ConfigSkill = Field(default_factory=lambda: ConfigSkill())
+    # Sem tetos configurados, `Orcamento.configurado` é falso e a checagem custa
+    # uma comparação por chamada. Orçamento que aparece sem ninguém pedir
+    # interrompe execução legítima e ensina a desligá-lo.
+    orcamento: Orcamento = Field(default_factory=Orcamento)
     origem: Path | None = None
 
     # -- carga --------------------------------------------------------------

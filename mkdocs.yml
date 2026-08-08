@@ -79,6 +79,7 @@ nav:
   - Referência:
       - CLI: referencia/cli.md
       - Configuração: referencia/configuracao.md
+      - Orçamento: referencia/orcamento.md
       - Códigos de violação: referencia/codigos-de-violacao.md
       - Eventos: referencia/eventos.md
       - Artefatos de execução: referencia/artefatos-de-execucao.md
@@ -105,4 +106,5 @@ nav:
       - 0012: adr/0012-marker-classifica-por-dependencia.md
       - 0013: adr/0013-sem-fachada-em-movimento-de-modulo.md
       - 0014: adr/0014-contrato-da-skill-fora-da-ci.md
+      - 0015: adr/0015-teto-para-antes-nao-garante-nao-ultrapassar.md
   - Plano de execução: plano-de-execucao.md

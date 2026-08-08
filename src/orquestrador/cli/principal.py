@@ -25,10 +25,12 @@ from orquestrador.cli.codigos_de_saida import (
     ERRO_DE_PROVEDOR,
     ERRO_DE_USO,
     FALHA_DE_GATE,
+    ORCAMENTO_ESGOTADO,
     REQUER_REVISAO,
     SUCESSO,
 )
 from orquestrador.cli.doctor import comando_doctor
+from orquestrador.cli.estimativa import estimar
 from orquestrador.cli.init import comando_init
 from orquestrador.config import Config
 from orquestrador.dominio.recurso import Recurso
@@ -119,6 +121,14 @@ def construir_analisador() -> argparse.ArgumentParser:
         type=inteiro_positivo,
         default=None,
         help="sobrescreve max_tentativas de todos os gates (inteiro >= 1).",
+    )
+    analisador.add_argument(
+        "--estimar",
+        action="store_true",
+        help=(
+            "conta os endpoints do backend e devolve a faixa de token, sem chamar "
+            "modelo nenhum. Roda só o Bloco 0."
+        ),
     )
     analisador.add_argument(
         "--rodar-cypress",
@@ -331,6 +341,12 @@ def executar_pipeline(argv: list[str] | None = None) -> int:
             console.print(f"[red]configuração inválida:[/red] {erro}")
             return ERRO_DE_USO
 
+    if args.estimar:
+        # Antes de criar o diretório de execução: `--estimar` não é uma execução.
+        # Ele lê o backend, conta e sai — sem log, sem manifesto, sem staging e sem
+        # deixar uma pasta vazia em `.execucoes/` para quem for procurar o resultado.
+        return estimar(config, console)
+
     dir_execucao = diretorio_de_execucao(
         config.caminhos.saida
         if config.caminhos.saida.is_absolute()
@@ -488,6 +504,10 @@ def executar_pipeline(argv: list[str] | None = None) -> int:
         # passou; aqui o pipeline não conseguiu emitir veredito nenhum. E provedor é
         # distinto de ferramenta porque a resposta do operador é outra — esperar e
         # repetir, em vez de arrumar o ambiente.
+        if pipeline.interrupcao.por_orcamento:
+            # Antes do provedor: teto alcançado não é indisponibilidade, e a
+            # resposta de quem opera é decidir, não esperar.
+            return ORCAMENTO_ESGOTADO
         if pipeline.interrupcao.categoria_do_provedor is not None:
             return ERRO_DE_PROVEDOR
         return ERRO_DE_USO

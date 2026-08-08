@@ -270,3 +270,17 @@ class FalhaDePublicacao(FalhaComArtefatos):
     É irmã de `FalhaDeGate`, e não filha de `ErroDeFerramenta`: não há ferramenta
     quebrada nem ambiente errado, e o recurso seguinte pode perfeitamente publicar.
     """
+
+
+class OrcamentoEsgotado(ErroDeFerramenta):
+    """O teto configurado foi alcançado; nenhuma chamada nova começa.
+
+    Herda de `ErroDeFerramenta` porque o efeito desejado é o mesmo: interromper o
+    laço de recursos preservando o resultado de quem já terminou, em vez de isolar
+    a falha num recurso e seguir para o próximo. Insistir aqui é ainda mais
+    claramente inútil que numa indisponibilidade — o teto não se recupera sozinho.
+
+    Não é falha: é a execução obedecendo. O código de saída é próprio (`5`) porque
+    a resposta de quem opera também é — não é arrumar o ambiente nem esperar, é
+    decidir se o trabalho valia mais do que o teto autorizava.
+    """

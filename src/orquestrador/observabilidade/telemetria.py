@@ -18,6 +18,7 @@ from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from orquestrador.dominio.orcamento import Consumo
 from orquestrador.observabilidade.eventos import TipoDeEvento
 from orquestrador.observabilidade.medidas import RegistroDeChamada, RegistroDeTool, UsoDeTokens
 from orquestrador.observabilidade.registro import RegistradorDeEventos
@@ -163,3 +164,26 @@ class Telemetria:
                 for (recurso, estagio, tentativa), agregado in self.por_tentativa().items()
             },
         }
+
+    def consumo(self, recurso: str | None = None) -> Consumo:
+        """O que já foi gasto, em `Consumo` — o vocabulário que o orçamento entende.
+
+        Com `recurso`, só o daquele recurso; sem, o da execução inteira. São os dois
+        escopos que `dominio/orcamento.py` compara, e é por isso que a agregação
+        mora aqui: a telemetria já tem os registros, e duplicar a soma do outro lado
+        criaria duas contas que divergem.
+
+        Este módulo **não decide** parar. Ele responde "quanto"; quem compara com o
+        teto e interrompe é o agente, antes de chamar o modelo.
+        """
+        chamadas = [c for c in self.chamadas if recurso is None or c.recurso == recurso]
+        tools = [t for t in self.tools if recurso is None or t.recurso == recurso]
+        return Consumo(
+            chamadas=len(chamadas),
+            tokens=sum(c.uso.total for c in chamadas),
+            caracteres_de_tools=sum(t.caracteres for t in tools),
+            # Só o tempo de chamada de modelo e de tool: o do pipeline em volta não é
+            # gasto de provedor, e contá-lo faria um gate lento parecer estouro de
+            # orçamento.
+            segundos=sum(c.duracao_s for c in chamadas) + sum(t.duracao_s for t in tools),
+        )

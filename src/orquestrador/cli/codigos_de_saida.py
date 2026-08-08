@@ -25,6 +25,11 @@ REQUER_REVISAO = 3
 # para esperar e repetir. Num agendamento, é a diferença entre alertar alguém e
 # reenfileirar sozinho.
 ERRO_DE_PROVEDOR = 4
+# O teto de `[orcamento]` foi alcançado. Não é falha: é a execução obedecendo. O
+# código é próprio porque a resposta de quem opera também é — não é arrumar o
+# ambiente (`2`) nem esperar e repetir (`4`), é decidir se o trabalho valia mais
+# do que o teto autorizava.
+ORCAMENTO_ESGOTADO = 5
 
 # A descrição fica ao lado da constante, e não na documentação, pelo mesmo motivo
 # de sempre: duas cópias divergem. A tabela publicada sai daqui.
@@ -42,6 +47,10 @@ DESCRICAO: dict[int, str] = {
     ERRO_DE_PROVEDOR: (
         "o provedor de LLM não respondeu dentro da política de retentativa. "
         "Esperar e repetir é a resposta certa"
+    ),
+    ORCAMENTO_ESGOTADO: (
+        "o teto de `[orcamento]` foi alcançado e nenhuma chamada nova começou. "
+        "Não é falha: é a execução obedecendo"
     ),
 }
 

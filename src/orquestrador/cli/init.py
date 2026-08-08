@@ -86,6 +86,38 @@ retencao_de_dados = "deny"
 # provedor indisponível faz o roteador cair para outro qualquer.
 provedores_permitidos = []
 
+# ---------------------------------------------------------------------------
+# Orçamento. Sem nada aqui, não há teto — e é esse o padrão: um orçamento que
+# aparece sem ninguém pedir interrompe execução legítima e ensina a desligá-lo.
+#
+# O que ele promete: nenhuma chamada nova começa depois que o teto foi alcançado.
+# O que ele NÃO promete: que o teto não será ultrapassado. O custo de uma chamada
+# só se conhece depois dela, então a última pode passar.
+#
+# Dois escopos, e os dois valem juntos. Só o de execução deixaria um recurso
+# patológico consumir tudo antes de o segundo começar; só o de recurso não pararia
+# uma lista de trinta que sangram devagar.
+#
+# Campo ausente = sem teto. Zero é um teto legítimo ("não me deixe chamar o
+# modelo") e é diferente de ausente.
+#
+# [orcamento.por_execucao]
+# chamadas = 200
+# tokens = 5_000_000
+# caracteres_de_tools = 20_000_000
+# segundos = 3600
+#
+# [orcamento.por_recurso]
+# chamadas = 40
+# tokens = 800_000
+
+# A régua do `orquestrador --estimar`, que conta os endpoints do backend e devolve
+# uma faixa de token sem chamar modelo nenhum. Os padrões saíram de UMA execução
+# medida — troque-os pelos números da sua, que é para isso que eles estão aqui.
+[orcamento.estimativa]
+tokens_por_endpoint_min = 40000
+tokens_por_endpoint_max = 120000
+
 # Identificador do modelo no provedor, na forma que ele espera.
 # O mapeador tem o julgamento mais difícil e o menor volume de saída: pede o modelo
 # mais capaz. O executor tem o volume de tokens e trabalho mecânico se o gabarito

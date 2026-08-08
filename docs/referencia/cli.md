@@ -23,6 +23,7 @@ coisas diferentes de quem agenda a execução.
 | `2` | erro de quem invocou ou do ambiente: configuração inválida, comando inexistente, ferramenta indisponível |
 | `3` | publicado, e alguma coisa precisa de olho humano — hoje, schema do consumidor que declara menos campos do que o backend tem |
 | `4` | o provedor de LLM não respondeu dentro da política de retentativa. Esperar e repetir é a resposta certa |
+| `5` | o teto de `[orcamento]` foi alcançado e nenhuma chamada nova começou. Não é falha: é a execução obedecendo |
 <!-- FIM DOS CODIGOS DE SAIDA -->
 
 Em CI, o que importa é **não ser 0**: zero é indistinguível de trabalho feito.
@@ -32,8 +33,8 @@ Em CI, o que importa é **não ser 0**: zero é indistinguível de trabalho feit
 <!-- INICIO DA AJUDA: gerado por cli/principal.py::parse_args -->
 ```
 usage: orquestrador [-h] [--config CONFIG] [--recurso RECURSOS] [--dry-run]
-                    [--max-tentativas MAX_TENTATIVAS] [--rodar-cypress] [--auditor]
-                    [--remover-reprovados]
+                    [--max-tentativas MAX_TENTATIVAS] [--estimar] [--rodar-cypress]
+                    [--auditor] [--remover-reprovados]
 
 Orquestrador multi-agente de testes de API (skill qa-api).
 
@@ -45,6 +46,8 @@ options:
   --dry-run             roda ponta a ponta sem chamar nenhum modelo, usando fixtures.
   --max-tentativas MAX_TENTATIVAS
                         sobrescreve max_tentativas de todos os gates (inteiro >= 1).
+  --estimar             conta os endpoints do backend e devolve a faixa de token, sem
+                        chamar modelo nenhum. Roda só o Bloco 0.
   --rodar-cypress       executa o Cypress no Bloco 3 (por padrão é pulado).
   --auditor             RECUSADO enquanto o auditor semântico for stub: encerra com
                         erro.

@@ -10,7 +10,7 @@ outra, que a supersede. É isso que impede o conjunto de virar wiki — um docum
 que se reescreve perde exatamente o que se procura nele, que é o que se pensava na
 época.
 
-As catorze primeiras não são prosa nova. São justificativas que já existiam,
+As quinze primeiras não são prosa nova. São justificativas que já existiam,
 enterradas em docstring e em comentário, movidas para um lugar com nome e número
 citável.
 
@@ -32,5 +32,6 @@ citável.
 | [0012](0012-marker-classifica-por-dependencia.md) | Marker classifica por dependência, não por escopo |
 | [0013](0013-sem-fachada-em-movimento-de-modulo.md) | Sem fachada de compatibilidade em movimento de módulo |
 | [0014](0014-contrato-da-skill-fora-da-ci.md) | O contrato com a skill não é verificado na CI |
+| [0015](0015-teto-para-antes-nao-garante-nao-ultrapassar.md) | O teto para antes da próxima chamada, e não promete mais |
 
 Para escrever a próxima, copie o [template](0000-template.md).

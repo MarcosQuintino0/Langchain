@@ -52,6 +52,7 @@ from orquestrador.excecoes import (
     FalhaDeGate,
     FalhaDePublicacao,
     GrafoNaoPreparado,
+    OrcamentoEsgotado,
 )
 from orquestrador.ferramentas import processo
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
@@ -104,6 +105,8 @@ class InterrupcaoDaExecucao:
     recurso: str
     recursos_nao_executados: list[str] = field(default_factory=list[str])
     categoria_do_provedor: CategoriaDeProvedor | None = None
+    # Teto alcançado não é falha, é obediência — e o código de saída é outro.
+    por_orcamento: bool = False
 
 
 @dataclass
@@ -496,9 +499,16 @@ class Pipeline:
                     categoria_do_provedor=(
                         erro.categoria if isinstance(erro, ErroDeProvedor) else None
                     ),
+                    por_orcamento=isinstance(erro, OrcamentoEsgotado),
                 )
                 self.registro.falha(
-                    f"execução interrompida em {recurso.nome}: ferramenta indisponível. {erro}"
+                    f"execução interrompida em {recurso.nome}: "
+                    + (
+                        "teto de orçamento"
+                        if isinstance(erro, OrcamentoEsgotado)
+                        else "ferramenta indisponível"
+                    )
+                    + f". {erro}"
                 )
                 self.registro.evento(
                     TipoDeEvento.EXECUCAO_INTERROMPIDA,

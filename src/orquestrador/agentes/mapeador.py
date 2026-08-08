@@ -29,6 +29,7 @@ from orquestrador.agentes.grafo_react import (
     acabaram_os_passos,
     criar_agente,
 )
+from orquestrador.agentes.guarda_de_orcamento import exigir_folga
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import SUFIXO_SCHEMA, SaidaMapeador
 from orquestrador.dominio.recurso import Recurso
@@ -120,6 +121,9 @@ def executar(
     politica = PoliticaDeRetentativa.do_config(config)
 
     for passo in range(1, parametros.max_tentativas_schema + 1):
+        # Dentro do laço, e não antes dele: o mini-loop de schema dá várias voltas
+        # de modelo por tentativa, e cada uma reenvia a exploração inteira do ReAct.
+        exigir_folga(config, telemetria, estagio=ESTAGIO, recurso=recurso.nome)
         inicio = time.perf_counter()
 
         def invocar(entrada: str = entrada) -> EstadoDoReAct:

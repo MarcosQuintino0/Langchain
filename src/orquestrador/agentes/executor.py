@@ -15,6 +15,7 @@ from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
 
+from orquestrador.agentes.guarda_de_orcamento import exigir_folga
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import SaidaExecutor
 from orquestrador.dominio.manifesto import Manifesto
@@ -89,6 +90,7 @@ def executar(
     superficie: SuperficieDoProjeto | None = None,
 ) -> SaidaExecutor:
     """Uma tentativa do executor para um recurso. Sem histórico algum."""
+    exigir_folga(config, telemetria, estagio=ESTAGIO, recurso=recurso.nome)
     parametros = config.estagio(ESTAGIO)
     gerador = GeradorEstruturado(
         modelo=modelo,
