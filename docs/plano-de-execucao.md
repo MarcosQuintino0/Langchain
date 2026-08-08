@@ -1,8 +1,8 @@
 # Plano de execução
 
-Consolidação das duas revisões externas ([revisao-arquitetura.md](revisao-arquitetura.md) e
-[revisao-organizacao.md](revisao-organizacao.md)), filtrada pelo que faz sentido para este
-projeto e ordenada por etapas.
+Consolidação das duas revisões externas ([revisao-arquitetura.md](historico/revisao-arquitetura.md)
+e [revisao-organizacao.md](historico/revisao-organizacao.md)), filtrada pelo que faz sentido
+para este projeto e ordenada por etapas.
 
 ## Como ler este documento
 
@@ -41,7 +41,7 @@ conferência.
 estiver ausente, corrompido ou com drift, o pipeline segue e o mapeador explora um grafo
 inválido.
 
-**Evidência.** ✅ [pipeline.py:561](../src/orquestrador/pipeline.py:561) — `self.bloco0()`
+**Evidência.** ✅ `pipeline.py:561` — `self.bloco0()`
 sem atribuição. O método monta um `ResultadoPreparacao` com campo `ok` que ninguém lê.
 
 **Correção.** `resultado = self.bloco0()`; se `not resultado.ok`, levantar erro operacional
@@ -56,7 +56,7 @@ seja chamado.
 **Problema.** Um filho com `aprovado=False` e lista de violações vazia vira resultado
 aprovado. Basta uma checagem reprovar sem conseguir descrever o motivo para o gate passar.
 
-**Evidência.** ✅ [contratos.py:125](../src/orquestrador/contratos.py:125) —
+**Evidência.** ✅ `contratos.py:125` —
 `aprovado=not violacoes`.
 
 **Correção.** Exigir que **todos** os filhos estejam aprovados **e** que não haja violações.
@@ -70,12 +70,12 @@ Adicionar validador no modelo proibindo `aprovado=True` com violações.
 degradado, e também não é violação para o LLM reparar — mandar o modelo "consertar" um
 script que não rodou queima tentativa sem chance de convergir.
 
-**Evidência.** ✅ [gates/cobertura.py:64-82](../src/orquestrador/gates/cobertura.py:64) —
+**Evidência.** ✅ `gates/cobertura.py:64-82` —
 aprova quando o `qa-cobertura.mjs` não devolve contadores. **Este código é meu, de hoje.** Eu
 tratei o problema como binário (aprovar ou reprovar) quando existe um terceiro estado. O
 revisor está certo.
 
-Também em [gates/parser.py](../src/orquestrador/gates/parser.py): confia no campo `valid` do
+Também em `gates/parser.py`: confia no campo `valid` do
 JSON mesmo quando o código de saída é incompatível, exceto no caso particular de exit 2.
 
 **Correção.** Introduzir `VereditoDeGate` com `APROVADO`, `REPROVADO` e `ERRO_DA_FERRAMENTA`.
@@ -83,7 +83,7 @@ Erro operacional interrompe o recurso com mensagem acionável e **nunca** entra 
 `delta.violacoes`. Exigir as combinações documentadas — exit 0 com `valid=true`, exit 1 com
 `valid=false`; qualquer outra é quebra de contrato.
 
-**Validação.** Reescrever `test_gate_cobertura.py::test_sem_contadores_avisa_em_vez_de_reprovar`,
+**Validação.** Reescrever `test_gates_lacunas.py::test_sem_contadores_avisa_em_vez_de_reprovar`,
 que hoje **fixa o comportamento errado**. Cobrir cada combinação inválida de exit/JSON.
 
 ## 1.4 — Falha do Cypress não reprova, e relatório velho é aceito `[M]`
@@ -91,7 +91,7 @@ que hoje **fixa o comportamento errado**. Cobrir cada combinação inválida de 
 **Problema.** O código de saída é registrado e ignorado. Um `report.json` de uma execução
 anterior é aceito como se fosse desta.
 
-**Evidência.** ✅ [pipeline.py:394-397](../src/orquestrador/pipeline.py:394) — evento com
+**Evidência.** ✅ `pipeline.py:394-397` — evento com
 `codigo=saida.codigo`, seguido de `candidato.is_file()` sem verificar procedência.
 
 **Correção.** Caminho de relatório único por execução, garantir inexistência antes de rodar,
@@ -103,7 +103,7 @@ validar após. Exit não-zero vira falha tipada. Quando o Cypress não roda, o r
 **Problema.** `startswith` aceita diretório irmão com prefixo comum. `.../products-old` passa
 na verificação de `.../products`.
 
-**Evidência.** ✅ [executor.py:117](../src/orquestrador/agentes/executor.py:117) —
+**Evidência.** ✅ `executor.py:117` —
 `str(destino).startswith(str(raiz))`.
 
 **Correção.** `Path.resolve()` nos dois lados e `Path.is_relative_to()`. Centralizar em
@@ -116,8 +116,8 @@ na verificação de `.../products`.
 **Problema.** O nome do recurso vem cru da CLI e é concatenado em caminhos. `..`,
 separadores, caminho absoluto e nomes reservados do Windows (`CON`, `NUL`, `COM1`) escapam.
 
-**Evidência.** ✅ [contratos.py](../src/orquestrador/contratos.py) — `Recurso.nome: str` sem
-validador. ✅ [cli.py:32-40](../src/orquestrador/cli.py:32) — nomes crus.
+**Evidência.** ✅ `contratos.py` — `Recurso.nome: str` sem
+validador. ✅ `cli.py:32-40` — nomes crus.
 
 **Correção.** Tipo restrito a slug: `^[a-z0-9][a-z0-9._-]*$`, sem `.`/`..`, sem ponto ou
 espaço final, com denylist dos dispositivos reservados.
@@ -128,7 +128,7 @@ espaço final, com denylist dos dispositivos reservados.
 é herdado. `OPENROUTER_API_KEY` chega ao Node, ao Cypress, ao prettier e ao eslint — que
 rodam código do projeto do cliente.
 
-**Evidência.** ✅ [processo.py:86-96](../src/orquestrador/ferramentas/processo.py:86) — sem
+**Evidência.** ✅ `processo.py:86-96` — sem
 parâmetro `env`.
 
 **Correção.** Ambiente mínimo explícito: `PATH`, `SystemRoot`, `TEMP` e uma allowlist
@@ -143,7 +143,7 @@ chave.
 **Problema.** O comando encerra com código 0 anunciando um veredito, mas o auditor é stub.
 Em CI, isso é indistinguível de auditoria feita.
 
-**Evidência.** ✅ [cli.py:169-178](../src/orquestrador/cli.py:169) — `return 0` depois de
+**Evidência.** ✅ `cli.py:169-178` — `return 0` depois de
 imprimir a descrição do stub.
 
 **Correção.** Enquanto não existir implementação, retornar código diferente de zero com
@@ -155,8 +155,8 @@ mensagem de indisponibilidade. O auditor continua **fora do loop quente**.
 proteção que construímos hoje cobre schemas preexistentes, mas os specs continuam sendo
 sobrescritos direto no destino final, sem staging e sem rollback.
 
-**Evidência.** ✅ [cli.py:89-103](../src/orquestrador/cli.py:89). ✅
-[executor.py:110-122](../src/orquestrador/agentes/executor.py:110) — grava direto no
+**Evidência.** ✅ `cli.py:89-103`. ✅
+`executor.py:110-122` — grava direto no
 diretório do recurso.
 
 **Correção nesta etapa.** Desabilitar `--remover-reprovados` com mensagem explicando que
@@ -168,12 +168,12 @@ volta quando houver diário de propriedade. O staging completo é a Etapa 2.
 resposta válida para "de onde importo isso?". Num projeto escrito por IA, o agente importa de
 onde encontrou primeiro, e a estrutura derrete em silêncio.
 
-**Evidência.** ✅ [processo.py:23-32](../src/orquestrador/ferramentas/processo.py:23)
+**Evidência.** ✅ `processo.py:23-32`
 reexporta `ErroDeFerramenta` e `ExecutavelAusente`. ✅
-[gates/parser.py:12-23](../src/orquestrador/gates/parser.py:12) reexporta `ErroDeInvocacao` e
-`extrair_json`. ✅ [superficie.py:31-33](../src/orquestrador/ferramentas/superficie.py:31)
+`gates/parser.py:12-23` reexporta `ErroDeInvocacao` e
+`extrair_json`. ✅ `superficie.py:31-33`
 reexporta `extrair_exports`. ✅ `ErroDeConfiguracao` mora em
-[config.py:25](../src/orquestrador/config.py:25), embora `excecoes.py` declare concentrar a
+`config.py:25`, embora `excecoes.py` declare concentrar a
 taxonomia.
 
 **Correção.** Remover os reexports; consumidores importam do dono. Mover
@@ -184,14 +184,14 @@ vive no `__init__.py` e ✅ **não contém `QAORQ-030`**, o código que eu adici
 
 ## 1.11 — Correções pontuais de baixo custo `[P]`
 
-- ✅ [mapeador.py:298](../src/orquestrador/agentes/mapeador.py:298) manda o usuário rodar
+- ✅ `mapeador.py:298` manda o usuário rodar
   `pip install -r requirements.txt`. **Esse arquivo não existe.** Trocar por
   `pip install -e ".[dev]"`, que é o que o README documenta.
 - ✅ `CATS_SET` e `ESTADOS_DE_EXCECAO` em `contratos.py` não têm consumidor. Remover.
 - ✅ `.coverage` não está no `.gitignore` (arquivo que eu gerei hoje). Acrescentar
   `.coverage*` e `htmlcov/`.
 - ✅ O catálogo de eventos do README omite `execucao_abortada`
-  ([cli.py:199](../src/orquestrador/cli.py:199)) e `cypress`.
+  (`cli.py:199`) e `cypress`.
 
 **Critério de saída da Etapa 1.** Nenhum erro, evidência ausente ou arquivo residual produz
 "aprovado". Uma interrupção no meio preserva os arquivos preexistentes byte a byte. A chave
@@ -229,7 +229,7 @@ trabalho de quem pagou pela ferramenta.
 **Problema.** No reparo, o mapeador recebe **só o manifesto**. Inventário e schemas ficam de
 fora. Uma violação sobre schema não pode ser corrigida sem o schema à vista.
 
-**Evidência.** ✅ [pipeline.py:264](../src/orquestrador/pipeline.py:264) — o
+**Evidência.** ✅ `pipeline.py:264` — o
 `texto_do_artefato` do Bloco 1 usa apenas `saida.manifesto.para_json()`, embora
 `SaidaMapeador` tenha inventário e schemas.
 
@@ -245,7 +245,7 @@ significar o artefato inteiro, não uma fatia arbitrária dele. Nada de históri
 caracteres. Em suíte grande, o trecho que o gate reclamou pode estar depois do corte — e o
 loop repete a tentativa sem chance de corrigir.
 
-**Evidência.** ✅ [executor.py:125-143](../src/orquestrador/agentes/executor.py:125).
+**Evidência.** ✅ `executor.py:125-143`.
 
 **Correção.** Projetar deterministicamente **apenas** os arquivos e trechos apontados por
 `delta.violacoes`, com contexto de linhas calculado por script. Fica menor e mais relevante ao
@@ -256,7 +256,7 @@ mesmo tempo.
 **Problema.** Quando preservamos um schema do cliente e o mapeador encontrou campos que ele
 não declara, sai um aviso — e o recurso pode terminar como sucesso completo.
 
-**Evidência.** ✅ [pipeline.py:288-328](../src/orquestrador/pipeline.py:288) — o
+**Evidência.** ✅ `pipeline.py:288-328` — o
 `_avisar_divergencia` que escrevi hoje.
 
 **Correção.** Manter a preservação e produzir um diff legível por máquina. O recurso encerra
@@ -452,7 +452,7 @@ a Etapa 6 avança, nunca crescer.
 **Problema.** Limites aceitam zero e negativo. A CLI muta um modelo já validado usando
 truthiness, então `--max-tentativas 0` é silenciosamente ignorado e um valor negativo passa.
 
-**Evidência.** ✅ [cli.py:138-140](../src/orquestrador/cli.py:138) —
+**Evidência.** ✅ `cli.py:138-140` —
 `if args.max_tentativas`.
 
 **Correção.** `PositiveInt` e `NonNegativeFloat` com máximos sensatos; URL do provedor com

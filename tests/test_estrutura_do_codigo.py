@@ -46,6 +46,7 @@ DIR_TESTES = Path(__file__).resolve().parent
 RAIZ_DO_REPOSITORIO = DIR_TESTES.parent
 PACOTE = RAIZ_DO_REPOSITORIO / "src" / "orquestrador"
 README = RAIZ_DO_REPOSITORIO / "README.md"
+AGENTS = RAIZ_DO_REPOSITORIO / "AGENTS.md"
 
 # A raiz do pacote é lista fechada: arquivo novo aqui reprova, e é para reprovar.
 # Escolher diretório é escolher o motivo dominante de mudança — a tabela do
@@ -84,6 +85,16 @@ DIRECAO_PROIBIDA: dict[str, frozenset[str]] = {
 
 CODIGO_QAORQ = re.compile(r"QAORQ-\d{3}")
 
+# A tabela "Onde colocar código novo" do `AGENTS.md`, localizada pelo cabeçalho
+# literal e não por número de linha: acrescentar uma seção antes dela não pode cegar
+# a checagem.
+CABECALHO_DA_TABELA = "| Diretório | Motivo dominante | O que ele não faz |"
+LINHA_DA_RAIZ = "raiz do pacote"
+
+# `★ \`dominio/\`` — a estrela marca diretório que ainda não existe.
+DIRETORIO_NA_TABELA = re.compile(r"^(?P<estrela>★\s*)?`(?P<nome>[a-z_]+)/`$")
+ARQUIVO_NA_CELULA = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*\.py)`")
+
 
 # ---------------------------------------------------------------------------
 # Leitura
@@ -98,6 +109,18 @@ def modulos_de_producao() -> list[Path]:
 def caminho_no_pacote(arquivo: Path) -> str:
     """`llm/montagem.py` — o nome pelo qual a documentação chama o módulo."""
     return arquivo.relative_to(PACOTE).as_posix()
+
+
+def pacotes_reais() -> set[str]:
+    """Subpacotes de `orquestrador` que existem no disco.
+
+    Mesma definição de `subpacotes_reais` em `tests/test_empacotamento.py`, que a
+    usa contra o `pyproject.toml`. Duas cópias de uma definição divergem; se você
+    mudar uma, mude a outra — ou funda as duas numa fixture.
+    """
+    return {
+        diretorio.name for diretorio in PACOTE.iterdir() if (diretorio / "__init__.py").is_file()
+    }
 
 
 def arvore(arquivo: Path) -> ast.Module:
@@ -309,6 +332,30 @@ def test_direcao_de_dependencia(arquivo: Path):
     )
 
 
+def test_direcao_proibida_so_cita_pacote_que_existe():
+    """A matriz não pode citar pacote que não existe — nem chave, nem valor.
+
+    O valor é comparado contra o **segundo componente** do módulo importado, então
+    ele deixa de casar no dia em que um módulo de topo vira subpacote: proibir
+    `"pipeline"` funciona enquanto for `orquestrador.pipeline`, e passa a não
+    proibir nada quando virar `orquestrador.aplicacao.pipeline` — sem que teste
+    algum reprove. Esta checagem é a que transforma esse silêncio em falha.
+    """
+    reais = pacotes_reais() | {arquivo.stem for arquivo in PACOTE.glob("*.py")}
+    citados = set(DIRECAO_PROIBIDA) | {
+        valor for valores in DIRECAO_PROIBIDA.values() for valor in valores
+    }
+
+    fantasmas = sorted(citados - reais)
+    assert not fantasmas, (
+        f"DIRECAO_PROIBIDA cita {fantasmas}, que não é pacote nem módulo de "
+        "src/orquestrador/.\n"
+        "Uma entrada que não corresponde a nada nunca reprova — ela parece uma "
+        "regra e não é. Se o alvo mudou de nome ou virou subpacote, atualize a "
+        "chave e o valor; se a regra deixou de fazer sentido, remova a entrada."
+    )
+
+
 # ---------------------------------------------------------------------------
 # 5 — todo código QAORQ vem do catálogo
 # ---------------------------------------------------------------------------
@@ -440,7 +487,122 @@ def test_a_arvore_do_readme_nao_lista_modulo_que_nao_existe():
 
 
 # ---------------------------------------------------------------------------
-# 7 — `conftest` não é módulo de biblioteca
+# 7 — a tabela do AGENTS.md descreve o disco
+# ---------------------------------------------------------------------------
+
+
+def linhas_da_tabela_de_diretorios() -> list[list[str]]:
+    """As linhas de corpo da tabela "Onde colocar código novo", célula a célula.
+
+    Localizada pelo cabeçalho literal e não por número de linha, para que
+    acrescentar uma seção antes dela não cegue a checagem.
+    """
+    linhas = AGENTS.read_text(encoding="utf-8").splitlines()
+    assert CABECALHO_DA_TABELA in linhas, (
+        f"não achei a tabela de diretórios no AGENTS.md.\n"
+        f"Ela é localizada pelo cabeçalho literal {CABECALHO_DA_TABELA!r}. Se você "
+        "renomeou uma coluna, esta checagem fica cega — ajuste CABECALHO_DA_TABELA "
+        "aqui na mesma mudança."
+    )
+
+    corpo: list[list[str]] = []
+    # +2 pula o cabeçalho e a linha de separação (`| --- | --- | --- |`).
+    for linha in linhas[linhas.index(CABECALHO_DA_TABELA) + 2 :]:
+        if not linha.startswith("|"):
+            break
+        celulas = [celula.strip() for celula in linha.strip().strip("|").split("|")]
+        assert len(celulas) == 3, (
+            f"linha da tabela do AGENTS.md com {len(celulas)} células: {linha!r}.\n"
+            "Um `|` literal dentro de uma célula quebra a leitura — escreva-o como "
+            "`\\|` ou reescreva a frase."
+        )
+        corpo.append(celulas)
+    return corpo
+
+
+def diretorios_da_tabela() -> dict[str, bool]:
+    """Nome do diretório → se a linha está marcada com ★ (ainda não existe)."""
+    marcados: dict[str, bool] = {}
+    for primeira, _, _ in linhas_da_tabela_de_diretorios():
+        casou = DIRETORIO_NA_TABELA.match(primeira)
+        if casou:
+            marcados[casou.group("nome")] = casou.group("estrela") is not None
+    return marcados
+
+
+def test_todo_subpacote_tem_linha_na_tabela():
+    faltando = sorted(pacotes_reais() - set(diretorios_da_tabela()))
+    assert not faltando, (
+        f"subpacote(s) sem linha na tabela do AGENTS.md: {faltando}.\n"
+        "Pacote sem linha é pacote sem regra de pertencimento: o próximo agente "
+        "não tem como saber o que entra ali e o que não entra, e a resposta vira "
+        "'o que já estiver dentro'.\n"
+        "O que fazer: acrescente a linha declarando o motivo dominante de mudança "
+        "e o que o pacote deliberadamente não faz."
+    )
+
+
+def test_a_estrela_marca_exatamente_o_que_nao_existe():
+    """★ significa "planejado, ainda não criado" — e só isso.
+
+    É esta checagem que obriga a Etapa 6 a tirar a estrela: no instante em que
+    `dominio/` nasce, a linha estrelada reprova. Sem ela, o `AGENTS.md` continuaria
+    dizendo "ainda não existe" sobre um diretório cheio de código, e a regra que
+    manda não criá-lo por conta própria seguiria valendo contra o próprio repositório.
+    """
+    reais = pacotes_reais()
+    tabela = diretorios_da_tabela()
+
+    estrela_mas_existe = sorted(
+        nome for nome, estrela in tabela.items() if estrela and nome in reais
+    )
+    assert not estrela_mas_existe, (
+        f"a tabela do AGENTS.md marca com ★ diretório(s) que já existem: "
+        f"{estrela_mas_existe}.\n"
+        "★ quer dizer 'ainda não existe'. Se o diretório foi criado, tire a estrela "
+        "da linha e apague o parágrafo que manda não criá-lo por conta própria."
+    )
+
+    sem_estrela_e_ausente = sorted(
+        nome for nome, estrela in tabela.items() if not estrela and nome not in reais
+    )
+    assert not sem_estrela_e_ausente, (
+        f"a tabela do AGENTS.md descreve diretório(s) que não existem: "
+        f"{sem_estrela_e_ausente}.\n"
+        "Ou o diretório foi removido e a linha deve sair, ou ele é planejado e a "
+        "linha precisa da ★."
+    )
+
+
+def test_a_celula_da_raiz_e_a_lista_fechada():
+    """O terceiro vértice: AGENTS.md ↔ RAIZ_PERMITIDA ↔ disco.
+
+    Os outros dois já têm teste (`test_raiz_do_pacote_e_lista_fechada` fecha
+    constante ↔ disco). Sem este, o `AGENTS.md` pode listar sete arquivos enquanto
+    a constante lista nove, e quem lê o documento — que é justamente quem vai
+    decidir onde pôr um arquivo novo — recebe a versão errada.
+    """
+    celulas = [
+        motivo
+        for primeira, motivo, _ in linhas_da_tabela_de_diretorios()
+        if LINHA_DA_RAIZ in primeira
+    ]
+    assert len(celulas) == 1, (
+        f"esperava exatamente uma linha {LINHA_DA_RAIZ!r} na tabela do AGENTS.md, "
+        f"achei {len(celulas)}."
+    )
+
+    declarados = set(ARQUIVO_NA_CELULA.findall(celulas[0]))
+    assert declarados == set(RAIZ_PERMITIDA), (
+        "a célula 'raiz do pacote' do AGENTS.md e RAIZ_PERMITIDA discordam.\n"
+        f"  só no AGENTS.md:  {sorted(declarados - RAIZ_PERMITIDA)}\n"
+        f"  só na constante:  {sorted(RAIZ_PERMITIDA - declarados)}\n"
+        "As duas descrevem a mesma decisão. Quando a raiz encolhe, encolhem juntas."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 8 — `conftest` não é módulo de biblioteca
 # ---------------------------------------------------------------------------
 
 
