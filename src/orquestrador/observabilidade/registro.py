@@ -80,7 +80,7 @@ class Registro:
         `llm/` também emitem, e trocar a assinatura dos dois numa mudança que
         ninguém pediu ali é o tipo de conflito que o working tree compartilhado
         transforma em retrabalho. Enquanto durar, quem garante que nenhuma string
-        solta entra é `tests/test_eventos.py`, que varre a AST de `src/` e exige
+        solta entra é `tests/test_observabilidade_eventos.py`, que varre a AST de `src/` e exige
         que todo primeiro argumento de `.evento(...)` seja membro de
         `TipoDeEvento` ou literal com valor de um membro.
 

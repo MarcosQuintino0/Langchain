@@ -176,7 +176,7 @@ jobs:
         # Mutação só no runner, nunca no repositório: o config.toml versionado
         # tem o caminho absoluto da máquina de desenvolvimento, que não existe
         # aqui. Os testes de integração leem `[caminhos].skill` deste arquivo
-        # para decidir se pulam (tests/test_dry_run.py::_skill_configurada).
+        # para decidir se pulam (tests/test_e2e_dry_run.py::_skill_configurada).
         shell: bash
         working-directory: orquestrador
         run: |

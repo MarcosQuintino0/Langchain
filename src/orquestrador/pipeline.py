@@ -577,7 +577,7 @@ class Pipeline:
         # importação do módulo, e o `monkeypatch.setattr(processo, "executar", ...)`
         # dos testes do Bloco 3 passaria a não ter efeito nenhum — a suíte roda o
         # Cypress de verdade. Verificado: subir este import reprova 4 testes de
-        # tests/test_falhas_isoladas.py.
+        # tests/test_invariante_falhas_isoladas.py.
         from orquestrador.ferramentas.processo import executar as rodar  # noqa: PLC0415
 
         configurado = list(self.config.execucao.cypress)

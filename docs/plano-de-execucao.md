@@ -321,13 +321,13 @@ aparecer demanda real.
 
 Sem isto, todas as convenções abaixo são texto que um agente futuro lê pela metade.
 
-`tests/test_estrutura_do_codigo.py` existe e cobre as sete checagens. Duas ressalvas sobre o
+`tests/test_invariante_estrutura_do_codigo.py` existe e cobre as sete checagens. Duas ressalvas sobre o
 que foi entregue, ambas deliberadas: a lista fechada da raiz aceita os nove arquivos de hoje
 (item 1 pedia seis — os outros três dependem da Etapa 6), e a árvore do README é **conferida**
 contra o código, não gerada a partir dele (item 6 admitia as duas formas; a descrição de uma
 linha por módulo é editorial e nenhum gerador a produz).
 
-Criar `tests/test_estrutura_do_codigo.py` com verificação por AST:
+Criar `tests/test_invariante_estrutura_do_codigo.py` com verificação por AST:
 
 1. A raiz de `src/orquestrador/` contém **exatamente** `__init__.py`, `__main__.py`,
    `cli.py`, `config.py`, `excecoes.py`, `raiz.py`. Lista fechada.
@@ -444,7 +444,7 @@ estrutura-alvo acima: `agentes/ferramentas_do_mapeador.py`, `observabilidade/eve
 (Etapa 4.3), `observabilidade/modelos.py`, e os pacotes `dominio/` e `aplicacao/` inteiros —
 Etapa 6. A raiz do pacote, portanto, ainda tem nove arquivos e não seis: `contratos.py`,
 `pipeline.py` e `simulacao.py` só saem quando aqueles dois pacotes existirem. A lista fechada
-de `tests/test_estrutura_do_codigo.py` reflete os nove de hoje e é para **encolher** conforme
+de `tests/test_invariante_estrutura_do_codigo.py` reflete os nove de hoje e é para **encolher** conforme
 a Etapa 6 avança, nunca crescer.
 
 ## 3.4 — Configuração que não pode voltar a ficar inválida `[P]`
@@ -529,15 +529,28 @@ vazamento de segredo.
 Separar `unit`, `integration` e `e2e`; job Windows obrigatório com Node 24 e referência exata
 da skill, falhando se houver skip inesperado.
 
-## 4.5 — Reorganizar os testes `[M]`
+## 4.5 — Reorganizar os testes `[M]` — **CONCLUÍDO**
 
 Um arquivo unitário por módulo canônico; `test_invariante_*` quando cruzar dois ou mais
-módulos; `test_integracao_*` para subprocesso real. Fábricas no `conftest.py` como fixture, não
-como import. Renomear `test_dry_run.py` → `test_integracao_dry_run.py` e `test_principio_2.py`
-→ `test_invariante_principio_2.py`.
+módulos. Fábricas no `conftest.py` como fixture, não como import.
 
 **Não** criar `tests/unitarios/` e `tests/integracao/`: com 15 arquivos, nome e marker
 resolvem com menos navegação.
+
+**Divergência do que esta seção pedia.** O prefixo `test_integracao_*` foi descartado. Com os
+markers aplicados (4.4), ele seria uma segunda declaração da mesma coisa, e as duas
+divergiriam: `test_invariante_confinamento.py` tem 33 casos `unit` e 4 `integration`, e nome
+de arquivo não classifica caso a caso. **Marker classifica; nome descreve.** O prefixo
+`test_e2e_` ficou, porque `e2e` não é "roda subprocesso" — é "exercita o pipeline inteiro", e
+isso vale para o arquivo todo.
+
+A convenção final tem teste:
+`test_invariante_estrutura_do_codigo.py::test_nome_de_teste_aponta_para_modulo_que_existe`. O
+nome é lido como caminho, tentando todo corte possível do sublinhado
+(`analise_estatica_exports_javascript` → `analise_estatica/exports_javascript.py`), e um
+sufixo depois do módulo descreve a fatia (`test_pipeline_loop_reparo.py` promete
+`pipeline.py`). É essa checagem que teria pego `test_parser.py` continuando a existir depois
+que `gates/parser.py` virou `gates/saidas.py`.
 
 ---
 

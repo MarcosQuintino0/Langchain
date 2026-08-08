@@ -116,7 +116,7 @@ def caminho_no_pacote(arquivo: Path) -> str:
 def pacotes_reais() -> set[str]:
     """Subpacotes de `orquestrador` que existem no disco.
 
-    Mesma definição de `subpacotes_reais` em `tests/test_empacotamento.py`, que a
+    Mesma definição de `subpacotes_reais` em `tests/test_invariante_empacotamento.py`, que a
     usa contra o `pyproject.toml`. Duas cópias de uma definição divergem; se você
     mudar uma, mude a outra — ou funda as duas numa fixture.
     """
@@ -604,7 +604,84 @@ def test_a_celula_da_raiz_e_a_lista_fechada():
 
 
 # ---------------------------------------------------------------------------
-# 8 — `conftest` não é módulo de biblioteca
+# 8 — o nome do arquivo de teste diz o que ele protege
+# ---------------------------------------------------------------------------
+
+# `test_invariante_delta.py` cruza módulos; `test_e2e_dry_run.py` é o pipeline
+# inteiro. Nenhum dos dois promete um módulo, então nenhum dos dois é conferido
+# contra o disco — o prefixo é a declaração de que a promessa é outra.
+PREFIXOS_SEM_MODULO = ("invariante_", "e2e_")
+
+
+def composicoes(partes: list[str]) -> set[Path]:
+    """Todo jeito de ler `a_b_c` como caminho: `a_b_c.py`, `a/b_c.py`, `a/b/c.py`…
+
+    O sublinhado é ambíguo por construção — `analise_estatica_exports_javascript`
+    é `analise_estatica/exports_javascript.py`, e `gates_gate_a` é
+    `gates/gate_a.py`. Em vez de adivinhar onde cortar, tenta-se todo corte: é
+    frouxo o bastante para nunca dar falso positivo e apertado o bastante para
+    pegar módulo renomeado sem o teste correspondente.
+    """
+    total = len(partes)
+    candidatos: set[Path] = set()
+    for mascara in range(1 << (total - 1)):
+        grupos: list[str] = []
+        atual = [partes[0]]
+        for indice in range(1, total):
+            if mascara >> (indice - 1) & 1:
+                grupos.append("_".join(atual))
+                atual = [partes[indice]]
+            else:
+                atual.append(partes[indice])
+        grupos.append("_".join(atual))
+        candidatos.add(Path(*grupos[:-1], grupos[-1] + ".py"))
+    return candidatos
+
+
+def modulo_prometido_existe(nome: str) -> bool:
+    """O maior prefixo do nome resolve para um módulo real.
+
+    O resto é descritor de fatia: `test_pipeline_loop_reparo.py` promete
+    `pipeline.py` e diz qual pedaço dele exercita. Sem isso, três arquivos que
+    testam fatias diferentes do mesmo módulo teriam de disputar um nome só.
+    """
+    partes = nome.split("_")
+    for tamanho in range(len(partes), 0, -1):
+        if any((PACOTE / candidato).is_file() for candidato in composicoes(partes[:tamanho])):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("arquivo", sorted(DIR_TESTES.rglob("test_*.py")), ids=lambda p: p.name)
+def test_nome_de_teste_aponta_para_modulo_que_existe(arquivo: Path):
+    """A convenção: o nome do arquivo nomeia o que ele protege.
+
+    * protege um módulo → caminho achatado por sublinhado, `test_gates_lacunas.py`;
+    * protege uma invariante que atravessa módulos → `test_invariante_<nome>.py`;
+    * exercita o pipeline inteiro → `test_e2e_<nome>.py`.
+
+    Achatado e não `tests/gates/test_lacunas.py`: sem `__init__.py` em cada
+    diretório, dois arquivos de mesmo nome-base em pastas diferentes produzem
+    `import file mismatch` — erro de coleta, não de teste.
+    """
+    nome = arquivo.stem.removeprefix("test_")
+    if nome.startswith(PREFIXOS_SEM_MODULO):
+        return
+
+    assert modulo_prometido_existe(nome), (
+        f"{arquivo.name} promete um módulo que não existe em src/orquestrador/.\n"
+        "Ou o módulo foi renomeado e o teste não acompanhou — foi o que aconteceu "
+        "com test_parser.py depois que gates/parser.py virou gates/saidas.py —, ou "
+        "o arquivo protege uma invariante que atravessa módulos e o nome precisa do "
+        "prefixo `test_invariante_`.\n"
+        "O nome é lido como caminho: `test_gates_lacunas.py` promete "
+        "`gates/lacunas.py`. Um sufixo depois do módulo é permitido e descreve a "
+        "fatia: `test_pipeline_loop_reparo.py` promete `pipeline.py`."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9 — `conftest` não é módulo de biblioteca
 # ---------------------------------------------------------------------------
 
 

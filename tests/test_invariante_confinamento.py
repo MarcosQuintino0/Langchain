@@ -10,7 +10,7 @@ repositório do cliente, e a chave do provedor não tem o que fazer lá.
 O que **não** está aqui: a política de privacidade — denylist, `.llmignore` e
 redação de segredo. Ela responde outra pergunta ("este arquivo pode ir para um
 provedor de LLM?"), age depois do confinamento e é testada em
-`tests/test_privacidade.py`. Um `.env` no meio do backend passa por tudo que este
+`tests/test_ferramentas_privacidade.py`. Um `.env` no meio do backend passa por tudo que este
 arquivo verifica: está dentro da raiz, e é lá que ele deveria estar.
 """
 

@@ -4,7 +4,7 @@ Fronteira: este módulo é o **dono do nome de cada evento** e da descrição de
 linha que o acompanha. Ele não escreve nada em disco — quem escreve é
 `registro.py` — e não conhece pipeline, gate nem agente: um enum que soubesse de
 quem o emite inverteria a seta de dependência que
-`tests/test_estrutura_do_codigo.py` protege.
+`tests/test_invariante_estrutura_do_codigo.py` protege.
 
 Por que um enum, e não a string solta que havia antes
 -----------------------------------------------------
@@ -141,7 +141,7 @@ class TipoDeEvento(StrEnum):
 def catalogo_markdown() -> str:
     """Tabela Markdown do catálogo, na ordem de declaração do enum.
 
-    O README consome esta saída entre marcadores, e `tests/test_eventos.py`
+    O README consome esta saída entre marcadores, e `tests/test_observabilidade_eventos.py`
     compara os dois. Gerar em vez de conferir por lista: conferir exigiria manter a
     lista de nomes num terceiro lugar, e a divergência que este item resolve
     nasceu exatamente de um segundo lugar.

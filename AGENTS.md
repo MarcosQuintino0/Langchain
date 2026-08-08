@@ -81,7 +81,7 @@ ferramenta de terceiro; `analise_estatica/` acompanha a sintaxe da linguagem e a
 convenção de marcação da skill.
 
 **Estas regras têm teste.**
-[`tests/test_estrutura_do_codigo.py`](tests/test_estrutura_do_codigo.py) verifica
+[`tests/test_invariante_estrutura_do_codigo.py`](tests/test_invariante_estrutura_do_codigo.py) verifica
 por AST a lista fechada da raiz, a proibição de reexport em `__init__.py`, a
 honestidade de cada `__all__`, a direção de dependência da tabela acima, o catálogo
 dos códigos `QAORQ-`, a correspondência entre a árvore do `README.md` e os módulos

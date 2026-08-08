@@ -1,7 +1,7 @@
 """O que "artefato atual" significa em cada estágio.
 
 Princípio 2: `prompt_reparo = instrucao_fixa + artefato_atual + delta.violacoes`.
-`tests/test_principio_2.py` guarda a fórmula; este arquivo guarda o **conteúdo do
+`tests/test_invariante_principio_2.py` guarda a fórmula; este arquivo guarda o **conteúdo do
 segundo termo**, que tinha dois defeitos opostos:
 
 * no mapeador ele era pequeno demais — só o manifesto, sem o inventário nem os

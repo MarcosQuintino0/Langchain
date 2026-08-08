@@ -234,7 +234,7 @@ uv build --wheel
 ```
 
 Toda release constrói o wheel e o **testa num ambiente vazio** — é o que
-`tests/test_empacotamento.py::test_wheel_limpo` faz: constrói, cria um venv novo,
+`tests/test_invariante_empacotamento.py::test_wheel_limpo` faz: constrói, cria um venv novo,
 instala só o wheel, e roda `orquestrador --help`, `doctor`, `init`, `doctor` de
 novo e um `--dry-run`. O teste é marcado `integration` e pula sozinho sem o `uv`.
 
@@ -437,7 +437,7 @@ de uma mudança de formato.
 
 O catálogo abaixo é **gerado** a partir de `TipoDeEvento`, em
 [`observabilidade/eventos.py`](src/orquestrador/observabilidade/eventos.py), e
-[`tests/test_eventos.py`](tests/test_eventos.py) reprova se ele divergir do enum.
+[`tests/test_observabilidade_eventos.py`](tests/test_observabilidade_eventos.py) reprova se ele divergir do enum.
 Era uma lista mantida à mão, e ela divergiu duas vezes no mesmo dia — não edite a
 tabela: edite o enum e regenere.
 
@@ -481,7 +481,7 @@ estágio e o hash de cada prompt e de cada artefato.
 deixe o cabeçalho do chamado; e no fim, com os hashes dos artefatos.
 
 Três regras que o módulo não pode violar, e que
-[`tests/test_manifesto_de_execucao.py`](tests/test_manifesto_de_execucao.py) fixa:
+[`tests/test_observabilidade_manifesto_de_execucao.py`](tests/test_observabilidade_manifesto_de_execucao.py) fixa:
 
 * **segredo nunca entra** — o *nome* da variável de ambiente da chave entra, o
   valor não, nem mascarado; além da redação por nome de campo, o texto final é
@@ -545,7 +545,7 @@ cresce o tamanho do artefato; repita a tentativa dez vezes e ela não cresce nad
 
 O que fica de fato mais barato no reparo é o *total* da tentativa: ela não repete a
 exploração por tools que a primeira volta fez, então tem menos chamadas ao modelo.
-Os testes em [`tests/test_principio_2.py`](tests/test_principio_2.py) fixam as duas
+Os testes em [`tests/test_invariante_principio_2.py`](tests/test_invariante_principio_2.py) fixam as duas
 afirmações — e quebram se alguém concatenar histórico "para dar mais contexto".
 
 ---
@@ -616,7 +616,7 @@ razão de `exports_javascript.py` não morar em `ferramentas/`: entra texto, sai
 `ExportJs`. `ferramentas/` fica reservado ao adaptador de disco, de subprocesso e
 de CLI de terceiro.
 
-[`tests/test_estrutura_do_codigo.py`](tests/test_estrutura_do_codigo.py) **verifica
+[`tests/test_invariante_estrutura_do_codigo.py`](tests/test_invariante_estrutura_do_codigo.py) **verifica
 esta árvore**: módulo de produção que não aparece aqui reprova, e linha aqui que
 não corresponde a arquivo também. Foi a omissão de dois módulos que fez um revisor
 externo procurar arquivo no lugar errado — a árvore é documentação executável, não
@@ -673,7 +673,7 @@ checkout só existe `prompts/`; num ambiente instalado só existe
 
 O preço é uma lista explícita de `packages` no `pyproject.toml` — `packages.find`
 varre `where` e nunca acharia um diretório fora de `src/`. Quem cobra que ela não
-envelheça é `tests/test_empacotamento.py`: subpacote novo que não apareça lá reprova,
+envelheça é `tests/test_invariante_empacotamento.py`: subpacote novo que não apareça lá reprova,
 em vez de sumir do wheel em silêncio.
 
 **Por que `fixtures/` e `config.toml` NÃO vão no wheel.** `fixtures/` é material de
@@ -788,8 +788,8 @@ que uma refatoração quebraria em silêncio:
 
 | Arquivo | O que protege |
 | --- | --- |
-| [`test_principio_2.py`](tests/test_principio_2.py) | a entrada de um reparo não leva nada da tentativa anterior, nos dois estágios de LLM |
-| [`test_falhas_isoladas.py`](tests/test_falhas_isoladas.py) | um recurso que falha não derruba os seguintes, e o artefato reprovado que fica em disco é anunciado |
+| [`test_invariante_principio_2.py`](tests/test_invariante_principio_2.py) | a entrada de um reparo não leva nada da tentativa anterior, nos dois estágios de LLM |
+| [`test_invariante_falhas_isoladas.py`](tests/test_invariante_falhas_isoladas.py) | um recurso que falha não derruba os seguintes, e o artefato reprovado que fica em disco é anunciado |
 
 ---
 

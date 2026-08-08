@@ -104,7 +104,7 @@ orquestrador = "orquestrador.cli:main"
 # A lista de pacotes é explícita, e não `packages.find`, porque `package-dir` com
 # entrada fora da raiz não é visível para a descoberta automática — ela varre
 # `where` e nunca acharia `prompts/`. O custo é uma lista que precisa acompanhar os
-# subpacotes reais, e `tests/test_empacotamento.py` é quem cobra isso: subpacote
+# subpacotes reais, e `tests/test_invariante_empacotamento.py` é quem cobra isso: subpacote
 # novo em `src/orquestrador/` que não apareça aqui reprova, em vez de sumir do
 # wheel em silêncio.
 [tool.setuptools]

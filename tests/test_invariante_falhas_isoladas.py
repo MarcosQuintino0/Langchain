@@ -290,7 +290,7 @@ def test_aviso_final_lista_arquivos_e_codigos(tmp_path: Path):
     assert "cobertura.json" in texto
     assert "QAAPI-021" in texto
     # Com o diário de propriedade a flag voltou, e o aviso volta a apontá-la —
-    # restrita ao que criamos. Ver tests/test_publicacao.py.
+    # restrita ao que criamos. Ver tests/test_ferramentas_publicacao.py.
     assert "--remover-reprovados" in texto
 
 

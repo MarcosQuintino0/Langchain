@@ -78,7 +78,7 @@ LINK = re.compile(r"\]\(([^)\s]+)\)")
 
 # Exige a barra: `cli.py` sozinho é ambíguo (raiz do pacote? nome proibido citado
 # numa regra?), e a célula da raiz do `AGENTS.md` já é conferida contra
-# `RAIZ_PERMITIDA` por `test_estrutura_do_codigo.py`. Com barra, o caminho afirma
+# `RAIZ_PERMITIDA` por `test_invariante_estrutura_do_codigo.py`. Com barra, o caminho afirma
 # onde o arquivo mora, e essa afirmação é verificável.
 CRASE = re.compile(r"`([A-Za-z0-9_.][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]*\.[a-z]{2,4})`")
 

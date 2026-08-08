@@ -13,7 +13,7 @@ utilidade, e é a que mais tenta ser violada — a correção "óbvia" para um `
 falha é deixar a exceção subir.
 
 Nada aqui abre subprocesso: `executar` é substituído por dublê. O manifesto do
-`--dry-run` de verdade é exercitado em `tests/test_dry_run.py`.
+`--dry-run` de verdade é exercitado em `tests/test_e2e_dry_run.py`.
 """
 
 from __future__ import annotations

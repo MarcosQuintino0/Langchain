@@ -1,6 +1,6 @@
 """A fronteira de privacidade: o que do backend do cliente chega ao modelo.
 
-O confinamento de caminho (`tests/test_confinamento.py`) responde "este caminho
+O confinamento de caminho (`tests/test_invariante_confinamento.py`) responde "este caminho
 escapa da raiz?". Aqui a pergunta é outra e vale sobre caminho que já passou por
 ele: "este arquivo pode ser enviado a um provedor de LLM?".
 
