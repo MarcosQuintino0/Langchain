@@ -174,7 +174,8 @@ ou `e2e` (o pipeline inteiro). A coleta reprova sem ele — ver
 `pytest_collection_modifyitems` em [`tests/conftest.py`](tests/conftest.py).
 
 **A CI não verifica o contrato com a skill.** Ela roda lint, tipagem e
-`pytest --cov`; o job de integração ficou em `workflow_dispatch` porque `qa-api`
+`pytest --cov`; o job de integração virou um workflow próprio
+(`.github/workflows/contrato-da-skill.yml`), disparado só à mão, porque `qa-api`
 mora fora deste repositório e não há cópia que o runner alcance. Quem prova esse
 contrato é você, nesta máquina:
 

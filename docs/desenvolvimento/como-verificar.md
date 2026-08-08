@@ -27,8 +27,8 @@ python -m pytest -m "integration or e2e" -rs
 ```
 
 **A CI não roda isto.** A skill `qa-api` é outro projeto e não há cópia que o runner
-alcance; o job ficou em `workflow_dispatch`, com o motivo escrito no `ci.yml` e a
-decisão registrada no [ADR 0014](../adr/0014-contrato-da-skill-fora-da-ci.md).
+alcance; o job virou um workflow próprio, disparado só à mão, e a
+decisão está registrada no [ADR 0014](../adr/0014-contrato-da-skill-fora-da-ci.md).
 
 Se esses testes **pularem**, você não os rodou. O `-rs` diz o motivo — normalmente
 Node ausente ou `[caminhos].skill` apontando para lugar nenhum.

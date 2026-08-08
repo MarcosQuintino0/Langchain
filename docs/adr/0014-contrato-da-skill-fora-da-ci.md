@@ -8,7 +8,17 @@ O job de integração dependia de `vars.SKILL_REPO`, uma variável que nunca foi
 
 ## Decisão
 
-O job sai do gatilho de `push` e vira `workflow_dispatch`. O contrato com os `.mjs` é verificado **na máquina de quem desenvolve**, com `pytest -m "integration or e2e" -rs`, e isso está escrito no `AGENTS.md` e no cabeçalho do `ci.yml`.
+O job sai do `ci.yml` e vira um workflow próprio,
+`.github/workflows/contrato-da-skill.yml`, disparado só por `workflow_dispatch`.
+
+Workflow separado, e não um job com `if:` dentro do `ci.yml`, por um motivo
+visível: um job com condição falsa **ainda aparece** na lista da execução, como
+`skipped` ao lado dos verdes — que é exatamente o defeito sendo corrigido. Num
+arquivo próprio, ele não aparece a menos que alguém o dispare.
+
+O contrato com os `.mjs` é verificado **na máquina de quem desenvolve**, com
+`pytest -m "integration or e2e" -rs`, e isso está escrito no `AGENTS.md` e no
+cabeçalho do workflow.
 
 ## Consequências
 
