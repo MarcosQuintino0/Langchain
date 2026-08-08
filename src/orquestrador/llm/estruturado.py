@@ -19,10 +19,10 @@ from pydantic import BaseModel, ValidationError
 from orquestrador.config import ConfigEstagio
 from orquestrador.contratos import Delta, RegistroDeChamada, UsoDeTokens, Violacao
 from orquestrador.excecoes import FalhaDeEstagio
+from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.mensagens import medir_mensagens, texto_da_mensagem, uso_da_mensagem
-from orquestrador.montagem import montar_entrada_reparo
+from orquestrador.llm.montagem import montar_entrada_reparo
 from orquestrador.observabilidade.telemetria import Telemetria
-from orquestrador.textos import extrair_json
 
 T = TypeVar("T", bound=BaseModel)
 

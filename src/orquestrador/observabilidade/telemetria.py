@@ -1,15 +1,21 @@
-"""Telemetria de token e de tamanho de entrada.
+"""Telemetria de token e de tamanho de entrada — agregação, só.
 
 Sem isto não há como comprovar que o custo quadrático foi resolvido — que é
 metade do objetivo do projeto.
+
+Este módulo conta e agrupa; ele não desenha. A apresentação em tabela Rich mora
+em `tabelas.py`, que consome os agregados daqui. A divisão vale porque as duas
+metades mudam por motivos diferentes: acrescentar uma métrica mexe aqui,
+acrescentar uma coluna ao console mexe lá — e o pipeline, que só precisa contar
+token, não deve arrastar a dependência de terminal junto.
+
+O que sai daqui para fora é dado: agregados e `resumo_para_log`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-
-from rich.table import Table
 
 from orquestrador.contratos import RegistroDeChamada, RegistroDeTool, UsoDeTokens
 
@@ -124,120 +130,11 @@ class Telemetria:
         """
         return self._agregar(lambda chamada: (chamada.recurso, chamada.estagio, chamada.tentativa))
 
-    # -- apresentação -------------------------------------------------------
-
-    def tabela_por_estagio(self) -> Table:
-        sufixo = " [yellow](SIMULADO — nenhum modelo foi chamado)[/yellow]" if self.simulado else ""
-        tabela = Table(title=f"Tokens por estágio{sufixo}", title_justify="left")
-        tabela.add_column("estágio")
-        tabela.add_column("chamadas", justify="right")
-        tabela.add_column("entrada", justify="right")
-        tabela.add_column("saída", justify="right")
-        tabela.add_column("total", justify="right")
-        tabela.add_column("tempo (s)", justify="right")
-        for estagio, agregado in sorted(self.por_estagio().items()):
-            tabela.add_row(
-                estagio,
-                str(agregado.chamadas),
-                f"{agregado.uso.entrada:,}",
-                f"{agregado.uso.saida:,}",
-                f"{agregado.uso.total:,}",
-                f"{agregado.duracao_s:.1f}",
-            )
-        total = self.total()
-        tabela.add_section()
-        tabela.add_row(
-            "[bold]TOTAL",
-            f"[bold]{len(self.chamadas)}",
-            f"[bold]{total.entrada:,}",
-            f"[bold]{total.saida:,}",
-            f"[bold]{total.total:,}",
-            f"[bold]{sum(c.duracao_s for c in self.chamadas):.1f}",
-        )
-        return tabela
-
-    def tabela_por_recurso(self) -> Table:
-        tabela = Table(title="Tokens por recurso × estágio", title_justify="left")
-        tabela.add_column("recurso")
-        tabela.add_column("estágio")
-        tabela.add_column("chamadas", justify="right")
-        tabela.add_column("total", justify="right")
-        for (recurso, estagio), agregado in sorted(self.por_recurso().items()):
-            tabela.add_row(recurso, estagio, str(agregado.chamadas), f"{agregado.uso.total:,}")
-        return tabela
-
-    def tabela_entrada_por_tentativa(self) -> Table:
-        """A tabela que prova (ou refuta) o custo linear.
-
-        A coluna "entrada" é o que foi enviado ao modelo naquela tentativa, sem a
-        instrução fixa. Se ela cresce da tentativa 1 para a 2, o reparo está
-        levando histórico junto — que é exatamente o que o princípio 2 proíbe.
-        """
-        tabela = Table(title="Entrada enviada por tentativa (caracteres)", title_justify="left")
-        tabela.add_column("recurso")
-        tabela.add_column("estágio")
-        tabela.add_column("tentativa", justify="right")
-        tabela.add_column("chamadas", justify="right")
-        tabela.add_column("instrução fixa", justify="right")
-        tabela.add_column("entrada", justify="right")
-        for (recurso, estagio, tentativa), agregado in sorted(self.por_tentativa().items()):
-            tabela.add_row(
-                recurso,
-                estagio,
-                str(tentativa),
-                str(agregado.chamadas),
-                f"{agregado.caracteres_instrucao:,}",
-                f"{agregado.caracteres_entrada:,}",
-            )
-        return tabela
-
     def tools_por_nome(self) -> dict[str, AgregadoDeTools]:
         agregado: dict[str, AgregadoDeTools] = {}
         for tool in self.tools:
             agregado.setdefault(tool.nome, AgregadoDeTools()).somar(tool)
         return agregado
-
-    def tabela_de_tools(self) -> Table:
-        """Como o mapeador explorou o backend, e o que isso custou.
-
-        A coluna "devolvido" é o que interessa: cada caractere que uma tool devolve
-        entra no histórico do ReAct e é reenviado em toda volta seguinte. Uma
-        `buscar_no_backend` generosa custa muito mais que o próprio retorno dela.
-
-        `graphify_query` alto com `ler_arquivo` baixo é o comportamento que a
-        instrução pede. O inverso significa que o grafo está sendo ignorado — e o
-        Graphify deixou de pagar o que promete.
-        """
-        tabela = Table(title="Tools do mapeador", title_justify="left")
-        tabela.add_column("tool")
-        tabela.add_column("chamadas", justify="right")
-        tabela.add_column("devolvido", justify="right")
-        tabela.add_column("% do total", justify="right")
-        tabela.add_column("erros", justify="right")
-        tabela.add_column("tempo (s)", justify="right")
-        total = self.caracteres_de_tools()
-        for nome, agregado in sorted(
-            self.tools_por_nome().items(), key=lambda item: -item[1].caracteres
-        ):
-            fatia = (agregado.caracteres / total * 100) if total else 0.0
-            tabela.add_row(
-                nome,
-                str(agregado.chamadas),
-                f"{agregado.caracteres:,}",
-                f"{fatia:.0f}%",
-                f"[red]{agregado.erros}" if agregado.erros else "0",
-                f"{agregado.duracao_s:.1f}",
-            )
-        tabela.add_section()
-        tabela.add_row(
-            "[bold]TOTAL",
-            f"[bold]{len(self.tools)}",
-            f"[bold]{total:,}",
-            "",
-            f"[bold]{sum(t.erro for t in self.tools)}",
-            f"[bold]{sum(t.duracao_s for t in self.tools):.1f}",
-        )
-        return tabela
 
     def resumo_para_log(self) -> dict[str, Any]:
         return {

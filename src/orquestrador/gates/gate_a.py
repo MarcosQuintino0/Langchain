@@ -20,7 +20,7 @@ from pathlib import Path
 from orquestrador.config import Config
 from orquestrador.contratos import Inventario, Manifesto, Recurso, ResultadoGate, Violacao
 from orquestrador.ferramentas.scripts_qa import Validador
-from orquestrador.gates.parser import resultado_do_validador
+from orquestrador.gates.saidas import resultado_do_validador
 
 NOME = "gate_a"
 

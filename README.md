@@ -46,7 +46,8 @@ determinísticos descartam o que não presta. O LLM nunca é o verificador prim�
    pode morrer e ser reinstanciado do zero sem perda.
 2. **Loop de reparo envia apenas o delta:** `instrucao_fixa_do_estagio +
    artefato_atual + delta.violacoes`. Nunca o histórico das tentativas. Vive em
-   [`montagem.py`](src/orquestrador/montagem.py), num lugar só, para não escapar por descuido.
+   [`llm/montagem.py`](src/orquestrador/llm/montagem.py), num lugar só, para não
+   escapar por descuido.
 3. **Agentes são stateless entre unidades de trabalho.** Um recurso por vez,
    histórico zerado entre recursos.
 4. **Quem reprova é script; LLM só cria.** Nenhum LLM decide se a cobertura está
@@ -353,44 +354,57 @@ src/orquestrador/
   pipeline.py        a classe Pipeline e o _ciclo (o loop de reparo)
   config.py          carga e validação da configuração
   contratos.py       todos os modelos Pydantic
-  montagem.py        carga dos prompts e a regra do prompt de reparo
   simulacao.py       modelo falso dirigido por fixture + sandbox do --dry-run
   excecoes.py        FalhaDeGate, FalhaDeEstagio, ErroDeFerramenta, ErroDeConfiguracao
   raiz.py            resolução da raiz do projeto — único uso de Path(__file__)
-  textos.py          extrair_json tolerante (implementação única)
-  javascript.py      parser puro dos `export` de um módulo JS (sem I/O)
   llm/
     __init__.py
     cliente.py       cliente OpenRouter, seleção por estágio
     mensagens.py     uso de token, texto e tamanho de entrada
     estruturado.py   saída estruturada + mini-loop de reparo de schema
+    montagem.py      carga dos prompts e a regra do prompt de reparo
   observabilidade/
     __init__.py
     registro.py      log estruturado (JSONL) + console
-    telemetria.py    tokens e caracteres por estágio, recurso e tentativa
+    telemetria.py    agregação de tokens e caracteres por estágio, recurso, tentativa
+    tabelas.py       as tabelas Rich do resumo final
   agentes/
     __init__.py
     mapeador.py      agente ReAct + registro das tools
     executor.py      chamada estruturada, sem tools
     auditor.py       STUB, interface definida
+  analise_estatica/
+    __init__.py
+    exports_javascript.py    parser puro dos `export` de um módulo JS
+    tags_cypress.py          parser puro das tags @endpoint/@cat de um spec
+    extrator_de_superficie.py  acha os módulos compartilhados e calcula os imports
   ferramentas/
     __init__.py
     processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
     graphify.py      wrappers query/affected/reindex
     arquivos.py      ler/listar/buscar com confinamento de caminho
     scripts_qa.py    wrappers dos .mjs da skill
-    superficie.py    I/O da superfície do projeto: acha os módulos e calcula imports
+    json_externo.py  extrair_json tolerante de stdout de ferramenta (única impl.)
   gates/
     __init__.py
     codigos.py       catálogo dos códigos de violação QAORQ-
     gate_a.py        --so-manifesto + STUB do diff grafo×manifesto
     gate_b.py        prettier + eslint + validador + lacuna de cobertura
-    cobertura.py     QAORQ-030: categoria planejada que não virou teste
-    parser.py        JSON dos .mjs → ResultadoGate/Violacao
+    lacunas.py       QAORQ-030: categoria planejada que não virou teste
+    saidas.py        JSON dos .mjs → ResultadoGate/Violacao
 ```
 
-`javascript.py` fica na raiz do pacote, e não em `ferramentas/`, porque não fala com
-o mundo: entra texto, sai `ExportJs`. Quem faz o I/O é `ferramentas/superficie.py`.
+`analise_estatica/` responde "o que existe neste JavaScript" sem executá-lo, e é a
+razão de `exports_javascript.py` não morar em `ferramentas/`: entra texto, sai
+`ExportJs`. `ferramentas/` fica reservado ao adaptador de disco, de subprocesso e
+de CLI de terceiro.
+
+[`tests/test_estrutura_do_codigo.py`](tests/test_estrutura_do_codigo.py) **verifica
+esta árvore**: módulo de produção que não aparece aqui reprova, e linha aqui que
+não corresponde a arquivo também. Foi a omissão de dois módulos que fez um revisor
+externo procurar arquivo no lugar errado — a árvore é documentação executável, não
+enfeite. O mesmo arquivo fixa a lista fechada da raiz do pacote, a direção de
+dependência entre os subpacotes e a proibição de reexport em `__init__.py`.
 
 **Onde o Bloco 1 escreve.** O manifesto vai para `_support/cobertura.json`, dentro do
 diretório do recurso; os **schemas de entrada** vão para

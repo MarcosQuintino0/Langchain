@@ -27,6 +27,7 @@ from typing import Any
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
+from orquestrador.analise_estatica.extrator_de_superficie import extrair as extrair_superficie
 from orquestrador.config import Config
 from orquestrador.contratos import (
     Delta,
@@ -48,9 +49,8 @@ from orquestrador.excecoes import (
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
 from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS
 from orquestrador.ferramentas.scripts_qa import Cobertura
-from orquestrador.ferramentas.superficie import extrair as extrair_superficie
 from orquestrador.gates import gate_a, gate_b
-from orquestrador.gates.parser import resumo_da_cobertura
+from orquestrador.gates.saidas import resumo_da_cobertura
 from orquestrador.llm.cliente import criar_modelo
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria

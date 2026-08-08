@@ -6,6 +6,10 @@ Nada além disso. Sem histórico de tentativas: é esse corte que troca o custo
 quadrático por custo linear, e ele mora aqui, num lugar só, para não escapar por
 descuido em algum estágio.
 
+Mora em `llm/` porque o que ele produz é **entrada de modelo**: junto do cliente,
+da saída estruturada e da contagem de mensagens. Não conhece gate nem recurso — o
+`Delta` chega pronto, e este módulo só o renderiza.
+
 O **conteúdo** das instruções fixas é Fase 2; aqui só a carga do arquivo e a
 substituição de `{{chave}}`.
 """

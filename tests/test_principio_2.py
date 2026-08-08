@@ -4,7 +4,7 @@
 
 Este módulo existe para quebrar quando alguém, no futuro, resolver "dar mais
 contexto" concatenando o histórico das tentativas anteriores. Ele não olha o
-`montagem.py` de perto: espiona o que o **modelo efetivamente recebeu**, que é a
+`llm/montagem.py` de perto: espiona o que o **modelo efetivamente recebeu**, que é a
 única coisa que importa para o custo.
 
 Cobre os dois estágios de LLM: o mapeador (ReAct, com tools) e o executor

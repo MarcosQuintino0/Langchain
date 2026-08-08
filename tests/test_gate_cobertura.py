@@ -15,12 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from conftest import saida_de_processo
+from orquestrador.analise_estatica.tags_cypress import extrair_tags
 from orquestrador.contratos import Manifesto, Recurso, VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
-from orquestrador.gates import cobertura as gate_cobertura
+from orquestrador.gates import lacunas as gate_lacunas
 from orquestrador.gates.codigos import CODIGOS_DO_ORQUESTRADOR
-from orquestrador.javascript import extrair_tags
 
 MANIFESTO = Manifesto.model_validate(
     {
@@ -61,35 +60,42 @@ def recurso(config_falso, tmp_path: Path) -> Recurso:
     return Recurso(nome="pedidos", caminho_testes=caminho)
 
 
-def com_contadores(monkeypatch, lacunas: int, *, json_valido: bool = True) -> None:
+@pytest.fixture
+def com_contadores(monkeypatch, saida_de_processo):
     """Substitui o qa-cobertura.mjs: o veredito continua vindo do contador dele."""
-    corpo = json.dumps({"endpoints": 2, "esperadas": 3, "lacunas": lacunas}) if json_valido else ""
-    monkeypatch.setattr(
-        gate_cobertura.Cobertura,
-        "executar",
-        lambda *_a, **_k: saida_de_processo(stdout=corpo),
-    )
+
+    def aplicar(lacunas: int, *, json_valido: bool = True) -> None:
+        corpo = (
+            json.dumps({"endpoints": 2, "esperadas": 3, "lacunas": lacunas}) if json_valido else ""
+        )
+        monkeypatch.setattr(
+            gate_lacunas.Cobertura,
+            "executar",
+            lambda *_a, **_k: saida_de_processo(stdout=corpo),
+        )
+
+    return aplicar
 
 
 def escrever_spec(recurso: Recurso, conteudo: str) -> None:
     (recurso.caminho_testes / "crud.cy.js").write_text(conteudo, encoding="utf-8")
 
 
-def test_sem_lacuna_aprova(config_falso, recurso, monkeypatch):
-    com_contadores(monkeypatch, 0)
+def test_sem_lacuna_aprova(config_falso, recurso, com_contadores):
+    com_contadores(0)
     escrever_spec(recurso, SPEC_COMPLETO)
 
-    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado is not None
     assert resultado.aprovado is True
 
 
-def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, monkeypatch):
-    com_contadores(monkeypatch, 1)
+def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, com_contadores):
+    com_contadores(1)
     escrever_spec(recurso, SPEC_COM_LACUNA)
 
-    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.aprovado is False
     assert resultado.codigos == ["QAORQ-030"]
@@ -99,14 +105,14 @@ def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, monkeypatch)
     assert "@cat CAT-07" in mensagem
 
 
-def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, monkeypatch):
+def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, com_contadores):
     # O script diz 2, a leitura local acha 1. Nomear um par errado faria o executor
     # gastar tentativa consertando o que não estava quebrado — então o detalhe cai e
     # sobra o número, que é do script.
-    com_contadores(monkeypatch, 2)
+    com_contadores(2)
     escrever_spec(recurso, SPEC_COM_LACUNA)
 
-    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.aprovado is False
     assert len(resultado.violacoes) == 1
@@ -114,30 +120,30 @@ def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, monkeypat
     assert "CAT-07" not in resultado.violacoes[0].mensagem
 
 
-def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(config_falso, recurso, monkeypatch):
+def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(config_falso, recurso, com_contadores):
     # A forma data-driven da skill resolve a tag em tempo de execução; este parser
     # não. Sem isto, um `it` coberto por template pareceria lacuna.
-    com_contadores(monkeypatch, 1)
+    com_contadores(1)
     escrever_spec(
         recurso,
         SPEC_COM_LACUNA + "\n// @endpoint POST /pedidos @cat ${cenario.cat}\n",
     )
 
-    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.aprovado is False
     assert "1 categoria(s)" in resultado.violacoes[0].mensagem
 
 
-def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, monkeypatch):
+def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, com_contadores):
     # O script sai 0 mesmo sem gerar relatório, então JSON ausente é o único sinal.
     # Aprovar aqui era declarar cobertura sem tê-la medido — é o falso sucesso que
     # este gate existe para fechar. Reprovar seria pior ainda: o executor gastaria
     # tentativa reescrevendo specs por causa de um script que não rodou.
-    com_contadores(monkeypatch, 0, json_valido=False)
+    com_contadores(0, json_valido=False)
     escrever_spec(recurso, SPEC_COMPLETO)
 
-    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
     assert resultado.aprovado is False
@@ -154,12 +160,12 @@ def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, monkeypatch)
 def test_qaorq_030_esta_no_catalogo():
     # O código era emitido sem estar catalogado, e catálogo incompleto é a forma
     # mais barata de um código virar folclore.
-    assert gate_cobertura.CODIGO in CODIGOS_DO_ORQUESTRADOR
+    assert gate_lacunas.CODIGO in CODIGOS_DO_ORQUESTRADOR
 
 
-def test_desligado_na_configuracao_nao_roda(config_falso, recurso, monkeypatch):
+def test_desligado_na_configuracao_nao_roda(config_falso, recurso):
     config_falso.gates["b"].exigir_cobertura = False
-    assert gate_cobertura.executar(config_falso, recurso, gate="gate_b") is None
+    assert gate_lacunas.executar(config_falso, recurso, gate="gate_b") is None
 
 
 # ---------------------------------------------------------------------------

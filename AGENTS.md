@@ -54,25 +54,40 @@ Escolha o diretório pelo **único motivo dominante de mudança**:
 | `ferramentas/` | adaptador de I/O externo: disco, subprocesso, CLI de terceiro | não contém regra de domínio |
 | `llm/` | cliente, saída estruturada e montagem de prompt | não conhece gate nem recurso |
 | `observabilidade/` | eventos e métricas | nunca decide fluxo |
-| ★ `analise_estatica/` | lê código-fonte sem executar | não faz I/O de rede nem subprocesso |
+| `analise_estatica/` | lê código-fonte sem executar | não abre subprocesso nem fala com a rede |
 | ★ `dominio/` | contratos e regras puras | sem I/O, sem `Path`, sem subprocess |
 | ★ `aplicacao/` | coordena estágios e persistência | não parseia saída de ferramenta |
-| raiz do pacote | **lista fechada**: `cli.py`, `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py` | não recebe arquivo novo |
+| raiz do pacote | **lista fechada**: `cli.py`, `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py`, e — até a Etapa 6 — `contratos.py`, `pipeline.py`, `simulacao.py` | não recebe arquivo novo |
 
-★ ainda não existem — são as Etapas 3 e 6 de
+★ ainda não existem — são a Etapa 6 de
 [`docs/plano-de-execucao.md`](docs/plano-de-execucao.md). Não as crie por conta
-própria numa tarefa que não seja essa. Até lá, o código que pertenceria a elas fica
-junto do vizinho que já existe: análise estática em `javascript.py` e
-`ferramentas/superficie.py`, coordenação em `pipeline.py`, contrato puro em
-`contratos.py`.
+própria numa tarefa que não seja essa. Até lá, coordenação fica em `pipeline.py` e
+contrato puro em `contratos.py`, na raiz.
 
 **Nunca crie `utils.py`, `helpers.py`, `common.py`, `models.py` ou
 `constantes.py`.** Nome que não diz o motivo de mudança vira depósito.
 
 **Se um código couber em dois donos, a fronteira não está clara**: extraia a parte
-pura para o dono inferior e deixe só o I/O no de cima. É o que `javascript.py`
-(puro) e `ferramentas/superficie.py` (I/O) já fazem — use os dois como referência
-antes de inventar um arranjo novo.
+pura para o dono inferior e deixe só o I/O no de cima. O par de referência é
+`analise_estatica/exports_javascript.py` — entra texto, sai `ExportJs`, sem
+dependência do projeto — e `ferramentas/scripts_qa.py`, que invoca `.mjs` por
+subprocesso e devolve a saída crua para outro módulo interpretar. Use os dois antes
+de inventar um arranjo novo.
+
+`analise_estatica/` lê arquivo do disco, e isso não a torna `ferramentas/`. A
+fronteira entre as duas não é "toca em `Path`", é **o que muda o módulo**:
+`ferramentas/` acompanha a CLI, o código de retorno e o formato de saída de uma
+ferramenta de terceiro; `analise_estatica/` acompanha a sintaxe da linguagem e a
+convenção de marcação da skill.
+
+**Estas regras têm teste.**
+[`tests/test_estrutura_do_codigo.py`](tests/test_estrutura_do_codigo.py) verifica
+por AST a lista fechada da raiz, a proibição de reexport em `__init__.py`, a
+honestidade de cada `__all__`, a direção de dependência da tabela acima, o catálogo
+dos códigos `QAORQ-`, a correspondência entre a árvore do `README.md` e os módulos
+reais, e a proibição de `from conftest import`. Falha ali é para ser resolvida
+movendo o código — ou, se a decisão de arquitetura mudou mesmo, alterando **esta
+tabela e o teste na mesma mudança**, nunca só o teste.
 
 Funções puras recebem dados e devolvem dados; o I/O fica explícito na borda. Falha
 de ferramenta ou de provedor é **erro operacional**, não violação para o LLM
@@ -119,7 +134,8 @@ Mudança de prompt é tarefa própria, com diff próprio.
 
 ## Docstring e comentário
 
-O padrão real do projeto, visível em `raiz.py`, `montagem.py` e `javascript.py`:
+O padrão real do projeto, visível em `raiz.py`, `llm/montagem.py` e
+`analise_estatica/exports_javascript.py`:
 
 - **Docstring de módulo explica a fronteira e a invariante** — o que este módulo é
   dono, o que ele deliberadamente não faz, e por quê. Não é um índice das funções.

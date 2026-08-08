@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from orquestrador.javascript import (
+from orquestrador.analise_estatica.exports_javascript import (
     MARCA_DE_TRUNCAMENTO,
     MAX_DECLARACAO,
     extrair_exports,

@@ -15,15 +15,14 @@ import json
 
 import pytest
 
-from conftest import saida_de_processo
 from orquestrador.contratos import VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
-from orquestrador.gates.parser import (
+from orquestrador.ferramentas.json_externo import extrair_json
+from orquestrador.gates.saidas import (
     resultado_do_validador,
     resumo_da_cobertura,
     violacoes_do_eslint,
 )
-from orquestrador.textos import extrair_json
 
 APROVADO = json.dumps(
     {
@@ -59,14 +58,14 @@ REPROVADO = json.dumps(
 )
 
 
-def test_aprovacao_vem_pelo_stdout():
+def test_aprovacao_vem_pelo_stdout(saida_de_processo):
     resultado = resultado_do_validador(saida_de_processo(codigo=0, stdout=APROVADO), gate="gate_a")
     assert resultado.aprovado is True
     assert resultado.violacoes == []
     assert [aviso.codigo for aviso in resultado.avisos] == ["QAAPI-035"]
 
 
-def test_reprovacao_vem_pelo_stderr():
+def test_reprovacao_vem_pelo_stderr(saida_de_processo):
     resultado = resultado_do_validador(
         saida_de_processo(codigo=1, stdout="", stderr=REPROVADO), gate="gate_a"
     )
@@ -78,7 +77,7 @@ def test_reprovacao_vem_pelo_stderr():
     assert "CAT-05" in primeira.mensagem
 
 
-def test_saida_bruta_guarda_os_dois_fluxos():
+def test_saida_bruta_guarda_os_dois_fluxos(saida_de_processo):
     resultado = resultado_do_validador(
         saida_de_processo(codigo=1, stdout="ruído", stderr=REPROVADO), gate="gate_a"
     )
@@ -95,7 +94,7 @@ def erro_de_ferramenta(resultado) -> bool:
     )
 
 
-def test_exit_2_e_erro_da_ferramenta_nao_delta():
+def test_exit_2_e_erro_da_ferramenta_nao_delta(saida_de_processo):
     # Exit 2 é erro de uso NOSSO: o artefato não foi julgado. Mandá-lo ao modelo
     # como violação gastaria tentativa num script que sequer chegou a rodar.
     resultado = resultado_do_validador(
@@ -107,7 +106,7 @@ def test_exit_2_e_erro_da_ferramenta_nao_delta():
         resultado.exigir_veredito()
 
 
-def test_saida_sem_json_e_erro_da_ferramenta():
+def test_saida_sem_json_e_erro_da_ferramenta(saida_de_processo):
     resultado = resultado_do_validador(
         saida_de_processo(codigo=1, stderr="SUITE INVALIDA: ..."), gate="gate_b"
     )
@@ -122,14 +121,16 @@ def test_saida_sem_json_e_erro_da_ferramenta():
         (3, APROVADO),  # código fora do contrato
     ],
 )
-def test_exit_incompativel_com_valid_e_quebra_de_contrato(codigo: int, corpo: str):
+def test_exit_incompativel_com_valid_e_quebra_de_contrato(
+    saida_de_processo, codigo: int, corpo: str
+):
     resultado = resultado_do_validador(
         saida_de_processo(codigo=codigo, stdout=corpo), gate="gate_a"
     )
     assert erro_de_ferramenta(resultado)
 
 
-def test_valid_true_com_erros_listados_e_quebra_de_contrato():
+def test_valid_true_com_erros_listados_e_quebra_de_contrato(saida_de_processo):
     # Não dá para escolher em quem acreditar, e escolher o `valid` aprovaria uma
     # suíte que o próprio script acabou de descrever como quebrada.
     corpo = json.dumps({"valid": True, "errors": [{"code": "QAAPI-021", "message": "x"}]})
@@ -137,7 +138,7 @@ def test_valid_true_com_erros_listados_e_quebra_de_contrato():
     assert erro_de_ferramenta(resultado)
 
 
-def test_reprovacao_sem_erro_descrito_continua_reprovando():
+def test_reprovacao_sem_erro_descrito_continua_reprovando(saida_de_processo):
     # Reprovar sem conseguir dizer o motivo é reprovação, nunca aprovação por
     # ausência de violação.
     corpo = json.dumps({"valid": False, "errors": []})
@@ -150,7 +151,7 @@ def test_extrair_json_tolera_ruido_em_volta():
     assert extrair_json('aviso\n{"valid": true}\n') == {"valid": True}
 
 
-def test_resumo_da_cobertura_vazio_quando_nao_ha_json():
+def test_resumo_da_cobertura_vazio_quando_nao_ha_json(saida_de_processo):
     # qa-cobertura.mjs sai 0 mesmo quando falha: a ausência do JSON é o único sinal.
     assert resumo_da_cobertura(saida_de_processo(codigo=0, stderr="falha ao gerar")) == {}
     contadores = resumo_da_cobertura(

@@ -36,16 +36,16 @@ from orquestrador.contratos import (
 from orquestrador.excecoes import ErroDeFerramenta, FalhaDeEstagio
 from orquestrador.ferramentas import arquivos as fa
 from orquestrador.ferramentas.graphify import Graphify
+from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.estruturado import violacoes_de_validacao
 from orquestrador.llm.mensagens import texto_da_mensagem, uso_das_mensagens
-from orquestrador.montagem import (
+from orquestrador.llm.montagem import (
     carregar_prompt,
     esquema_json,
     montar_entrada_inicial,
     montar_entrada_reparo,
 )
 from orquestrador.observabilidade.telemetria import Telemetria
-from orquestrador.textos import extrair_json
 
 ESTAGIO = "mapeador"
 

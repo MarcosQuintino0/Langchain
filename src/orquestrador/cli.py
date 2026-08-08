@@ -20,6 +20,7 @@ from rich.markup import escape
 from orquestrador.config import Config
 from orquestrador.contratos import Recurso
 from orquestrador.excecoes import ErroDeConfiguracao, ErroDeFerramenta
+from orquestrador.observabilidade import tabelas
 from orquestrador.observabilidade.registro import (
     Registro,
     configurar_console,
@@ -243,12 +244,12 @@ def main(argv: list[str] | None = None) -> int:
             return ERRO_DE_USO
 
         registro.titulo("Telemetria")
-        console.print(pipeline.telemetria.tabela_por_estagio())
-        console.print(pipeline.telemetria.tabela_por_recurso())
-        console.print(pipeline.telemetria.tabela_entrada_por_tentativa())
+        console.print(tabelas.tabela_por_estagio(pipeline.telemetria))
+        console.print(tabelas.tabela_por_recurso(pipeline.telemetria))
+        console.print(tabelas.tabela_entrada_por_tentativa(pipeline.telemetria))
         # Só o mapeador tem tools; sem elas a tabela seria uma moldura vazia.
         if pipeline.telemetria.tools:
-            console.print(pipeline.telemetria.tabela_de_tools())
+            console.print(tabelas.tabela_de_tools(pipeline.telemetria))
         registro.evento("telemetria", **pipeline.telemetria.resumo_para_log())
 
         registro.titulo("Resumo")

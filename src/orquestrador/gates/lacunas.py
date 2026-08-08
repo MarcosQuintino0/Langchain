@@ -1,5 +1,10 @@
 """Gate de lacuna — categoria planejada que não virou teste.
 
+O módulo nomeia o que produz: **lacunas**. Chamava-se `cobertura.py`, colidindo
+conceitualmente com a classe `Cobertura` de `ferramentas/scripts_qa.py` — que é o
+adaptador do script, não o gate. Dois nomes iguais para papéis diferentes no mesmo
+fluxo mandam quem lê conferir qual dos dois está em jogo a cada import.
+
 O buraco que este módulo fecha
 ------------------------------
 O `validar-suite-gerada.mjs` prova forma: manifesto bem contabilizado, specs-base
@@ -40,11 +45,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from orquestrador.analise_estatica.tags_cypress import extrair_tags
 from orquestrador.config import Config
 from orquestrador.contratos import Manifesto, Recurso, ResultadoGate, Violacao
 from orquestrador.ferramentas.scripts_qa import Cobertura
-from orquestrador.gates.parser import resumo_da_cobertura
-from orquestrador.javascript import extrair_tags
+from orquestrador.gates.saidas import resumo_da_cobertura
 
 CODIGO = "QAORQ-030"
 

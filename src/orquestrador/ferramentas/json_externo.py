@@ -1,7 +1,12 @@
 """Leitura tolerante de JSON vindo de fora — de um LLM ou de um script `.mjs`.
 
-Implementação **única**: antes havia duas, uma em `modelos.py` e outra em
-`gates/parser.py`, com assinaturas diferentes fazendo a mesma coisa.
+Implementação **única**: antes havia duas, uma em `modelos.py` e outra no parser
+dos gates, com assinaturas diferentes fazendo a mesma coisa.
+
+O nome diz o que o módulo é dono: recuperar JSON de **stdout de ferramenta
+externa** e de resposta de modelo. Ele não trata texto genérico — não normaliza,
+não formata, não corta. Chamava-se `textos.py`, e esse nome convidava a virar
+depósito de qualquer manipulação de string do projeto.
 
 Retorna sempre `dict[str, Any]`, nunca `Any`. Todos os consumidores esperam um
 objeto — o `--json` do validador emite um objeto, e todo contrato de saída dos

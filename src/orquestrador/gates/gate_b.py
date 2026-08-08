@@ -17,8 +17,8 @@ from orquestrador.contratos import Manifesto, Recurso, ResultadoGate, Violacao
 from orquestrador.excecoes import ExecutavelAusente
 from orquestrador.ferramentas.processo import executar as rodar_processo
 from orquestrador.ferramentas.scripts_qa import Validador
-from orquestrador.gates import cobertura as gate_cobertura
-from orquestrador.gates.parser import resultado_do_validador, violacoes_do_eslint
+from orquestrador.gates import lacunas as gate_lacunas
+from orquestrador.gates.saidas import resultado_do_validador, violacoes_do_eslint
 
 NOME = "gate_b"
 
@@ -38,8 +38,8 @@ def executar(
         _formatador(config, "eslint", "QAORQ-021", config.execucao.eslint, recurso),
         _validador(config, recurso),
         # A terceira checagem responde por "planejei e não entreguei", que o
-        # validador da skill não cobre. Ver gates/cobertura.py.
-        gate_cobertura.executar(config, recurso, manifesto=manifesto, gate=NOME, out=out_cobertura),
+        # validador da skill não cobre. Ver gates/lacunas.py.
+        gate_lacunas.executar(config, recurso, manifesto=manifesto, gate=NOME, out=out_cobertura),
     ]
     combinado = ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
     # Checagem que não rodou não vira delta: `exigir_veredito` interrompe o recurso

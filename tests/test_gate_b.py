@@ -11,11 +11,10 @@ import sys
 
 import pytest
 
-from conftest import saida_de_processo
 from orquestrador.contratos import Recurso, VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
-from orquestrador.gates import cobertura as gate_cobertura
 from orquestrador.gates import gate_b
+from orquestrador.gates import lacunas as gate_lacunas
 
 
 def recurso_de(config) -> Recurso:
@@ -84,39 +83,52 @@ def test_formatador_ausente_e_exigido_e_erro_da_ferramenta(config_falso):
     assert "eslint" in resultado.motivo
 
 
-def com_validador(monkeypatch, *, valido: bool, erros: list[dict] | None = None) -> None:
-    corpo = json.dumps({"valid": valido, "errors": erros or []})
-    monkeypatch.setattr(
-        gate_b.Validador,
-        "executar",
-        lambda *_a, **_k: saida_de_processo(codigo=0 if valido else 1, stdout=corpo),
-    )
+@pytest.fixture
+def com_validador(monkeypatch, saida_de_processo):
+    """Substitui o `validar-suite-gerada.mjs` por um veredito fixo."""
+
+    def aplicar(*, valido: bool, erros: list[dict] | None = None) -> None:
+        corpo = json.dumps({"valid": valido, "errors": erros or []})
+        monkeypatch.setattr(
+            gate_b.Validador,
+            "executar",
+            lambda *_a, **_k: saida_de_processo(codigo=0 if valido else 1, stdout=corpo),
+        )
+
+    return aplicar
 
 
-def com_cobertura(monkeypatch, corpo: str) -> None:
-    monkeypatch.setattr(
-        gate_cobertura.Cobertura, "executar", lambda *_a, **_k: saida_de_processo(stdout=corpo)
-    )
+@pytest.fixture
+def com_cobertura(monkeypatch, saida_de_processo):
+    """Substitui o `qa-cobertura.mjs` pelo stdout dado."""
+
+    def aplicar(corpo: str) -> None:
+        monkeypatch.setattr(
+            gate_lacunas.Cobertura, "executar", lambda *_a, **_k: saida_de_processo(stdout=corpo)
+        )
+
+    return aplicar
 
 
-def test_checagem_que_nao_rodou_interrompe_em_vez_de_virar_delta(config_falso, monkeypatch):
+def test_checagem_que_nao_rodou_interrompe_em_vez_de_virar_delta(
+    config_falso, com_validador, com_cobertura
+):
     # O validador aprovou, mas a lacuna ficou sem medida. Aprovar aqui declararia
     # cobertura que ninguém contou; reprovar mandaria o executor reescrever specs
     # por causa de um script que não rodou.
-    com_validador(monkeypatch, valido=True)
-    com_cobertura(monkeypatch, "falha ao gerar o relatório")
+    com_validador(valido=True)
+    com_cobertura("falha ao gerar o relatório")
 
     with pytest.raises(ErroDeFerramenta, match="qa-cobertura"):
         gate_b.executar(config_falso, recurso_de(config_falso))
 
 
-def test_reprovacao_normal_atravessa_a_uniao(config_falso, monkeypatch):
+def test_reprovacao_normal_atravessa_a_uniao(config_falso, com_validador, com_cobertura):
     com_validador(
-        monkeypatch,
         valido=False,
         erros=[{"code": "QAAPI-025", "message": "campo sem teste"}],
     )
-    com_cobertura(monkeypatch, json.dumps({"lacunas": 0}))
+    com_cobertura(json.dumps({"lacunas": 0}))
 
     resultado = gate_b.executar(config_falso, recurso_de(config_falso))
 

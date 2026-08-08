@@ -2,6 +2,11 @@
 
 Funções puras: recebem a saída de processo já capturada, não invocam nada. É o
 que torna o parsing testável sem Node instalado.
+
+O nome nomeia a entrada, não a técnica: são as **saídas dos validadores externos**
+que este módulo interpreta. Chamava-se `parser.py`, que não diz de quê — e num
+pacote onde outros três módulos também parseiam alguma coisa, esse nome mandava
+quem procurava abrir o arquivo para descobrir.
 """
 
 from __future__ import annotations
@@ -10,8 +15,8 @@ import json
 from typing import Any
 
 from orquestrador.contratos import ResultadoGate, Violacao
+from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.ferramentas.processo import SaidaProcesso
-from orquestrador.textos import extrair_json
 
 __all__ = [
     "resultado_do_validador",

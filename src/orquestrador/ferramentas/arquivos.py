@@ -97,7 +97,8 @@ def relativo_a(alvo: Path, base: Path) -> str:
     Só desce: quando `alvo` está **fora** de `base`, devolve o caminho absoluto em
     vez de subir com `../`. Para subir — o caso do import de um módulo
     compartilhado, que nunca está abaixo do recurso — use
-    `ferramentas.superficie.caminho_de_import`, que usa `os.path.relpath`.
+    `analise_estatica.extrator_de_superficie.caminho_de_import`, que usa
+    `os.path.relpath`.
     """
     try:
         return alvo.resolve().relative_to(base.resolve()).as_posix()

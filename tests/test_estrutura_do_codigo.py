@@ -1,0 +1,465 @@
+"""As invariantes de organização do pacote, verificadas por AST.
+
+Por que este arquivo existe
+---------------------------
+A tabela "Onde colocar código novo" do `AGENTS.md` e a árvore de módulos do
+`README.md` descrevem uma estrutura. Descrição não sustenta estrutura: um agente
+que lê o `AGENTS.md` pela metade acrescenta um arquivo na raiz do pacote, o
+revisor não repara, e em três meses a raiz voltou a ter doze arquivos sem dono
+declarado. Foi exatamente assim que `parser.py`, `textos.py` e `javascript.py`
+chegaram onde estavam.
+
+Cada checagem aqui é a forma executável de uma regra escrita naqueles dois
+documentos. Se uma delas reprovar, a resposta é **mover o código ou atualizar a
+regra**, nunca afrouxar a checagem.
+
+Escrevendo mensagem de falha
+----------------------------
+Quem lê estas falhas é um agente daqui a seis meses, sem o contexto de hoje.
+Então toda mensagem diz **o que fazer**, não só o que está errado: qual diretório
+recebe o arquivo, qual documento atualizar, qual import trocar.
+
+Por que AST e não regex
+-----------------------
+Um `grep` por `import` acha a palavra em docstring, em comentário e em string de
+mensagem de erro — este módulo cita `from conftest import` na própria docstring, e
+uma checagem por texto reprovaria a si mesma. O que interessa é a estrutura do
+programa, e é ela que o `ast` devolve.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
+
+import pytest
+
+from orquestrador.gates.codigos import CODIGOS_DO_ORQUESTRADOR
+
+# `Path(__file__)` aqui não contraria a regra do `raiz.py`: aquela regra protege o
+# **pacote**, que não pode calcular a raiz do projeto por conta própria. Este
+# módulo precisa da árvore de fontes ao lado dele, não da raiz configurável — que
+# `ORQUESTRADOR_RAIZ` pode apontar para outro lugar justamente quando o pacote é
+# instalado fora da árvore.
+DIR_TESTES = Path(__file__).resolve().parent
+RAIZ_DO_REPOSITORIO = DIR_TESTES.parent
+PACOTE = RAIZ_DO_REPOSITORIO / "src" / "orquestrador"
+README = RAIZ_DO_REPOSITORIO / "README.md"
+
+# A raiz do pacote é lista fechada: arquivo novo aqui reprova, e é para reprovar.
+# Escolher diretório é escolher o motivo dominante de mudança — a tabela do
+# `AGENTS.md` diz qual. A raiz não é "onde ainda não decidi".
+RAIZ_PERMITIDA = frozenset(
+    {
+        "__init__.py",
+        "__main__.py",
+        "cli.py",
+        "config.py",
+        "contratos.py",
+        "excecoes.py",
+        "pipeline.py",
+        "raiz.py",
+        "simulacao.py",
+    }
+)
+
+# Estes três saem na Etapa 6 de `docs/plano-de-execucao.md`: `contratos.py` vira
+# `dominio/`, `pipeline.py` e `simulacao.py` viram `aplicacao/`. Quando isso
+# acontecer, remova-os de `RAIZ_PERMITIDA` — a lista só encolhe.
+SAEM_NA_ETAPA_6 = frozenset({"contratos.py", "pipeline.py", "simulacao.py"})
+
+# Direção de dependência. A chave é o pacote; o valor, os pacotes que ele não pode
+# importar. Seta ao contrário não quebra teste nenhum hoje — ela só transforma
+# dois módulos independentes num par que precisa ser lido junto para sempre.
+DIRECAO_PROIBIDA: dict[str, frozenset[str]] = {
+    # Lê código-fonte e devolve dado. Se precisasse de gate ou de agente, não
+    # seria análise: seria decisão.
+    "analise_estatica": frozenset({"agentes", "gates", "pipeline", "cli"}),
+    # Adaptador de I/O externo. Quem decide o que fazer com a saída é o chamador.
+    "ferramentas": frozenset({"agentes", "gates"}),
+    # Registra o que aconteceu; nunca decide fluxo.
+    "observabilidade": frozenset({"agentes", "gates", "pipeline"}),
+}
+
+CODIGO_QAORQ = re.compile(r"QAORQ-\d{3}")
+
+
+# ---------------------------------------------------------------------------
+# Leitura
+# ---------------------------------------------------------------------------
+
+
+def modulos_de_producao() -> list[Path]:
+    """Todo `.py` sob `src/orquestrador/`, em ordem estável."""
+    return sorted(PACOTE.rglob("*.py"))
+
+
+def caminho_no_pacote(arquivo: Path) -> str:
+    """`llm/montagem.py` — o nome pelo qual a documentação chama o módulo."""
+    return arquivo.relative_to(PACOTE).as_posix()
+
+
+def arvore(arquivo: Path) -> ast.Module:
+    return ast.parse(arquivo.read_text(encoding="utf-8"), filename=str(arquivo))
+
+
+def nomes_definidos(modulo: ast.Module) -> set[str]:
+    """Nomes que o módulo **define** no topo — importar não é definir."""
+    definidos: set[str] = set()
+    for no in modulo.body:
+        if isinstance(no, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            definidos.add(no.name)
+        elif isinstance(no, ast.Assign):
+            for alvo in no.targets:
+                if isinstance(alvo, ast.Name):
+                    definidos.add(alvo.id)
+        elif isinstance(no, ast.AnnAssign) and isinstance(no.target, ast.Name):
+            definidos.add(no.target.id)
+    return definidos
+
+
+def literal_de_all(modulo: ast.Module) -> list[str] | None:
+    """Conteúdo de `__all__`, ou `None` se o módulo não declara um."""
+    for no in modulo.body:
+        alvos = no.targets if isinstance(no, ast.Assign) else []
+        if not any(isinstance(alvo, ast.Name) and alvo.id == "__all__" for alvo in alvos):
+            continue
+        valor = no.value
+        if isinstance(valor, ast.List | ast.Tuple):
+            return [
+                item.value
+                for item in valor.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            ]
+    return None
+
+
+def pacotes_importados(modulo: ast.Module) -> set[str]:
+    """Subpacotes de `orquestrador` que este módulo importa, em qualquer nível.
+
+    `ast.walk` em vez de `modulo.body`: import dentro de função ou sob
+    `TYPE_CHECKING` acopla igual, e esconder a seta lá dentro é o caminho mais
+    curto para o ciclo que ninguém vê.
+    """
+    achados: set[str] = set()
+    for no in ast.walk(modulo):
+        if isinstance(no, ast.ImportFrom) and no.module:
+            partes = no.module.split(".")
+        elif isinstance(no, ast.Import):
+            for alias in no.names:
+                partes = alias.name.split(".")
+                if len(partes) >= 2 and partes[0] == "orquestrador":
+                    achados.add(partes[1])
+            continue
+        else:
+            continue
+        if len(partes) >= 2 and partes[0] == "orquestrador":
+            achados.add(partes[1])
+    return achados
+
+
+# ---------------------------------------------------------------------------
+# 1 — a raiz do pacote é lista fechada
+# ---------------------------------------------------------------------------
+
+
+def test_raiz_do_pacote_e_lista_fechada():
+    presentes = {arquivo.name for arquivo in PACOTE.glob("*.py")}
+
+    intrusos = sorted(presentes - RAIZ_PERMITIDA)
+    assert not intrusos, (
+        f"arquivo(s) novo(s) na raiz de src/orquestrador/: {intrusos}.\n"
+        "A raiz é lista fechada — ela não recebe arquivo novo. Escolha o diretório "
+        "pelo motivo dominante de mudança, usando a tabela 'Onde colocar código "
+        "novo' do AGENTS.md:\n"
+        "  agentes/          monta e invoca um criador LLM\n"
+        "  gates/            reprova determinística, sem LLM\n"
+        "  ferramentas/      adaptador de disco, subprocesso e CLI externa\n"
+        "  analise_estatica/ lê código-fonte sem executar\n"
+        "  llm/              cliente, saída estruturada e montagem de prompt\n"
+        "  observabilidade/  eventos e métricas\n"
+        "Se o arquivo realmente pertence à raiz, a decisão é de arquitetura: "
+        "atualize a tabela do AGENTS.md, a árvore do README.md e RAIZ_PERMITIDA "
+        "aqui, na mesma mudança."
+    )
+
+    sumidos = sorted(RAIZ_PERMITIDA - presentes)
+    assert not sumidos, (
+        f"RAIZ_PERMITIDA lista arquivo(s) que não existem mais: {sumidos}.\n"
+        "Se você acabou de movê-los para um subpacote, remova-os de RAIZ_PERMITIDA "
+        "(a lista só encolhe) e atualize a árvore do README.md."
+    )
+
+
+def test_a_raiz_ainda_carrega_o_que_sai_na_etapa_6():
+    """Lembrete executável: a lista fechada de hoje não é a de destino.
+
+    `contratos.py` vira `dominio/`; `pipeline.py` e `simulacao.py` viram
+    `aplicacao/`. Enquanto estiverem aqui, `RAIZ_PERMITIDA` os tolera — e o dia em
+    que a Etapa 6 acontecer, é este teste que avisa para encolher a lista.
+    """
+    presentes = {arquivo.name for arquivo in PACOTE.glob("*.py")}
+    pendentes = sorted(SAEM_NA_ETAPA_6 & presentes)
+    resolvidos = sorted(SAEM_NA_ETAPA_6 - presentes)
+
+    assert not resolvidos or not pendentes, (
+        f"a Etapa 6 moveu {resolvidos} mas deixou {pendentes} na raiz.\n"
+        "Termine o movimento ou ajuste SAEM_NA_ETAPA_6 e RAIZ_PERMITIDA para "
+        "refletir a decisão que foi realmente tomada."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2 — `__init__.py` não reexporta
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "arquivo", sorted(PACOTE.rglob("__init__.py")), ids=lambda p: caminho_no_pacote(p)
+)
+def test_init_nao_reexporta_nome_importado(arquivo: Path):
+    modulo = arvore(arquivo)
+    nome = caminho_no_pacote(arquivo)
+
+    importados = [
+        no
+        for no in ast.walk(modulo)
+        if isinstance(no, ast.Import | ast.ImportFrom)
+        and not (isinstance(no, ast.ImportFrom) and no.module == "__future__")
+    ]
+    assert not importados, (
+        f"{nome} importa nome de outro módulo (linha(s) "
+        f"{[no.lineno for no in importados]}).\n"
+        "Um `__init__.py` que reexporta cria uma segunda rota de import para o "
+        "mesmo símbolo, e com duas rotas some a resposta para 'quem é o dono "
+        "disto' — além de fazer `import orquestrador.gates` puxar todos os gates "
+        "só para ler um código de violação.\n"
+        "O que fazer: apague o import daqui e importe do módulo que define o "
+        "símbolo (`from orquestrador.gates.saidas import ...`, não "
+        "`from orquestrador.gates import ...`)."
+    )
+
+    assert literal_de_all(modulo) is None, (
+        f"{nome} declara __all__.\n"
+        "Num `__init__.py` isso só serve para reexportar. O pacote é um diretório, "
+        "não uma fachada: deixe só a docstring que explica a fronteira e, no "
+        "máximo, uma constante própria do pacote."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3 — `__all__` não promete o que o módulo não define
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("arquivo", modulos_de_producao(), ids=lambda p: caminho_no_pacote(p))
+def test_all_so_lista_simbolo_que_o_modulo_define(arquivo: Path):
+    modulo = arvore(arquivo)
+    declarados = literal_de_all(modulo)
+    if declarados is None:
+        return
+
+    falsos = sorted(set(declarados) - nomes_definidos(modulo))
+    assert not falsos, (
+        f"{caminho_no_pacote(arquivo)} declara em __all__ símbolo(s) que não "
+        f"define: {falsos}.\n"
+        "Um `__all__` que lista nome importado faz este módulo parecer o dono de "
+        "algo que mora em outro lugar — é assim que uma busca por 'quem define X' "
+        "para no arquivo errado.\n"
+        "O que fazer: tire o nome do __all__ e deixe quem precisa dele importar do "
+        "módulo que o define. Se ele realmente devia nascer aqui, mova a definição."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4 — direção de dependência
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "arquivo",
+    [
+        arquivo
+        for arquivo in modulos_de_producao()
+        if arquivo.relative_to(PACOTE).parts[0] in DIRECAO_PROIBIDA
+    ],
+    ids=lambda p: caminho_no_pacote(p),
+)
+def test_direcao_de_dependencia(arquivo: Path):
+    pacote = arquivo.relative_to(PACOTE).parts[0]
+    proibidos = DIRECAO_PROIBIDA[pacote]
+
+    violados = sorted(pacotes_importados(arvore(arquivo)) & proibidos)
+    assert not violados, (
+        f"{caminho_no_pacote(arquivo)} importa {violados}, e `{pacote}/` está "
+        f"proibido de depender de {sorted(proibidos)}.\n"
+        "A seta aponta para baixo: quem decide (gates, agentes, pipeline) conhece "
+        "quem executa (ferramentas, análise estática, observabilidade), nunca o "
+        "contrário. Invertida, ela impede testar a camada de baixo sozinha e "
+        "prepara o ciclo de import.\n"
+        "O que fazer: passe o dado pronto como argumento em vez de importar quem "
+        "o produz, ou mova a parte que precisa da decisão para o chamador. Se o "
+        "acoplamento for mesmo necessário, é mudança de arquitetura: atualize "
+        "DIRECAO_PROIBIDA e a tabela do AGENTS.md junto."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5 — todo código QAORQ vem do catálogo
+# ---------------------------------------------------------------------------
+
+
+def test_todo_codigo_qaorq_esta_catalogado():
+    fora: dict[str, set[str]] = {}
+    for arquivo in modulos_de_producao():
+        if caminho_no_pacote(arquivo) == "gates/codigos.py":
+            continue
+        achados = set(CODIGO_QAORQ.findall(arquivo.read_text(encoding="utf-8")))
+        desconhecidos = achados - set(CODIGOS_DO_ORQUESTRADOR)
+        if desconhecidos:
+            fora[caminho_no_pacote(arquivo)] = desconhecidos
+
+    assert not fora, (
+        f"código(s) QAORQ- emitido(s) sem estar no catálogo: {fora}.\n"
+        "Código não catalogado vira folclore: ele aparece num delta, alguém procura "
+        "o significado, não acha, e passa a adivinhar pelo contexto.\n"
+        "O que fazer: acrescente a entrada em src/orquestrador/gates/codigos.py "
+        "(CODIGOS_DO_ORQUESTRADOR) com a descrição de uma linha, e a linha "
+        "correspondente na tabela 'Códigos de violação' do README.md."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6 — a árvore do README é a árvore real
+# ---------------------------------------------------------------------------
+
+
+def blocos_cercados(arquivo: Path) -> list[str]:
+    """Blocos de código do Markdown, alternando na cerca.
+
+    Varredura por linha em vez de uma expressão sobre o texto inteiro: alguns
+    blocos abrem com linguagem (```bash) e outros não, e um casamento por par de
+    cercas pula os primeiros — o que emenda o fim de um bloco com o começo do
+    seguinte e faz esta checagem ler prosa como se fosse árvore.
+    """
+    blocos: list[str] = []
+    atual: list[str] | None = None
+    for linha in arquivo.read_text(encoding="utf-8").splitlines():
+        if linha.lstrip().startswith("```"):
+            if atual is None:
+                atual = []
+            else:
+                blocos.append("\n".join(atual))
+                atual = None
+            continue
+        if atual is not None:
+            atual.append(linha)
+    return blocos
+
+
+def modulos_na_arvore_do_readme() -> set[str]:
+    """Caminhos `.py` que a árvore de `## Estrutura` do README declara.
+
+    A árvore é indentada, então o caminho de cada arquivo é reconstruído pela
+    pilha de diretórios — comparar só o nome do arquivo deixaria passar um módulo
+    listado no pacote errado, que é justamente o erro que manda o leitor procurar
+    no lugar errado.
+    """
+    arvores = [bloco for bloco in blocos_cercados(README) if "src/orquestrador/" in bloco]
+    assert arvores, (
+        "não achei a árvore de módulos no README.md.\n"
+        "Ela é um bloco de código cercado por ``` que contém a linha "
+        "'src/orquestrador/'. Se você a removeu ou trocou a cerca por outra "
+        "linguagem, esta checagem fica cega — restaure a árvore ou ajuste este "
+        "teste junto."
+    )
+
+    declarados: set[str] = set()
+    for bloco in arvores:
+        pilha: list[tuple[int, str]] = []
+        dentro_do_pacote = False
+        for linha in bloco.splitlines():
+            if not linha.strip():
+                continue
+            recuo = len(linha) - len(linha.lstrip())
+            # A anotação depois do nome é prosa, não caminho.
+            item = linha.strip().split()[0]
+
+            if item == "src/orquestrador/":
+                dentro_do_pacote, pilha = True, [(recuo, "")]
+                continue
+            if not dentro_do_pacote:
+                continue
+            # Voltou ao nível da raiz do bloco: saiu do pacote.
+            if recuo <= pilha[0][0]:
+                dentro_do_pacote = False
+                continue
+
+            while len(pilha) > 1 and recuo <= pilha[-1][0]:
+                pilha.pop()
+            if item.endswith("/"):
+                pilha.append((recuo, pilha[-1][1] + item))
+            elif item.endswith(".py"):
+                declarados.add(pilha[-1][1] + item)
+    return declarados
+
+
+def test_a_arvore_do_readme_lista_todo_modulo_de_producao():
+    reais = {caminho_no_pacote(arquivo) for arquivo in modulos_de_producao()}
+    declarados = modulos_na_arvore_do_readme()
+
+    faltando = sorted(reais - declarados)
+    assert not faltando, (
+        f"módulo(s) de produção ausente(s) da árvore do README.md: {faltando}.\n"
+        "Módulo que não aparece na árvore é módulo que ninguém acha sem `grep` — "
+        "foi a omissão de javascript.py e de superficie.py que fez um revisor "
+        "externo procurar arquivo no lugar errado.\n"
+        "O que fazer: acrescente a linha na árvore da seção '## Estrutura' do "
+        "README.md, com a descrição curta do que o módulo é dono."
+    )
+
+
+def test_a_arvore_do_readme_nao_lista_modulo_que_nao_existe():
+    reais = {caminho_no_pacote(arquivo) for arquivo in modulos_de_producao()}
+    declarados = modulos_na_arvore_do_readme()
+
+    fantasmas = sorted(declarados - reais)
+    assert not fantasmas, (
+        f"a árvore do README.md lista módulo(s) que não existem: {fantasmas}.\n"
+        "Documentação que promete arquivo inexistente é pior que documentação "
+        "ausente: quem procura conclui que a busca dele é que está errada.\n"
+        "O que fazer: se o módulo foi movido ou renomeado, corrija a linha na "
+        "árvore da seção '## Estrutura' do README.md; se ele foi apagado, remova a "
+        "linha."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 7 — `conftest` não é módulo de biblioteca
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("arquivo", sorted(DIR_TESTES.rglob("test_*.py")), ids=lambda p: p.name)
+def test_nenhum_teste_importa_de_conftest(arquivo: Path):
+    modulo = arvore(arquivo)
+
+    linhas = [
+        no.lineno
+        for no in ast.walk(modulo)
+        if (isinstance(no, ast.ImportFrom) and (no.module or "").split(".")[0] == "conftest")
+        or (
+            isinstance(no, ast.Import)
+            and any(alias.name.split(".")[0] == "conftest" for alias in no.names)
+        )
+    ]
+    assert not linhas, (
+        f"{arquivo.name} importa de conftest (linha(s) {linhas}).\n"
+        "`conftest.py` é um arquivo que o pytest injeta, não um módulo de "
+        "biblioteca. O import só resolve porque o rootdir entra no sys.path: ele "
+        "quebra quando os testes ganham um subdiretório, e faz ruff, mypy e IDE "
+        "resolverem um módulo que não existe como pacote.\n"
+        "O que fazer: transforme o helper numa fixture no conftest.py e receba-a "
+        "como parâmetro do teste. Helper que é fábrica vira fixture que devolve a "
+        "função — veja `saida_de_processo` em tests/conftest.py."
+    )

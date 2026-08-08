@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from orquestrador.contratos import Delta, ResultadoGate, VereditoDeGate, Violacao
 from orquestrador.excecoes import ErroDeFerramenta
-from orquestrador.montagem import montar_entrada_reparo
+from orquestrador.llm.montagem import montar_entrada_reparo
 
 
 def violacao(codigo: str, mensagem: str = "detalhe", **extra) -> Violacao:

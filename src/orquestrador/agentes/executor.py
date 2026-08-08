@@ -24,7 +24,7 @@ from orquestrador.contratos import (
 )
 from orquestrador.ferramentas.arquivos import confinar
 from orquestrador.llm.estruturado import GeradorEstruturado
-from orquestrador.montagem import (
+from orquestrador.llm.montagem import (
     carregar_prompt,
     esquema_json,
     montar_entrada_inicial,

@@ -317,9 +317,15 @@ Cadeia pequena e ortogonal. Uma ferramenta por responsabilidade.
 **3.13**. Não há usuário em 3.12; suportar dois dobra o tempo de CI sem retorno. Reavaliar se
 aparecer demanda real.
 
-## 3.2 — Teste de estrutura: o item que faz tudo o resto grudar `[M]`
+## 3.2 — Teste de estrutura: o item que faz tudo o resto grudar `[M]` — **CONCLUÍDO**
 
 Sem isto, todas as convenções abaixo são texto que um agente futuro lê pela metade.
+
+`tests/test_estrutura_do_codigo.py` existe e cobre as sete checagens. Duas ressalvas sobre o
+que foi entregue, ambas deliberadas: a lista fechada da raiz aceita os nove arquivos de hoje
+(item 1 pedia seis — os outros três dependem da Etapa 6), e a árvore do README é **conferida**
+contra o código, não gerada a partir dele (item 6 admitia as duas formas; a descrição de uma
+linha por módulo é editorial e nenhum gerador a produz).
 
 Criar `tests/test_estrutura_do_codigo.py` com verificação por AST:
 
@@ -413,25 +419,33 @@ exatamente o problema de descobribilidade que o plano quer resolver. Renomeei o 
 crescimento de ~45%. Cada arquivo ganha um dono, o que é bom, mas é custo real de navegação.
 É parte da razão de eu empurrar `dominio/` e `aplicacao/` para a Etapa 6.
 
-### O que fazer nesta etapa `[M]`
+### O que fazer nesta etapa `[M]` — **CONCLUÍDO**
 
 Só a parte barata — `git mv` mais atualização de import, um commit por movimento, suíte verde
 entre eles:
 
-| # | Movimento | Custo |
-| --- | --- | --- |
-| 1 | `montagem.py` → `llm/montagem.py` | P |
-| 2 | `textos.py` → `ferramentas/json_externo.py` | P |
-| 3 | `gates/parser.py` → `gates/saidas.py` | P |
-| 4 | `gates/cobertura.py` → `gates/lacunas.py` | P |
-| 5 | Criar `analise_estatica/` com os três módulos | M |
-| 6 | Tabelas Rich → `observabilidade/tabelas.py` | P |
+| # | Movimento | Custo | Estado |
+| --- | --- | --- | --- |
+| 1 | `montagem.py` → `llm/montagem.py` | P | ✅ feito |
+| 2 | `textos.py` → `ferramentas/json_externo.py` | P | ✅ feito |
+| 3 | `gates/parser.py` → `gates/saidas.py` | P | ✅ feito |
+| 4 | `gates/cobertura.py` → `gates/lacunas.py` | P | ✅ feito |
+| 5 | Criar `analise_estatica/` com os três módulos | M | ✅ feito |
+| 6 | Tabelas Rich → `observabilidade/tabelas.py` | P | ✅ feito |
 
 Isso já entrega: raiz com lista fechada e verificável, `javascript.py` e `superficie.py` num
 lugar que se acha pelo nome, e o fim dos nomes genéricos `parser` e `textos`.
 
 **Sem fachada de compatibilidade** nesses movimentos: são imports internos, e manter duas
 rotas de import anula a padronização.
+
+**O que ficou fora, e continua nesta seção como pendência.** Tudo marcado ★ na
+estrutura-alvo acima: `agentes/ferramentas_do_mapeador.py`, `observabilidade/eventos.py`
+(Etapa 4.3), `observabilidade/modelos.py`, e os pacotes `dominio/` e `aplicacao/` inteiros —
+Etapa 6. A raiz do pacote, portanto, ainda tem nove arquivos e não seis: `contratos.py`,
+`pipeline.py` e `simulacao.py` só saem quando aqueles dois pacotes existirem. A lista fechada
+de `tests/test_estrutura_do_codigo.py` reflete os nove de hoje e é para **encolher** conforme
+a Etapa 6 avança, nunca crescer.
 
 ## 3.4 — Configuração que não pode voltar a ficar inválida `[P]`
 

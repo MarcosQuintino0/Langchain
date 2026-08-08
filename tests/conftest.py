@@ -2,10 +2,18 @@
 
 Sem `sys.path.insert`: o projeto é instalável (`pip install -e ".[dev]"`), então
 `orquestrador` é importável de qualquer diretório de trabalho.
+
+Tudo que sai daqui sai como **fixture**, nunca como função importável. `conftest`
+é um arquivo que o pytest injeta, não um módulo de biblioteca: `from conftest
+import x` só funciona porque o rootdir entra no `sys.path`, quebra quando o
+diretório de testes ganha um nível, e faz o ferramental de import (ruff, mypy,
+IDE) resolver um módulo que não existe como pacote. Precisa compartilhar um
+helper? Devolva-o de uma fixture.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -39,11 +47,17 @@ def config_falso(tmp_path: Path) -> Config:
     )
 
 
-def saida_de_processo(*, codigo: int = 0, stdout: str = "", stderr: str = "") -> SaidaProcesso:
-    return SaidaProcesso(
-        argv=["node", "validar-suite-gerada.mjs", "recurso", "--json"],
-        codigo=codigo,
-        stdout=stdout,
-        stderr=stderr,
-        duracao_s=0.01,
-    )
+@pytest.fixture
+def saida_de_processo() -> Callable[..., SaidaProcesso]:
+    """Fábrica de `SaidaProcesso` para exercitar parsing sem Node instalado."""
+
+    def construir(*, codigo: int = 0, stdout: str = "", stderr: str = "") -> SaidaProcesso:
+        return SaidaProcesso(
+            argv=["node", "validar-suite-gerada.mjs", "recurso", "--json"],
+            codigo=codigo,
+            stdout=stdout,
+            stderr=stderr,
+            duracao_s=0.01,
+        )
+
+    return construir

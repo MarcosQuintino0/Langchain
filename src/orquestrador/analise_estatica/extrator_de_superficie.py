@@ -10,9 +10,15 @@ informação que o executor nunca teve.
 Este módulo custa zero token e roda uma vez por execução: a superfície é do
 **projeto**, não do recurso.
 
-Aqui mora só o I/O: achar os arquivos, calcular os caminhos de import e montar o
-artefato. A leitura do JavaScript é de `orquestrador.javascript`, que é puro e
+Aqui mora só a varredura: achar os arquivos, calcular os caminhos de import e
+montar o artefato. A leitura do JavaScript é de `exports_javascript`, que é puro e
 testável sem disco.
+
+O nome tem `extrator_` de propósito. Na Etapa 6 vai existir `dominio/superficie.py`
+com o contrato `SuperficieDoProjeto`; dois arquivos chamados `superficie.py` em
+pacotes irmãos são exatamente o problema de descobribilidade que esta organização
+existe para resolver. Um é o contrato, o outro é quem o produz — e o nome diz qual
+é qual antes de o arquivo ser aberto.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from orquestrador.analise_estatica.exports_javascript import ExportJs, extrair_exports
 from orquestrador.config import Config
 from orquestrador.contratos import (
     ExportCompartilhado,
@@ -28,7 +35,6 @@ from orquestrador.contratos import (
 )
 from orquestrador.excecoes import ProjetoNaoPreparado
 from orquestrador.ferramentas.arquivos import relativo_a
-from orquestrador.javascript import ExportJs, extrair_exports
 
 __all__ = ["EXTENSOES", "caminho_de_import", "extrair"]
 
