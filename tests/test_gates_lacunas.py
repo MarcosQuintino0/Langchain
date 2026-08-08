@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 
 from orquestrador.analise_estatica.tags_cypress import extrair_tags
-from orquestrador.contratos import Manifesto, Recurso, VereditoDeGate
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import lacunas as gate_lacunas
 from orquestrador.gates.codigos import CODIGOS_DO_ORQUESTRADOR

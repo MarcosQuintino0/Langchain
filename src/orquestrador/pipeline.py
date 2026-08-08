@@ -36,20 +36,12 @@ from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.analise_estatica.extrator_de_superficie import extrair as extrair_superficie
 from orquestrador.config import Config
-from orquestrador.contratos import (
-    Classificacao,
-    Delta,
-    DivergenciaDeSchema,
-    EntradaDoDiario,
-    EstadoDoRecurso,
-    EstagioDelta,
-    Manifesto,
-    Recurso,
-    ResultadoGate,
-    SaidaExecutor,
-    SaidaMapeador,
-    SuperficieDoProjeto,
-)
+from orquestrador.dominio.artefatos import SaidaExecutor, SaidaMapeador
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.propriedade import Classificacao, DivergenciaDeSchema, EntradaDoDiario
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.superficie import SuperficieDoProjeto
+from orquestrador.dominio.veredito import Delta, EstadoDoRecurso, EstagioDelta, ResultadoGate
 from orquestrador.excecoes import (
     CategoriaDeProvedor,
     ErroDeConfiguracao,

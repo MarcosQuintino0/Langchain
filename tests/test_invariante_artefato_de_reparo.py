@@ -22,7 +22,8 @@ import pytest
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
-from orquestrador.contratos import ArquivoGerado, Delta, SaidaExecutor, Violacao
+from orquestrador.dominio.artefatos import ArquivoGerado, SaidaExecutor
+from orquestrador.dominio.veredito import Delta, Violacao
 from orquestrador.llm.montagem import recortar_por_violacoes
 
 pytestmark = pytest.mark.unit

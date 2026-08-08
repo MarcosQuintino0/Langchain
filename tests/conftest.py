@@ -15,10 +15,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from orquestrador.config import Config
+from orquestrador.dominio.manifesto import CATS
 from orquestrador.ferramentas.processo import SaidaProcesso
 
 # Os três markers de `[tool.pytest.ini_options] markers`. A definição de cada um
@@ -81,6 +83,33 @@ def config_falso(tmp_path: Path) -> Config:
             },
         }
     )
+
+
+@pytest.fixture
+def manifesto_minimo() -> Callable[..., dict[str, Any]]:
+    """Fábrica do menor `_support/cobertura.json` que passa na validação estrutural.
+
+    Um endpoint com CAT-01 declarada e as outras onze justificadas — a forma que
+    `test_dominio_manifesto`, `test_dominio_artefatos` e `test_dominio_recurso`
+    precisam para exercitar coisas diferentes sobre o mesmo alvo. Fixture, e não
+    função importável: `from conftest import` só resolve porque o rootdir entra no
+    `sys.path`, e há teste proibindo.
+    """
+
+    def construir(**extra: Any) -> dict[str, Any]:
+        return {
+            "recurso": "pedidos",
+            "endpoints": [
+                {
+                    "endpoint": "GET /pedidos",
+                    "cats": ["CAT-01"],
+                    "naoAplica": dict.fromkeys(CATS[1:], "justificativa suficientemente longa"),
+                }
+            ],
+            **extra,
+        }
+
+    return construir
 
 
 @pytest.fixture

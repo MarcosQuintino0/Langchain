@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from orquestrador.contratos import Recurso, VereditoDeGate
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import gate_b
 from orquestrador.gates import lacunas as gate_lacunas

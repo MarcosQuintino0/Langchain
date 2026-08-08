@@ -24,7 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from orquestrador.contratos import Delta, Violacao
+from orquestrador.dominio.veredito import Delta, Violacao
 from orquestrador.raiz import DIR_PROMPTS_PADRAO
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")

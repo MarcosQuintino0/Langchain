@@ -59,7 +59,6 @@ RAIZ_PERMITIDA = frozenset(
         "__main__.py",
         "cli.py",
         "config.py",
-        "contratos.py",
         "excecoes.py",
         "pipeline.py",
         "raiz.py",
@@ -67,22 +66,46 @@ RAIZ_PERMITIDA = frozenset(
     }
 )
 
-# Estes três saem na Etapa 6 de `docs/plano-de-execucao.md`: `contratos.py` vira
-# `dominio/`, `pipeline.py` e `simulacao.py` viram `aplicacao/`. Quando isso
-# acontecer, remova-os de `RAIZ_PERMITIDA` — a lista só encolhe.
-SAEM_NA_ETAPA_6 = frozenset({"contratos.py", "pipeline.py", "simulacao.py"})
+# `pipeline.py` e `simulacao.py` viram `aplicacao/` na Etapa 6 de
+# `docs/plano-de-execucao.md`. Quando isso acontecer, remova-os de
+# `RAIZ_PERMITIDA` — a lista só encolhe — e apague esta constante junto com o
+# teste que a consome: teste que só pode passar não protege nada.
+SAEM_NA_ETAPA_6 = frozenset({"pipeline.py", "simulacao.py"})
 
 # Direção de dependência. A chave é o pacote; o valor, os pacotes que ele não pode
 # importar. Seta ao contrário não quebra teste nenhum hoje — ela só transforma
 # dois módulos independentes num par que precisa ser lido junto para sempre.
 DIRECAO_PROIBIDA: dict[str, frozenset[str]] = {
+    # O vocabulário comum. Não conhece **ninguém** — nem quem produz o dado, nem
+    # quem decide sobre ele. `excecoes` é a única aresta permitida, e não aparece
+    # aqui porque só o que está proibido é listado.
+    "dominio": frozenset(
+        {
+            "agentes",
+            "gates",
+            "ferramentas",
+            "llm",
+            "analise_estatica",
+            "observabilidade",
+            "pipeline",
+            "simulacao",
+            "cli",
+            "config",
+        }
+    ),
     # Lê código-fonte e devolve dado. Se precisasse de gate ou de agente, não
     # seria análise: seria decisão.
     "analise_estatica": frozenset({"agentes", "gates", "pipeline", "cli"}),
     # Adaptador de I/O externo. Quem decide o que fazer com a saída é o chamador.
-    "ferramentas": frozenset({"agentes", "gates"}),
+    "ferramentas": frozenset({"agentes", "gates", "pipeline", "cli"}),
     # Registra o que aconteceu; nunca decide fluxo.
-    "observabilidade": frozenset({"agentes", "gates", "pipeline"}),
+    "observabilidade": frozenset({"agentes", "gates", "pipeline", "cli"}),
+    # Cliente, saída estruturada e montagem de prompt. Não conhece gate nem recurso.
+    "llm": frozenset({"agentes", "gates", "pipeline", "cli"}),
+    # Reprova determinística. Conhece quem executa, nunca quem cria.
+    "gates": frozenset({"agentes", "pipeline", "cli"}),
+    # Monta e invoca um criador LLM. Não decide aprovação, e não coordena estágios.
+    "agentes": frozenset({"gates", "pipeline", "cli"}),
 }
 
 CODIGO_QAORQ = re.compile(r"QAORQ-\d{3}")
@@ -355,6 +378,114 @@ def test_direcao_proibida_so_cita_pacote_que_existe():
         "Uma entrada que não corresponde a nada nunca reprova — ela parece uma "
         "regra e não é. Se o alvo mudou de nome ou virou subpacote, atualize a "
         "chave e o valor; se a regra deixou de fazer sentido, remova a entrada."
+    )
+
+
+# Módulos cuja simples presença num `import` de `dominio/` já é acesso ao mundo.
+MODULOS_DE_FORA = frozenset(
+    {"subprocess", "os", "io", "shutil", "tempfile", "socket", "urllib", "requests", "httpx"}
+)
+
+# Métodos de `Path` (e afins) que leem ou escrevem. `resolve` e `expanduser` entram
+# porque consultam o sistema de arquivos e o ambiente — `resolve()` segue link
+# simbólico, e é justamente por isso que o confinamento de `ferramentas/arquivos.py`
+# depende dele. Álgebra de caminho pura (`/`, `.parent`, `.name`, `.with_suffix`)
+# continua permitida, e é o que `Recurso` usa.
+#
+# `Path.replace` fica **de fora**: `str.replace` tem o mesmo nome, é comum em
+# normalização de caminho (`valor.replace("\\", "/")` em `artefatos.py`), e a AST
+# não distingue os dois sem inferência de tipo. Uma checagem que reprova o inocente
+# é desligada na primeira vez que atrapalha; `rename` cobre a mesma intenção e não
+# colide com nada.
+ACESSOS_A_DISCO = frozenset(
+    {
+        "read_text",
+        "write_text",
+        "read_bytes",
+        "write_bytes",
+        "open",
+        "mkdir",
+        "rmdir",
+        "unlink",
+        "rename",
+        "touch",
+        "iterdir",
+        "glob",
+        "rglob",
+        "walk",
+        "exists",
+        "is_file",
+        "is_dir",
+        "is_symlink",
+        "stat",
+        "lstat",
+        "chmod",
+        "samefile",
+        "resolve",
+        "expanduser",
+        "cwd",
+        "home",
+    }
+)
+
+
+@pytest.mark.parametrize(
+    "arquivo", sorted((PACOTE / "dominio").glob("*.py")), ids=lambda p: caminho_no_pacote(p)
+)
+def test_dominio_nao_toca_no_disco(arquivo: Path):
+    """A célula "O que ele não faz" de `dominio/` no AGENTS.md, executável.
+
+    A regra é sobre **acesso**, não sobre o tipo: `Path` como anotação e como
+    álgebra (`/`, `.parent`, `.with_suffix`) é permitido, porque é o que `Recurso`
+    faz e proibir isso esvaziaria o pacote. O que não pode é o módulo consultar o
+    mundo — e é essa fronteira que decide se um contrato pode ser construído e
+    validado sem nenhum arquivo por perto.
+
+    Falso positivo conhecido e aceito: um método **nosso** chamado `resolve` ou
+    `open`. Não existe nenhum; se aparecer, a resposta é renomeá-lo, não afrouxar
+    esta lista.
+    """
+    modulo = arvore(arquivo)
+    nome = caminho_no_pacote(arquivo)
+
+    importados = sorted(pacotes_importados(modulo) - {"dominio", "excecoes"})
+    assert not importados, (
+        f"{nome} importa {importados}. `dominio/` é o vocabulário comum: ele não "
+        "conhece quem produz o dado nem quem decide sobre ele, e `excecoes` é a "
+        "única aresta permitida.\n"
+        "O que fazer: receba o dado pronto como argumento. Se a regra precisa "
+        "mesmo de I/O, ela não é regra pura — mova-a para o chamador."
+    )
+
+    raizes_importadas = {
+        alias.name.split(".")[0]
+        for no in ast.walk(modulo)
+        if isinstance(no, ast.Import)
+        for alias in no.names
+    } | {
+        (no.module or "").split(".")[0] for no in ast.walk(modulo) if isinstance(no, ast.ImportFrom)
+    }
+    de_fora = sorted(raizes_importadas & MODULOS_DE_FORA)
+    assert not de_fora, (
+        f"{nome} importa {de_fora}, que é acesso ao sistema.\n"
+        "Contrato que precisa de disco, processo ou rede para se validar não é "
+        "contrato: é ferramenta com nome errado."
+    )
+
+    chamadas: list[str] = []
+    for no in ast.walk(modulo):
+        if isinstance(no, ast.Call) and isinstance(no.func, ast.Name) and no.func.id == "open":
+            chamadas.append(f"linha {no.lineno}: open(...)")
+        if (
+            isinstance(no, ast.Call)
+            and isinstance(no.func, ast.Attribute)
+            and no.func.attr in ACESSOS_A_DISCO
+        ):
+            chamadas.append(f"linha {no.lineno}: .{no.func.attr}(...)")
+    assert not chamadas, (
+        f"{nome} consulta o sistema de arquivos:\n  " + "\n  ".join(sorted(chamadas)) + "\n"
+        "`Path` aqui é valor, não acesso: montar caminho pode, abrir não. Quem "
+        "abre é `ferramentas/`, e é lá que mora o confinamento."
     )
 
 

@@ -26,14 +26,14 @@ import pytest
 from pydantic import ValidationError
 
 from orquestrador.agentes.executor import escrever
-from orquestrador.contratos import (
+from orquestrador.dominio.artefatos import (
     ArquivoGerado,
     ArquivoSchema,
-    Inventario,
-    Manifesto,
     SaidaExecutor,
     SaidaMapeador,
 )
+from orquestrador.dominio.inventario import Inventario
+from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.ferramentas.arquivos import (
     CaminhoForaDaRaiz,
     Confinamento,

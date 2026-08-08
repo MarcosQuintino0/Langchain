@@ -26,7 +26,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
 from orquestrador.config import ConfigEstagio
-from orquestrador.contratos import Delta, Violacao
+from orquestrador.dominio.veredito import Delta, Violacao
 from orquestrador.excecoes import FalhaDeEstagio
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.cliente import (

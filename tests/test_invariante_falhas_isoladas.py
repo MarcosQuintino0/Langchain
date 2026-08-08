@@ -25,7 +25,8 @@ from rich.console import Console
 from orquestrador import cli as modulo_cli
 from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.cli import avisar_reprovados
-from orquestrador.contratos import EstadoDoRecurso, Recurso, ResultadoGate, Violacao
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import EstadoDoRecurso, ResultadoGate, Violacao
 from orquestrador.excecoes import (
     ErroDeConfiguracao,
     ErroDeFerramenta,

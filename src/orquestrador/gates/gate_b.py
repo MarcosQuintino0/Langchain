@@ -13,7 +13,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from orquestrador.config import Config
-from orquestrador.contratos import Manifesto, Recurso, ResultadoGate, Violacao
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import ExecutavelAusente
 from orquestrador.ferramentas.processo import executar as rodar_processo
 from orquestrador.ferramentas.scripts_qa import Validador

@@ -46,7 +46,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from orquestrador.analise_estatica.rotas_java_spring import extrair_controladores
-from orquestrador.contratos import Endpoint, RotaDinamica, normalizar_endpoint
+from orquestrador.dominio.endpoint import normalizar_endpoint
+from orquestrador.dominio.inventario import Endpoint, RotaDinamica
 from orquestrador.excecoes import GrafoNaoPreparado
 from orquestrador.ferramentas.arquivos import CaminhoForaDaRaiz, Confinamento
 

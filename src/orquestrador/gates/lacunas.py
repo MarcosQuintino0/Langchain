@@ -47,7 +47,9 @@ from pathlib import Path
 
 from orquestrador.analise_estatica.tags_cypress import extrair_tags
 from orquestrador.config import Config
-from orquestrador.contratos import Manifesto, Recurso, ResultadoGate, Violacao
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.gates.saidas import resumo_da_cobertura
 

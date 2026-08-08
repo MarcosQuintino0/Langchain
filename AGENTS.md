@@ -55,14 +55,23 @@ Escolha o diretório pelo **único motivo dominante de mudança**:
 | `llm/` | cliente, saída estruturada e montagem de prompt | não conhece gate nem recurso |
 | `observabilidade/` | eventos e métricas | nunca decide fluxo |
 | `analise_estatica/` | lê código-fonte sem executar | não abre subprocesso nem fala com a rede |
-| ★ `dominio/` | contratos e regras puras | sem I/O, sem `Path`, sem subprocess |
+| `dominio/` | contratos e regras puras | não abre, não lê, não escreve, não lista e não resolve caminho; não roda subprocesso; não importa outro subpacote. `Path` entra só como valor |
 | ★ `aplicacao/` | coordena estágios e persistência | não parseia saída de ferramenta |
-| raiz do pacote | **lista fechada**: `cli.py`, `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py`, e — até a Etapa 6 — `contratos.py`, `pipeline.py`, `simulacao.py` | não recebe arquivo novo |
+| raiz do pacote | **lista fechada**: `cli.py`, `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py`, e — até a Etapa 6 — `pipeline.py`, `simulacao.py` | não recebe arquivo novo |
 
-★ ainda não existem — são a Etapa 6 de
-[`docs/plano-de-execucao.md`](docs/plano-de-execucao.md). Não as crie por conta
-própria numa tarefa que não seja essa. Até lá, coordenação fica em `pipeline.py` e
-contrato puro em `contratos.py`, na raiz.
+★ ainda não existe — é a Etapa 6 de
+[`docs/plano-de-execucao.md`](docs/plano-de-execucao.md). Não a crie por conta
+própria numa tarefa que não seja essa. Até lá, coordenação fica em `pipeline.py`,
+na raiz.
+
+**Sobre o `Path` em `dominio/`.** A regra é sobre **acesso**, não sobre o tipo.
+`Recurso.caminho_testes` é álgebra de caminho e `EntradaDoDiario.destino` é chave
+de índice: nenhum dos dois toca o disco. Proibir a anotação esvaziaria o pacote —
+`Recurso` é o símbolo mais importado do repositório e é literalmente a unidade de
+trabalho do princípio 3. O que a regra proíbe tem lista e tem teste:
+`test_dominio_nao_toca_no_disco` recusa import de `subprocess`, `os`, `io`,
+`shutil` e rede, chamada de `open()`, e qualquer método de acesso a disco de
+`Path`.
 
 **Nunca crie `utils.py`, `helpers.py`, `common.py`, `models.py` ou
 `constantes.py`.** Nome que não diz o motivo de mudança vira depósito.

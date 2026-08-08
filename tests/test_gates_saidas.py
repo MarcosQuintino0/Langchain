@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-from orquestrador.contratos import VereditoDeGate
+from orquestrador.dominio.veredito import VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.gates.saidas import (

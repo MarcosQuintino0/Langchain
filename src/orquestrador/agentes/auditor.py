@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orquestrador.contratos import ResultadoAuditoria
+from orquestrador.dominio.auditoria import ResultadoAuditoria
 
 ESTAGIO = "auditor"
 

@@ -34,7 +34,8 @@ from rich.table import Table
 
 from orquestrador.analise_estatica import extrator_de_superficie
 from orquestrador.config import Config
-from orquestrador.contratos import EstadoDoRecurso, Recurso
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import EstadoDoRecurso
 from orquestrador.excecoes import (
     ErroDeConfiguracao,
     ErroDeFerramenta,

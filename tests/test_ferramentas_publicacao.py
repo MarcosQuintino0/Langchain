@@ -17,14 +17,9 @@ import pytest
 from rich.console import Console
 
 from orquestrador import cli as modulo_cli
-from orquestrador.contratos import (
-    Classificacao,
-    DivergenciaDeSchema,
-    EntradaDoDiario,
-    EstadoDoRecurso,
-    Recurso,
-    ResultadoGate,
-)
+from orquestrador.dominio.propriedade import Classificacao, DivergenciaDeSchema, EntradaDoDiario
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import EstadoDoRecurso, ResultadoGate
 from orquestrador.excecoes import FalhaDeGate, FalhaDePublicacao
 from orquestrador.ferramentas.publicacao import (
     Diario,

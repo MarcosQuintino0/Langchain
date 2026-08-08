@@ -22,7 +22,9 @@ from pydantic import Field
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
-from orquestrador.contratos import Delta, Manifesto, Recurso, Violacao
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import Delta, Violacao
 from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.raiz import DIR_FIXTURES
 from orquestrador.simulacao import ModeloSimulado, Roteiros

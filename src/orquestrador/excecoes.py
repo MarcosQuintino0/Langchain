@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # evita ciclo de import em tempo de execução
-    from orquestrador.contratos import Violacao
+    from orquestrador.dominio.veredito import Violacao
 
 
 class ErroDeConfiguracao(RuntimeError):

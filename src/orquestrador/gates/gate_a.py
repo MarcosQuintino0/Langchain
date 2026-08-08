@@ -26,14 +26,10 @@ from orquestrador.analise_estatica.extrator_de_endpoints import (
     matriz_em_texto,
 )
 from orquestrador.config import Config
-from orquestrador.contratos import (
-    Endpoint,
-    Inventario,
-    Manifesto,
-    Recurso,
-    ResultadoGate,
-    Violacao,
-)
+from orquestrador.dominio.inventario import Endpoint, Inventario
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import GrafoNaoPreparado
 from orquestrador.ferramentas.scripts_qa import Validador
 from orquestrador.gates.saidas import resultado_do_validador

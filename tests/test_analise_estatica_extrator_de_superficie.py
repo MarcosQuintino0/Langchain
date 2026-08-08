@@ -15,7 +15,7 @@ import pytest
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.analise_estatica import extrator_de_superficie as mod
-from orquestrador.contratos import Recurso
+from orquestrador.dominio.recurso import Recurso
 from orquestrador.excecoes import ProjetoNaoPreparado
 from orquestrador.raiz import DIR_FIXTURES
 

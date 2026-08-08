@@ -18,7 +18,8 @@ from pydantic import ValidationError
 
 from orquestrador import cli as modulo_cli
 from orquestrador.config import ConfigGate
-from orquestrador.contratos import Delta, Recurso, ResultadoGate, Violacao
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import Delta, ResultadoGate, Violacao
 from orquestrador.excecoes import ErroDeConfiguracao, FalhaDeGate
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.pipeline import Pipeline

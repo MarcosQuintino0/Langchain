@@ -113,6 +113,7 @@ packages = [
   "orquestrador",
   "orquestrador.agentes",
   "orquestrador.analise_estatica",
+  "orquestrador.dominio",
   "orquestrador.ferramentas",
   "orquestrador.gates",
   "orquestrador.llm",

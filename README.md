@@ -564,10 +564,20 @@ src/orquestrador/
   cli.py             argumentos, montagem da execução e apresentação
   pipeline.py        a classe Pipeline e o _ciclo (o loop de reparo)
   config.py          carga e validação da configuração
-  contratos.py       todos os modelos Pydantic
   simulacao.py       modelo falso dirigido por fixture + sandbox do --dry-run
   excecoes.py        FalhaDeGate, FalhaDeEstagio, ErroDeFerramenta, ErroDeConfiguracao
   raiz.py            resolução da raiz do projeto — único uso de Path(__file__)
+  dominio/
+    __init__.py
+    endpoint.py      o vocabulário HTTP que inventário e manifesto compartilham
+    recurso.py       Recurso e NomeDeRecurso — a unidade de trabalho e o nome que vira diretório
+    inventario.py    o que o backend expõe, segundo quem leu o código
+    manifesto.py     o gabarito de cobertura — espelho de _support/cobertura.json
+    veredito.py      Violacao, ResultadoGate, Delta, EstadoDoRecurso
+    artefatos.py     SaidaMapeador, SaidaExecutor e o confinamento de forma de caminho
+    propriedade.py   diário de propriedade, classificação e divergência de schema
+    superficie.py    o que o projeto de testes do consumidor já oferece ao executor
+    auditoria.py     o veredito do auditor semântico
   llm/
     __init__.py
     cliente.py       cliente OpenRouter, seleção por estágio
@@ -697,7 +707,8 @@ erro nenhum, só no lugar errado.
 
 `Recurso`, `Endpoint`, `Inventario`, `Manifesto`, `Violacao`, `Delta`,
 `ResultadoGate`, `SaidaMapeador`, `ArquivoSchema`, `SaidaExecutor`,
-`ResultadoAuditoria` — todos em [`contratos.py`](src/orquestrador/contratos.py).
+`ResultadoAuditoria` — todos em [`dominio/`](src/orquestrador/dominio), um módulo
+por vocabulário.
 
 `SaidaMapeador.schemas` é uma lista de `ArquivoSchema`, com o caminho relativo à raiz
 de schemas (`<recurso>/<nome>.schema.json`, sem `..` e sem raiz absoluta, como o

@@ -53,11 +53,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from orquestrador.contratos import (
-    Classificacao,
-    DiarioDePropriedade,
-    EntradaDoDiario,
-)
+from orquestrador.dominio.propriedade import Classificacao, DiarioDePropriedade, EntradaDoDiario
 from orquestrador.excecoes import FalhaDePublicacao
 from orquestrador.ferramentas.arquivos import confinar, sob_a_raiz
 

@@ -16,13 +16,11 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 
 from orquestrador.config import Config
-from orquestrador.contratos import (
-    Delta,
-    Manifesto,
-    Recurso,
-    SaidaExecutor,
-    SuperficieDoProjeto,
-)
+from orquestrador.dominio.artefatos import SaidaExecutor
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.superficie import SuperficieDoProjeto
+from orquestrador.dominio.veredito import Delta
 from orquestrador.ferramentas.publicacao import AreaDeStaging
 from orquestrador.llm.cliente import PoliticaDeRetentativa
 from orquestrador.llm.estruturado import GeradorEstruturado

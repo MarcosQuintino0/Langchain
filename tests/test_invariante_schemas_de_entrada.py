@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from orquestrador.contratos import Recurso, ResultadoGate, Violacao
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import FalhaDeGate
 from orquestrador.ferramentas.publicacao import AreaDeStaging, criar_area
 from orquestrador.gates import gate_a

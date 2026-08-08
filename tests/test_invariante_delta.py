@@ -14,7 +14,7 @@ import re
 import pytest
 from pydantic import ValidationError
 
-from orquestrador.contratos import Delta, ResultadoGate, VereditoDeGate, Violacao
+from orquestrador.dominio.veredito import Delta, ResultadoGate, VereditoDeGate, Violacao
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.llm.montagem import montar_entrada_reparo
 

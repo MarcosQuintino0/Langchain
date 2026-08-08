@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from orquestrador.contratos import ResultadoGate, Violacao
+from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.ferramentas.processo import SaidaProcesso
 

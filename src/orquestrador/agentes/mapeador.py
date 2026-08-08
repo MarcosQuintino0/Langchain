@@ -30,7 +30,9 @@ from orquestrador.agentes.grafo_react import (
     criar_agente,
 )
 from orquestrador.config import Config
-from orquestrador.contratos import SUFIXO_SCHEMA, Delta, Recurso, SaidaMapeador, Violacao
+from orquestrador.dominio.artefatos import SUFIXO_SCHEMA, SaidaMapeador
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import Delta, Violacao
 from orquestrador.excecoes import FalhaDeEstagio
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.cliente import (

@@ -28,7 +28,7 @@ from pathlib import Path
 
 from orquestrador.analise_estatica.exports_javascript import ExportJs, extrair_exports
 from orquestrador.config import Config
-from orquestrador.contratos import (
+from orquestrador.dominio.superficie import (
     ExportCompartilhado,
     ModuloCompartilhado,
     SuperficieDoProjeto,

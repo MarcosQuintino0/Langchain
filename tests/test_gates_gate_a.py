@@ -26,13 +26,10 @@ from orquestrador.analise_estatica.extrator_de_endpoints import (
     extrair,
 )
 from orquestrador.analise_estatica.rotas_java_spring import extrair_controladores
-from orquestrador.contratos import (
-    Inventario,
-    Manifesto,
-    Recurso,
-    RotaDinamica,
-    VereditoDeGate,
-)
+from orquestrador.dominio.inventario import Inventario, RotaDinamica
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.recurso import Recurso
+from orquestrador.dominio.veredito import VereditoDeGate
 from orquestrador.excecoes import GrafoNaoPreparado
 from orquestrador.gates.gate_a import diff_grafo_manifesto
 
