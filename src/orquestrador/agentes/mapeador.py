@@ -30,15 +30,7 @@ from orquestrador.agentes.grafo_react import (
     criar_agente,
 )
 from orquestrador.config import Config
-from orquestrador.contratos import (
-    SUFIXO_SCHEMA,
-    Delta,
-    Recurso,
-    RegistroDeChamada,
-    SaidaMapeador,
-    UsoDeTokens,
-    Violacao,
-)
+from orquestrador.contratos import SUFIXO_SCHEMA, Delta, Recurso, SaidaMapeador, Violacao
 from orquestrador.excecoes import FalhaDeEstagio
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.cliente import (
@@ -55,6 +47,7 @@ from orquestrador.llm.montagem import (
     montar_entrada_inicial,
     montar_entrada_reparo,
 )
+from orquestrador.observabilidade.medidas import RegistroDeChamada, UsoDeTokens
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
 

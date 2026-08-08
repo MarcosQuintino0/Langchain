@@ -31,10 +31,10 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 from orquestrador.config import Config
-from orquestrador.contratos import RegistroDeTool
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.ferramentas import arquivos as fa
 from orquestrador.ferramentas.graphify import Graphify
+from orquestrador.observabilidade.medidas import RegistroDeTool
 from orquestrador.observabilidade.telemetria import Telemetria
 
 

@@ -577,6 +577,7 @@ src/orquestrador/
   observabilidade/
     __init__.py
     eventos.py       TipoDeEvento — o vocabulário fechado do JSONL e a versão do formato
+    medidas.py       UsoDeTokens, RegistroDeChamada, RegistroDeTool — o que se mede
     manifesto_de_execucao.py  manifesto-execucao.json: ambiente, commits, hashes, config redigida
     registro.py      log estruturado (JSONL) + console
     telemetria.py    agregação de tokens e caracteres por estágio, recurso, tentativa

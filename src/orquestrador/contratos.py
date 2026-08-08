@@ -24,7 +24,7 @@ import json
 import re
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator,
@@ -962,91 +962,3 @@ class ResultadoAuditoria(BaseModel):
     )
     oraculos_fracos: list[AchadoAuditoria] = Field(default_factory=list[AchadoAuditoria])
     veredito: Literal["íntegro", "revisar"]
-
-
-# ---------------------------------------------------------------------------
-# Telemetria
-# ---------------------------------------------------------------------------
-
-
-class UsoDeTokens(BaseModel):
-    entrada: int = 0
-    saida: int = 0
-
-    @property
-    def total(self) -> int:
-        return self.entrada + self.saida
-
-    def __add__(self, outro: UsoDeTokens) -> UsoDeTokens:
-        return UsoDeTokens(entrada=self.entrada + outro.entrada, saida=self.saida + outro.saida)
-
-
-class RegistroDeChamada(BaseModel):
-    """Uma chamada de modelo, para provar (ou refutar) o custo linear.
-
-    `caracteres_instrucao` e `caracteres_entrada` medem o que foi **efetivamente
-    enviado**: a instrução fixa do estágio (constante, serve de linha de base) e a
-    entrada da tentativa. É por essa dupla que se verifica o princípio 2 a partir
-    do log — a entrada de um reparo não pode crescer com o número da tentativa.
-    """
-
-    estagio: str
-    recurso: str
-    tentativa: int
-    modelo: str
-    uso: UsoDeTokens = Field(default_factory=UsoDeTokens)
-    duracao_s: float = 0.0
-    simulado: bool = False
-    detalhe: str = ""
-    caracteres_instrucao: int = 0
-    caracteres_entrada: int = 0
-
-
-class RegistroDeTool(BaseModel):
-    """Uma chamada de tool do mapeador — o instrumento do custo de exploração.
-
-    O Graphify existe para localizar código sem gastar token varrendo o backend, e a
-    instrução do estágio manda consultá-lo **antes** de ler arquivo. Sem este
-    registro, "ele obedeceu?" e "que fatia da entrada veio de resposta de tool?" são
-    dedução, não medida — e é sobre elas que se decide a otimização do mapeador, que
-    é onde mora quase todo o custo do pipeline.
-
-    `ordem` é a posição na sequência da tentativa: é ela, e não o total, que responde
-    se o grafo foi consultado antes ou depois da leitura de arquivo.
-
-    `caracteres` é o tamanho do retorno. É o número que importa: ele entra na próxima
-    volta do ReAct e é reenviado em todas as seguintes, então resposta de tool grande
-    é multiplicador, não parcela.
-    """
-
-    estagio: str
-    recurso: str
-    tentativa: int
-    ordem: int
-    nome: str
-    argumentos: dict[str, Any] = Field(default_factory=dict)
-    caracteres: int = 0
-    duracao_s: float = 0.0
-    # As tools devolvem a falha como texto (`ERRO: ...`) para o modelo poder se
-    # corrigir sozinho. Sem esta marca, grafo quebrado passa por exploração
-    # bem-sucedida no relatório — e o custo de reindexar aparece como custo de LLM.
-    erro: bool = False
-
-
-def dados_para_log(valor: Any) -> Any:
-    """Converte modelos/Path para algo serializável em JSONL.
-
-    `Any` na entrada e na saída é o que esta função é: ela recebe os `**campos` de um
-    evento, que vêm de todo canto do pipeline, e devolve algo que o `json.dumps`
-    aceite. Amarrar um tipo aqui só empurraria o `cast` para cada emissor.
-    """
-    if isinstance(valor, BaseModel):
-        return valor.model_dump(mode="json")
-    if isinstance(valor, Path):
-        return str(valor)
-    if isinstance(valor, (list, tuple)):
-        return [dados_para_log(item) for item in cast(list[Any] | tuple[Any, ...], valor)]
-    if isinstance(valor, dict):
-        itens = cast(dict[Any, Any], valor).items()
-        return {chave: dados_para_log(item) for chave, item in itens}
-    return valor

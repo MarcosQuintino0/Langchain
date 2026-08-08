@@ -18,13 +18,36 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
+from pydantic import BaseModel
 from rich.console import Console
 from rich.markup import escape
 
-from orquestrador.contratos import dados_para_log
 from orquestrador.observabilidade.eventos import ESQUEMA_DOS_EVENTOS, TipoDeEvento
+
+
+def dados_para_log(valor: Any) -> Any:
+    """Converte modelos/Path para algo serializável em JSONL.
+
+    `Any` na entrada e na saída é o que esta função é: ela recebe os `**campos` de um
+    evento, que vêm de todo canto do pipeline, e devolve algo que o `json.dumps`
+    aceite. Amarrar um tipo aqui só empurraria o `cast` para cada emissor.
+
+    Mora ao lado de `Registro.evento`, seu único chamador, e não num módulo de
+    contratos: o formato do JSONL é o que muda esta função, e o formato do JSONL é
+    o que este módulo é dono.
+    """
+    if isinstance(valor, BaseModel):
+        return valor.model_dump(mode="json")
+    if isinstance(valor, Path):
+        return str(valor)
+    if isinstance(valor, (list, tuple)):
+        return [dados_para_log(item) for item in cast(list[Any] | tuple[Any, ...], valor)]
+    if isinstance(valor, dict):
+        itens = cast(dict[Any, Any], valor).items()
+        return {chave: dados_para_log(item) for chave, item in itens}
+    return valor
 
 
 class RegistradorDeEventos(Protocol):

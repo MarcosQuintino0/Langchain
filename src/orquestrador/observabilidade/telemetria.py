@@ -18,8 +18,8 @@ from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from orquestrador.contratos import RegistroDeChamada, RegistroDeTool, UsoDeTokens
 from orquestrador.observabilidade.eventos import TipoDeEvento
+from orquestrador.observabilidade.medidas import RegistroDeChamada, RegistroDeTool, UsoDeTokens
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 
 # A chave de agrupamento muda por método (`str`, `(str, str)`, `(str, str, int)`) e

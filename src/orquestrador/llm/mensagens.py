@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
-from orquestrador.contratos import UsoDeTokens
+from orquestrador.observabilidade.medidas import UsoDeTokens
 
 
 def uso_da_mensagem(mensagem: BaseMessage) -> UsoDeTokens:
