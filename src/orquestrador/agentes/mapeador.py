@@ -40,6 +40,12 @@ from orquestrador.excecoes import ErroDeFerramenta, FalhaDeEstagio
 from orquestrador.ferramentas import arquivos as fa
 from orquestrador.ferramentas.graphify import Graphify
 from orquestrador.ferramentas.json_externo import extrair_json
+from orquestrador.llm.cliente import (
+    PoliticaDeRetentativa,
+    TentativaDeProvedor,
+    chamar_com_retentativas,
+    descrever_volta,
+)
 from orquestrador.llm.estruturado import violacoes_de_validacao
 from orquestrador.llm.mensagens import texto_da_mensagem, uso_das_mensagens
 from orquestrador.llm.montagem import (
@@ -411,12 +417,51 @@ def executar(
     ultimo_texto = ""
     ultimas_violacoes: list[Violacao] = []
 
+    politica = PoliticaDeRetentativa.do_config(config)
+
     for passo in range(1, parametros.max_tentativas_schema + 1):
         inicio = time.perf_counter()
-        try:
-            estado = agente.invoke(
+
+        def invocar(entrada: str = entrada) -> EstadoDoReAct:
+            return agente.invoke(
                 {"messages": [HumanMessage(content=entrada)]},
                 config={"recursion_limit": parametros.limite_passos},
+            )
+
+        # `passo` e `entrada` viajam como padrão porque os dois mudam a cada volta do
+        # laço: capturados por referência, a telemetria mediria o que a tentativa
+        # SEGUINTE vai enviar, não o que esta enviou.
+        def perdeu_a_volta(
+            volta: TentativaDeProvedor, passo: int = passo, entrada: str = entrada
+        ) -> None:
+            """Volta perdida por indisponibilidade também custou tempo e dinheiro.
+
+            Aqui a perda é maior que no executor: o que se joga fora é a exploração
+            inteira do ReAct, com todas as respostas de tool já pagas. Sem este
+            registro, o gasto sumiria do relatório e reapareceria só na fatura.
+            """
+            telemetria.registrar(
+                RegistroDeChamada(
+                    estagio=ESTAGIO,
+                    recurso=recurso.nome,
+                    tentativa=tentativa,
+                    modelo=parametros.modelo,
+                    uso=UsoDeTokens(),
+                    duracao_s=volta.duracao_s,
+                    simulado=getattr(modelo, "simulado", False),
+                    detalhe=descrever_volta(volta, politica, prefixo=f"schema:{passo}"),
+                    caracteres_instrucao=len(instrucao),
+                    caracteres_entrada=len(entrada),
+                )
+            )
+
+        try:
+            estado = chamar_com_retentativas(
+                invocar,
+                politica=politica,
+                estagio=ESTAGIO,
+                recurso=recurso.nome,
+                ao_falhar=perdeu_a_volta,
             )
         except GraphRecursionError as erro:
             # GraphRecursionError herda de RecursionError, não de FalhaDeEstagio: sem

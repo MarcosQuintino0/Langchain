@@ -20,9 +20,10 @@ from rich.markup import escape
 
 from orquestrador.config import Config
 from orquestrador.contratos import EstadoDoRecurso, Recurso
-from orquestrador.excecoes import ErroDeConfiguracao, ErroDeFerramenta
+from orquestrador.excecoes import ErroDeConfiguracao, ErroDeFerramenta, ErroDeProvedor
 from orquestrador.ferramentas.publicacao import remover_criados
-from orquestrador.observabilidade import tabelas
+from orquestrador.observabilidade import manifesto_de_execucao, tabelas
+from orquestrador.observabilidade.eventos import TipoDeEvento
 from orquestrador.observabilidade.registro import (
     Registro,
     configurar_console,
@@ -45,6 +46,11 @@ SUCESSO = 0
 FALHA_DE_GATE = 1
 ERRO_DE_USO = 2
 REQUER_REVISAO = 3
+# Indisponibilidade do provedor de LLM tem código próprio porque a resposta do
+# operador é outra: `2` pede para arrumar a configuração ou o ambiente, `4` pede
+# para esperar e repetir. Num agendamento, é a diferença entre alertar alguém e
+# reenfileirar sozinho.
+ERRO_DE_PROVEDOR = 4
 
 MARCA_DO_ESTADO: dict[EstadoDoRecurso, str] = {
     EstadoDoRecurso.APROVADO: "[green]OK[/green]",
@@ -194,6 +200,47 @@ def remover_reprovados(resultados: list[ResultadoDoRecurso], registro: Registro)
             )
 
 
+def escrever_manifesto(
+    config: Config,
+    registro: Registro,
+    *,
+    dir_execucao: Path,
+    dry_run: bool,
+    recursos: list[str],
+    com_artefatos: bool,
+) -> None:
+    """Grava o `manifesto-execucao.json` e diz no log o que não deu para coletar.
+
+    Chamado **duas** vezes: no início, para que uma execução que morra no meio
+    ainda deixe o cabeçalho do chamado de suporte; e no fim, quando existem
+    artefatos para hashear. Escrever só no fim faria o diagnóstico faltar
+    exatamente nas execuções que mais precisam dele.
+
+    O que falhou é dito no console porque `campos_ausentes` dentro de um JSON é
+    exatamente o tipo de coisa que ninguém abre: quem vai precisar do commit do
+    backend descobre no chamado, meses depois, que ele nunca foi coletado.
+    """
+    manifesto = manifesto_de_execucao.escrever(
+        config,
+        dir_execucao / manifesto_de_execucao.NOME_DO_MANIFESTO,
+        run_id=dir_execucao.name,
+        dry_run=dry_run,
+        recursos=recursos,
+        dir_artefatos=(dir_execucao / "artefatos") if com_artefatos else None,
+    )
+    ausentes: dict[str, str] = manifesto["campos_ausentes"]
+    registro.evento(
+        TipoDeEvento.MANIFESTO_DE_EXECUCAO,
+        arquivo=dir_execucao / manifesto_de_execucao.NOME_DO_MANIFESTO,
+        com_artefatos=com_artefatos,
+        campos_ausentes=ausentes,
+    )
+    if ausentes:
+        registro.aviso(
+            "manifesto de execução incompleto (a execução segue): " + ", ".join(sorted(ausentes))
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     configurar_console()
@@ -241,12 +288,20 @@ def main(argv: list[str] | None = None) -> int:
     with Registro(dir_execucao / "execucao.jsonl", console) as registro:
         registro.info(f"log estruturado: {registro.caminho}")
         registro.evento(
-            "execucao_iniciada",
+            TipoDeEvento.EXECUCAO_INICIADA,
             dry_run=args.dry_run,
             recursos=recursos_pedidos,
             config=str(config.origem),
             projeto_testes=config.caminhos.projeto_testes,
             backend=config.caminhos.backend,
+        )
+        escrever_manifesto(
+            config,
+            registro,
+            dir_execucao=dir_execucao,
+            dry_run=args.dry_run,
+            recursos=recursos_pedidos,
+            com_artefatos=False,
         )
 
         try:
@@ -266,9 +321,20 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             resultados = pipeline.rodar(montar_recursos(config, recursos_pedidos))
+        except ErroDeProvedor as erro:
+            # Antes de `ErroDeFerramenta`, de quem herda: a ordem dos `except` é o
+            # que separa "arrume o ambiente" de "espere e repita".
+            registro.falha(str(erro))
+            registro.evento(
+                TipoDeEvento.EXECUCAO_ABORTADA,
+                motivo=str(erro),
+                categoria=erro.categoria.value,
+                retentavel=erro.categoria.retentavel,
+            )
+            return ERRO_DE_PROVEDOR
         except (ErroDeFerramenta, ErroDeConfiguracao) as erro:
             registro.falha(f"erro de invocação do pipeline: {erro}")
-            registro.evento("execucao_abortada", motivo=str(erro))
+            registro.evento(TipoDeEvento.EXECUCAO_ABORTADA, motivo=str(erro))
             return ERRO_DE_USO
 
         registro.titulo("Telemetria")
@@ -278,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         # Só o mapeador tem tools; sem elas a tabela seria uma moldura vazia.
         if pipeline.telemetria.tools:
             console.print(tabelas.tabela_de_tools(pipeline.telemetria))
-        registro.evento("telemetria", **pipeline.telemetria.resumo_para_log())
+        registro.evento(TipoDeEvento.TELEMETRIA, **pipeline.telemetria.resumo_para_log())
 
         registro.titulo("Resumo")
         for resultado in resultados:
@@ -325,8 +391,16 @@ def main(argv: list[str] | None = None) -> int:
                 console.print(
                     "     não chegaram a rodar: " + ", ".join(interrupcao.recursos_nao_executados)
                 )
+        escrever_manifesto(
+            config,
+            registro,
+            dir_execucao=dir_execucao,
+            dry_run=args.dry_run,
+            recursos=recursos_pedidos,
+            com_artefatos=True,
+        )
         registro.evento(
-            "execucao_concluida",
+            TipoDeEvento.EXECUCAO_CONCLUIDA,
             sucesso=interrupcao is None and all(resultado.sucesso for resultado in resultados),
             interrompida=interrupcao is not None,
             recursos_nao_executados=(interrupcao.recursos_nao_executados if interrupcao else []),
@@ -347,7 +421,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if pipeline.interrupcao is not None:
         # Distinto do 1 de gate esgotado: ali o pipeline funcionou e o artefato não
-        # passou; aqui o pipeline não conseguiu emitir veredito nenhum.
+        # passou; aqui o pipeline não conseguiu emitir veredito nenhum. E provedor é
+        # distinto de ferramenta porque a resposta do operador é outra — esperar e
+        # repetir, em vez de arrumar o ambiente.
+        if pipeline.interrupcao.categoria_do_provedor is not None:
+            return ERRO_DE_PROVEDOR
         return ERRO_DE_USO
     return codigo_de_saida(resultados)
 

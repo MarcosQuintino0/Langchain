@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from orquestrador.contratos import RegistroDeChamada, RegistroDeTool, UsoDeTokens
+from orquestrador.observabilidade.eventos import TipoDeEvento
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 
 # A chave de agrupamento muda por método (`str`, `(str, str)`, `(str, str, int)`) e
@@ -94,7 +95,7 @@ class Telemetria:
         if self.registro is not None:
             # Uma linha por chamada no JSONL: sem isso o log só teria o agregado, e
             # "quantos tokens custou a tentativa 2" viraria dedução em vez de registro.
-            self.registro.evento("chamada_llm", **chamada.model_dump())
+            self.registro.evento(TipoDeEvento.CHAMADA_LLM, **chamada.model_dump())
         return chamada
 
     def registrar_tool(self, tool: RegistroDeTool) -> RegistroDeTool:
@@ -102,7 +103,7 @@ class Telemetria:
         if self.registro is not None:
             # Uma linha por chamada, com a ordem: é o que permite reconstruir a
             # sequência de exploração sem reexecutar nada.
-            self.registro.evento("tool", **tool.model_dump())
+            self.registro.evento(TipoDeEvento.TOOL, **tool.model_dump())
         return tool
 
     @property

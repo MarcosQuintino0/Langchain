@@ -24,6 +24,7 @@ from orquestrador.contratos import (
     SuperficieDoProjeto,
 )
 from orquestrador.ferramentas.publicacao import AreaDeStaging
+from orquestrador.llm.cliente import PoliticaDeRetentativa
 from orquestrador.llm.estruturado import GeradorEstruturado
 from orquestrador.llm.montagem import (
     LIMITE_PADRAO,
@@ -97,6 +98,10 @@ def executar(
         parametros=parametros,
         telemetria=telemetria,
         registro=registro,
+        # Sem isto o orçamento de retentativa configurado em `[openrouter]` não chega
+        # ao gerador e vale o padrão da classe — que hoje coincide, mas passaria a
+        # divergir em silêncio no dia em que alguém mudasse o arquivo.
+        politica=PoliticaDeRetentativa.do_config(config),
     )
     if delta is not None:
         entrada = montar_entrada_reparo(artefato_atual or "(artefato ausente)", delta)

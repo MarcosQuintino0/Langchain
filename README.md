@@ -280,20 +280,78 @@ Cada execução cria `.execucoes/<AAAAMMDD-HHMMSS>-<pid>/` com:
 
 ```
 execucao.jsonl              log estruturado, uma linha por evento
+manifesto-execucao.json     o que era verdade na máquina quando esta execução rodou
 artefatos/<recurso>/inventario.json
 cobertura/<recurso>/cobertura.html
 sandbox/                    só no --dry-run
 ```
 
-Tipos de evento no JSONL: `execucao_iniciada`, `bloco0`, `superficie`,
-`estagio_tentativa`, `chamada_llm`, `tool`, `gate`, `delta`, `artefatos`,
-`schemas_preservados`, `artefatos_reprovados`, `cypress`, `cobertura`,
-`recurso_falhou`, `recurso_concluido`, `telemetria`, `execucao_abortada`,
-`execucao_interrompida`, `execucao_concluida`. Dá para reconstruir o que aconteceu sem
-reexecutar — cada `chamada_llm` traz estágio, recurso, tentativa, modelo e tokens de
-entrada e saída; cada `gate` traz o veredito e os códigos de violação. A execução
-termina em `execucao_concluida` ou em `execucao_abortada` (com o motivo), nunca nos
-dois.
+Dá para reconstruir o que aconteceu sem reexecutar — cada `chamada_llm` traz
+estágio, recurso, tentativa, modelo e tokens de entrada e saída; cada `gate` traz o
+veredito e os códigos de violação. A execução termina em `execucao_concluida` ou em
+`execucao_abortada` (com o motivo), nunca nos dois.
+
+Toda linha carrega `schema_version`, para que log de ontem continue legível depois
+de uma mudança de formato.
+
+### Tipos de evento no JSONL
+
+O catálogo abaixo é **gerado** a partir de `TipoDeEvento`, em
+[`observabilidade/eventos.py`](src/orquestrador/observabilidade/eventos.py), e
+[`tests/test_eventos.py`](tests/test_eventos.py) reprova se ele divergir do enum.
+Era uma lista mantida à mão, e ela divergiu duas vezes no mesmo dia — não edite a
+tabela: edite o enum e regenere.
+
+<!-- INICIO DO CATALOGO DE EVENTOS: gerado por observabilidade/eventos.py -->
+| Evento | O que registra |
+| --- | --- |
+| `execucao_iniciada` | abertura: dry-run, recursos pedidos, arquivo de configuração e os dois repositórios |
+| `manifesto_de_execucao` | onde o `manifesto-execucao.json` foi escrito e quais campos não puderam ser coletados |
+| `bloco0` | preparação determinística: se o `graph.json` ficou utilizável, e por quê |
+| `superficie` | módulos compartilhados do projeto de testes e os exports que o executor pode importar |
+| `estagio_tentativa` | uma tentativa de um estágio: tamanho da instrução fixa, da entrada e uso de tools |
+| `chamada_llm` | uma chamada ao modelo: estágio, recurso, tentativa, modelo e tokens de entrada e saída |
+| `tool` | uma chamada de tool do mapeador: ordem, argumentos, tamanho do retorno e erro |
+| `gate` | veredito de um gate numa tentativa, com violações e avisos |
+| `delta` | o delta enviado ao reparo: códigos de violação e tamanho do artefato atual |
+| `artefatos` | arquivos que um estágio escreveu na área de staging da execução |
+| `schemas_preservados` | schemas que já eram do consumidor e o mapeador não sobrescreveu |
+| `schemas_divergentes` | campos que o mapeador achou no backend e o schema preservado não declara |
+| `publicacao` | o que a publicação fez no projeto do consumidor, arquivo a arquivo, com hash e classificação |
+| `artefatos_reprovados` | o que ficou em disco em estado reprovado, e se chegou a ser publicado |
+| `staging_mantido` | o staging do recurso sobreviveu ao fim porque tem artefato para inspecionar |
+| `cypress` | execução da suíte: código de saída e relatório desta execução, ou o motivo de não rodar |
+| `cobertura` | contadores do `qa-cobertura.mjs` e se houve execução de runtime |
+| `recurso_falhou` | o recurso terminou reprovado, com o motivo |
+| `recurso_concluido` | desfecho do recurso: estado, tentativas e execução de testes |
+| `telemetria` | agregados de token e de caracteres por estágio, recurso e tentativa |
+| `execucao_interrompida` | o laço de recursos parou no meio por ferramenta indisponível; lista quem não rodou |
+| `execucao_abortada` | a execução terminou sem veredito, com o motivo |
+| `execucao_concluida` | fechamento: sucesso, interrupção e o resumo por recurso |
+<!-- FIM DO CATALOGO DE EVENTOS -->
+
+### `manifesto-execucao.json`
+
+Responde ao chamado de suporte que o JSONL não responde: *"ontem passou, hoje
+falhou"*. Ele registra o `run_id`, a versão do orquestrador, do Python e do Node, o
+commit e o **estado sujo** dos dois repositórios quando são checkouts Git, a
+impressão da skill, a configuração **redigida**, os modelos configurados por
+estágio e o hash de cada prompt e de cada artefato.
+
+É escrito **duas vezes**: no início, para que uma execução que morra no meio ainda
+deixe o cabeçalho do chamado; e no fim, com os hashes dos artefatos.
+
+Três regras que o módulo não pode violar, e que
+[`tests/test_manifesto_de_execucao.py`](tests/test_manifesto_de_execucao.py) fixa:
+
+* **segredo nunca entra** — o *nome* da variável de ambiente da chave entra, o
+  valor não, nem mascarado; além da redação por nome de campo, o texto final é
+  varrido atrás do valor real da chave;
+* **código-fonte nunca entra** — de arquivo sai hash, nunca conteúdo;
+* **sonda que falha não derruba a execução** — backend que não é repositório Git
+  ou `node` fora do PATH deixam o campo ausente **com o motivo** em
+  `campos_ausentes`, e o manifesto sai assim mesmo. Um diagnóstico que impede o
+  trabalho é pior que um diagnóstico incompleto.
 
 `schemas_preservados` é o que separa denominador independente de denominador
 gerado: ele lista os schemas que já existiam no projeto do consumidor e que o
@@ -379,6 +437,8 @@ src/orquestrador/
     montagem.py      carga dos prompts e a regra do prompt de reparo
   observabilidade/
     __init__.py
+    eventos.py       TipoDeEvento — o vocabulário fechado do JSONL e a versão do formato
+    manifesto_de_execucao.py  manifesto-execucao.json: ambiente, commits, hashes, config redigida
     registro.py      log estruturado (JSONL) + console
     telemetria.py    agregação de tokens e caracteres por estágio, recurso, tentativa
     tabelas.py       as tabelas Rich do resumo final

@@ -51,8 +51,10 @@ from orquestrador.contratos import (
     SuperficieDoProjeto,
 )
 from orquestrador.excecoes import (
+    CategoriaDeProvedor,
     ErroDeConfiguracao,
     ErroDeFerramenta,
+    ErroDeProvedor,
     FalhaDaExecucaoDeTestes,
     FalhaDeEstagio,
     FalhaDeGate,
@@ -73,6 +75,7 @@ from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.gates import gate_a, gate_b
 from orquestrador.gates.saidas import resumo_da_cobertura
 from orquestrador.llm.cliente import criar_modelo
+from orquestrador.observabilidade.eventos import TipoDeEvento
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.simulacao import Roteiros
@@ -111,11 +114,18 @@ class ResultadoDaExecucaoDeTestes:
 
 @dataclass(frozen=True)
 class InterrupcaoDaExecucao:
-    """A execução parou no meio porque uma ferramenta não pôde rodar."""
+    """A execução parou no meio porque uma ferramenta ou o provedor não respondeu.
+
+    `categoria_do_provedor` distingue as duas: só ela decide se a resposta certa é
+    arrumar o ambiente ou esperar e repetir, e é dela que sai o código de saída. A
+    exceção em si não chega à CLI — o laço de recursos a captura para não perder o
+    resultado de quem já terminou —, então o que sobrevive precisa carregar isso.
+    """
 
     motivo: str
     recurso: str
     recursos_nao_executados: list[str] = field(default_factory=list[str])
+    categoria_do_provedor: CategoriaDeProvedor | None = None
 
 
 @dataclass
@@ -272,7 +282,7 @@ class Pipeline:
             resultado = grafo.preparar()
 
         self.registro.evento(
-            "bloco0",
+            TipoDeEvento.BLOCO0,
             ok=resultado.ok,
             regenerou=resultado.regenerou,
             graph=resultado.graph,
@@ -296,7 +306,7 @@ class Pipeline:
         destino.write_text(self.superficie.para_json(), encoding="utf-8", newline="\n")
 
         self.registro.evento(
-            "superficie",
+            TipoDeEvento.SUPERFICIE,
             raiz=self.superficie.raiz,
             modulos=[
                 {
@@ -343,7 +353,7 @@ class Pipeline:
                 *self._persistir_schemas(recurso, saida, area),
             ]
             self.registro.evento(
-                "artefatos",
+                TipoDeEvento.ARTEFATOS,
                 estagio=agente_mapeador.ESTAGIO,
                 recurso=recurso.nome,
                 arquivos=[str(caminho) for caminho in escritos],
@@ -417,7 +427,7 @@ class Pipeline:
 
         if preservados:
             self.registro.evento(
-                "schemas_preservados",
+                TipoDeEvento.SCHEMAS_PRESERVADOS,
                 recurso=recurso.nome,
                 arquivos=[str(caminho) for caminho in preservados],
             )
@@ -470,7 +480,7 @@ class Pipeline:
         def persistir(saida: SaidaExecutor) -> list[Path]:
             escritos = agente_executor.escrever(area, saida)
             self.registro.evento(
-                "artefatos",
+                TipoDeEvento.ARTEFATOS,
                 estagio=agente_executor.ESTAGIO,
                 recurso=recurso.nome,
                 arquivos=[str(caminho) for caminho in escritos],
@@ -516,7 +526,7 @@ class Pipeline:
                 else "[execucao].cypress não configurado"
             )
             self.registro.evento(
-                "cypress", recurso=recurso.nome, estado=NAO_EXECUTADO, motivo=motivo
+                TipoDeEvento.CYPRESS, recurso=recurso.nome, estado=NAO_EXECUTADO, motivo=motivo
             )
             # Aviso, não info: sem relatório o que sai adiante é cobertura de
             # forma — as tags que os specs declaram — e não prova de runtime.
@@ -532,7 +542,7 @@ class Pipeline:
         )
         contadores = resumo_da_cobertura(saida)
         self.registro.evento(
-            "cobertura",
+            TipoDeEvento.COBERTURA,
             recurso=recurso.nome,
             contadores=contadores,
             execucao_de_testes=estado,
@@ -595,7 +605,7 @@ class Pipeline:
             variaveis_extras=VARIAVEIS_DO_CYPRESS,
         )
         self.registro.evento(
-            "cypress",
+            TipoDeEvento.CYPRESS,
             recurso=recurso.nome,
             codigo=saida.codigo,
             relatorio=destino,
@@ -671,7 +681,7 @@ class Pipeline:
             resultado = avaliar(artefato)
 
             self.registro.evento(
-                "gate",
+                TipoDeEvento.GATE,
                 gate=f"gate_{gate}",
                 estagio=estagio,
                 recurso=recurso.nome,
@@ -707,7 +717,7 @@ class Pipeline:
             # quais linhas precisam estar à vista. Ver `llm.montagem`.
             artefato_atual = texto_do_artefato(artefato, delta)
             self.registro.evento(
-                "delta",
+                TipoDeEvento.DELTA,
                 estagio=f"gate_{gate}",
                 de=estagio,
                 recurso=recurso.nome,
@@ -752,7 +762,7 @@ class Pipeline:
         for tool in tools:
             por_nome[tool.nome] = por_nome.get(tool.nome, 0) + 1
         self.registro.evento(
-            "estagio_tentativa",
+            TipoDeEvento.ESTAGIO_TENTATIVA,
             estagio=estagio,
             recurso=recurso.nome,
             tentativa=tentativa,
@@ -787,20 +797,26 @@ class Pipeline:
             try:
                 resultados.append(self._rodar_recurso(recurso))
             except (ErroDeFerramenta, ErroDeConfiguracao) as erro:
-                # Ferramenta indisponível não é falha do recurso, e por isso não é
-                # isolada como se fosse: o script que não rodou aqui não vai rodar no
-                # próximo, e insistir só queima token repetindo a mesma falha. Mas
-                # também não pode subir cru — a exceção atravessando `rodar` levaria
-                # junto o resultado dos recursos que já tinham terminado.
+                # Indisponibilidade — de ferramenta ou de provedor, que é subclasse —
+                # não é falha do recurso, e por isso não é isolada como se fosse: o
+                # script que não rodou aqui não vai rodar no próximo, e insistir só
+                # queima token repetindo a mesma falha. Mas também não pode subir cru:
+                # a exceção atravessando `rodar` levaria junto o resultado dos recursos
+                # que já tinham terminado.
                 restantes = [seguinte.nome for seguinte in recursos[indice + 1 :]]
                 self.interrupcao = InterrupcaoDaExecucao(
-                    motivo=str(erro), recurso=recurso.nome, recursos_nao_executados=restantes
+                    motivo=str(erro),
+                    recurso=recurso.nome,
+                    recursos_nao_executados=restantes,
+                    categoria_do_provedor=(
+                        erro.categoria if isinstance(erro, ErroDeProvedor) else None
+                    ),
                 )
                 self.registro.falha(
                     f"execução interrompida em {recurso.nome}: ferramenta indisponível. {erro}"
                 )
                 self.registro.evento(
-                    "execucao_interrompida",
+                    TipoDeEvento.EXECUCAO_INTERROMPIDA,
                     recurso=recurso.nome,
                     motivo=str(erro),
                     recursos_nao_executados=restantes,
@@ -852,14 +868,16 @@ class Pipeline:
             resultado.codigos_remanescentes = erro.codigos
             resultado.divergencias = list(self._divergencias)
             self.registro.falha(str(erro))
-            self.registro.evento("recurso_falhou", recurso=recurso.nome, motivo=str(erro))
+            self.registro.evento(
+                TipoDeEvento.RECURSO_FALHOU, recurso=recurso.nome, motivo=str(erro)
+            )
             if erro.arquivos:
                 # A3: os arquivos ficam em disco de propósito (é o que se inspeciona
                 # para entender a falha), mas o efeito não pode ser silencioso. Com o
                 # staging, "em disco" passou a significar "no diretório da execução"
                 # quando a falha veio antes da publicação.
                 self.registro.evento(
-                    "artefatos_reprovados",
+                    TipoDeEvento.ARTEFATOS_REPROVADOS,
                     recurso=recurso.nome,
                     codigos=erro.codigos,
                     publicado=resultado.publicado,
@@ -874,12 +892,14 @@ class Pipeline:
             if area.dir_recurso.is_dir():
                 if any(area.dir_recurso.rglob("*")):
                     self.registro.evento(
-                        "staging_mantido", recurso=recurso.nome, diretorio=area.dir_recurso
+                        TipoDeEvento.STAGING_MANTIDO,
+                        recurso=recurso.nome,
+                        diretorio=area.dir_recurso,
                     )
                 else:
                     area.descartar()
         self.registro.evento(
-            "recurso_concluido",
+            TipoDeEvento.RECURSO_CONCLUIDO,
             recurso=recurso.nome,
             estado=resultado.estado.value,
             sucesso=resultado.sucesso,
@@ -911,7 +931,7 @@ class Pipeline:
 
         self.diario.registrar(entradas, esquecer=set(removidos))
         self.registro.evento(
-            "publicacao",
+            TipoDeEvento.PUBLICACAO,
             recurso=recurso.nome,
             arquivos=[
                 {
@@ -955,7 +975,7 @@ class Pipeline:
                 newline="\n",
             )
             self.registro.evento(
-                "schemas_divergentes",
+                TipoDeEvento.SCHEMAS_DIVERGENTES,
                 recurso=recurso.nome,
                 artefato=destino,
                 divergencias=[d.model_dump(mode="json") for d in self._divergencias],

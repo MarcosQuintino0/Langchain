@@ -5,11 +5,20 @@ e a `tool calling` varia muito entre modelos do OpenRouter. O fluxo é sempre
 (1) pedir pelo mecanismo configurado, (2) validar com Pydantic aqui, (3) se
 falhar, reenviar **apenas** um delta de estágio `"schema"` — mini-loop de reparo,
 praticamente grátis em contexto.
+
+A fronteira que este módulo não deixa borrar: **o modelo respondeu errado e o
+provedor não respondeu são coisas diferentes.** A primeira é resposta recebida —
+vira `Violacao`, entra no delta de schema e converge em uma ou duas voltas. A
+segunda é operacional — vira `ErroDeProvedor` em `llm/cliente.py`, sobe e
+interrompe, sem nunca entrar em `delta.violacoes`. Tratar indisponibilidade como
+resposta inválida queima o orçamento de tentativas mandando o modelo consertar um
+artefato que ele não chegou a produzir.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from langchain_core.language_models import BaseChatModel
@@ -20,6 +29,12 @@ from orquestrador.config import ConfigEstagio
 from orquestrador.contratos import Delta, RegistroDeChamada, UsoDeTokens, Violacao
 from orquestrador.excecoes import FalhaDeEstagio
 from orquestrador.ferramentas.json_externo import extrair_json
+from orquestrador.llm.cliente import (
+    PoliticaDeRetentativa,
+    TentativaDeProvedor,
+    chamar_com_retentativas,
+    descrever_volta,
+)
 from orquestrador.llm.mensagens import medir_mensagens, texto_da_mensagem, uso_da_mensagem
 from orquestrador.llm.montagem import montar_entrada_reparo
 from orquestrador.observabilidade.registro import RegistradorDeEventos
@@ -60,12 +75,17 @@ class GeradorEstruturado:
         parametros: ConfigEstagio,
         telemetria: Telemetria,
         registro: RegistradorDeEventos | None = None,
+        politica: PoliticaDeRetentativa | None = None,
     ) -> None:
         self.modelo = modelo
         self.estagio = estagio
         self.parametros = parametros
         self.telemetria = telemetria
         self.registro = registro
+        # Sem política explícita vale o padrão, que espelha o default de
+        # `[openrouter].max_retries`. Quem tem a `Config` na mão passa
+        # `PoliticaDeRetentativa.do_config(config)` e a configuração volta a mandar.
+        self.politica = politica or PoliticaDeRetentativa()
         self._modo = parametros.modo_estruturado
 
     def gerar(
@@ -135,13 +155,23 @@ class GeradorEstruturado:
         resposta: BaseMessage | None = None
         objeto: T | None = None
         problemas: list[Violacao] | None = None
+        # Medido antes de chamar: é o tamanho do que **vai** ser enviado, e uma
+        # tentativa que morre no provedor precisa aparecer na telemetria com ele.
+        instrucao, entrada = medir_mensagens(mensagens)
+        tamanhos = (instrucao, entrada)
 
         if modo != "prompt":
             try:
                 estruturado = self.modelo.with_structured_output(
                     tipo, method=_METODOS[modo], include_raw=True
                 )
-                retorno = estruturado.invoke(mensagens)
+                retorno = self._com_retentativas(
+                    lambda: estruturado.invoke(mensagens),
+                    recurso=recurso,
+                    tentativa=tentativa,
+                    passo=passo,
+                    tamanhos=tamanhos,
+                )
                 # Com `include_raw=True` o LangChain devolve sempre o envelope
                 # `{"raw", "parsed", "parsing_error"}`. O `BaseModel` solto que a
                 # assinatura também admite é o caso `include_raw=False`, que este
@@ -166,10 +196,15 @@ class GeradorEstruturado:
                 modo = "prompt"
 
         if modo == "prompt":
-            resposta = self.modelo.invoke(mensagens)
+            resposta = self._com_retentativas(
+                lambda: self.modelo.invoke(mensagens),
+                recurso=recurso,
+                tentativa=tentativa,
+                passo=passo,
+                tamanhos=tamanhos,
+            )
             objeto, problemas = self._parsear(tipo, texto_da_mensagem(resposta))
 
-        instrucao, entrada = medir_mensagens(mensagens)
         self.telemetria.registrar(
             RegistroDeChamada(
                 estagio=self.estagio,
@@ -185,6 +220,56 @@ class GeradorEstruturado:
             )
         )
         return resposta, objeto, problemas
+
+    def _com_retentativas[R](
+        self,
+        operacao: Callable[[], R],
+        *,
+        recurso: str,
+        tentativa: int,
+        passo: int,
+        tamanhos: tuple[int, int],
+    ) -> R:
+        """Chama o provedor registrando cada volta que falhou.
+
+        A volta perdida vira `RegistroDeChamada` como qualquer outra — mesma
+        telemetria, mesmo evento `chamada_llm` —, com o tamanho do que foi enviado e
+        a duração até a falha. É o que torna a repetição auditável: enquanto ela
+        acontecia dentro do cliente, sumia entre duas linhas do log e reaparecia só
+        na fatura.
+
+        O uso de token vai zerado de propósito: a chamada que falha não devolve
+        contador, e estimar aqui contaminaria a medida do princípio 2, que é feita
+        sobre estes mesmos registros.
+
+        O formato da linha de `detalhe` é de `descrever_volta`, em `llm/cliente.py`:
+        o mapeador registra a mesma coisa, e dois formatos para a mesma pergunta
+        obrigariam quem lê o relatório a conhecer os dois.
+        """
+
+        def registrar(volta: TentativaDeProvedor) -> None:
+            self.telemetria.registrar(
+                RegistroDeChamada(
+                    estagio=self.estagio,
+                    recurso=recurso,
+                    tentativa=tentativa,
+                    modelo=self.parametros.modelo,
+                    uso=UsoDeTokens(),
+                    duracao_s=volta.duracao_s,
+                    simulado=getattr(self.modelo, "simulado", False),
+                    detalhe=descrever_volta(volta, self.politica, prefixo=f"schema:{passo}"),
+                    caracteres_instrucao=tamanhos[0],
+                    caracteres_entrada=tamanhos[1],
+                )
+            )
+
+        return chamar_com_retentativas(
+            operacao,
+            politica=self.politica,
+            estagio=self.estagio,
+            recurso=recurso,
+            ao_falhar=registrar,
+        )
 
     @staticmethod
     def _parsear(tipo: type[T], texto: str) -> tuple[T | None, list[Violacao] | None]:

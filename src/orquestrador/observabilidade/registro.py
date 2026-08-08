@@ -3,6 +3,11 @@
 Requisito: deve ser possível reconstruir o que aconteceu sem reexecutar. Cada
 evento carrega estágio, recurso, tentativa, tokens, veredito do gate e códigos de
 violação.
+
+O **nome** de cada evento não mora aqui: mora em `eventos.py`, que é o dono do
+vocabulário. Este módulo é dono do arquivo, do console e da forma da linha —
+incluindo o `schema_version`, que é o que mantém log de ontem legível depois de
+uma mudança de formato.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from orquestrador.contratos import dados_para_log
+from orquestrador.observabilidade.eventos import ESQUEMA_DOS_EVENTOS, TipoDeEvento
 
 
 class RegistradorDeEventos(Protocol):
@@ -32,7 +38,7 @@ class RegistradorDeEventos(Protocol):
     só apareceria em execução, dentro de um `if` que quase nunca roda em teste.
     """
 
-    def evento(self, tipo: str, **campos: Any) -> None: ...
+    def evento(self, tipo: TipoDeEvento | str, **campos: Any) -> None: ...
 
 
 def configurar_console() -> None:
@@ -67,11 +73,28 @@ class Registro:
 
     # -- eventos ------------------------------------------------------------
 
-    def evento(self, tipo: str, **campos: Any) -> None:
+    def evento(self, tipo: TipoDeEvento | str, **campos: Any) -> None:
+        """Escreve uma linha do JSONL. Nunca levanta por causa do tipo do evento.
+
+        A união com `str` é **fase de transição**, não relaxamento: `agentes/` e
+        `llm/` também emitem, e trocar a assinatura dos dois numa mudança que
+        ninguém pediu ali é o tipo de conflito que o working tree compartilhado
+        transforma em retrabalho. Enquanto durar, quem garante que nenhuma string
+        solta entra é `tests/test_eventos.py`, que varre a AST de `src/` e exige
+        que todo primeiro argumento de `.evento(...)` seja membro de
+        `TipoDeEvento` ou literal com valor de um membro.
+
+        A checagem é estática, e não uma conversão que levanta aqui, de propósito:
+        `staging_mantido` é emitido dentro de um `finally` que quase nunca roda, e
+        um `ValueError` ali derrubaria a execução escondendo o erro original —
+        observabilidade não decide fluxo, e muito menos o encerra. A varredura por
+        AST pega o mesmo defeito antes de rodar, inclusive nos ramos raros.
+        """
         linha = {
             "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "t_s": round(time.perf_counter() - self.inicio, 3),
-            "tipo": tipo,
+            "schema_version": ESQUEMA_DOS_EVENTOS,
+            "tipo": str(tipo),
             **{chave: dados_para_log(valor) for chave, valor in campos.items()},
         }
         self._fluxo.write(json.dumps(linha, ensure_ascii=False) + "\n")
