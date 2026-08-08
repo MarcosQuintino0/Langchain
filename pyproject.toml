@@ -79,6 +79,39 @@ dev = [
   "nodeenv==1.10.0",   # de pyright: é ele que baixa o Node do binário do Pyright
 ]
 
+# O site de documentação. Extra separado de `dev` de propósito: quem só vai rodar
+# a suíte não precisa baixar 20 pacotes de renderização, e a CI instala os dois
+# extras em jobs diferentes. Mesma política de pin do resto — versão exata,
+# transitivas junto.
+#
+# Sem `mkdocstrings`: o projeto deixou `D101`/`D103` fora do `select` do Ruff de
+# propósito, porque docstring obrigatória vira docstring burocrática. Autodoc sobre
+# um pacote assim produz páginas com o nome da função e mais nada, e uma página
+# vazia é pior que nenhuma — ela promete referência que não existe.
+docs = [
+  "mkdocs==1.6.1",
+  "mkdocs-material==9.7.7",
+  "pymdown-extensions==11.0.1",
+  # Transitivas
+  "babel==2.18.0",
+  "backrefs==8.0",
+  "click==8.4.2",
+  "ghp-import==2.1.0",
+  "Jinja2==3.1.6",
+  "Markdown==3.10.3",
+  "MarkupSafe==3.0.3",
+  "mergedeep==1.3.4",
+  "mkdocs-get-deps==0.2.2",
+  "mkdocs-material-extensions==1.3.1",
+  "paginate==0.5.7",
+  "pathspec==1.1.1",
+  "platformdirs==4.11.1",
+  "python-dateutil==2.9.0.post0",
+  "pyyaml_env_tag==1.1",
+  "six==1.17.0",
+  "watchdog==6.0.0",
+]
+
 [project.scripts]
 orquestrador = "orquestrador.cli.principal:main"
 

@@ -22,6 +22,26 @@ o pipeline recusa rodar até alguém conferir o contrato.
 
 ---
 
+## Documentação
+
+Este README ensina **o que o projeto é e como rodá-lo**. O resto — glossário,
+diagramas, referência da CLI e da configuração, o porquê de cada ferramenta e as
+decisões de arquitetura — está em [`docs/`](docs/index.md), como um site MkDocs:
+
+```bash
+pip install -e ".[docs]" && mkdocs serve
+```
+
+O site **não é publicado**. A CI o constrói com `--strict`, para reprovar link
+quebrado e página fora da navegação, e descarta o resultado
+([ADR 0011](docs/adr/0011-documentacao-sem-publicacao.md)).
+
+E o [`AGENTS.md`](AGENTS.md) diz **o que não pode ser quebrado e onde as coisas
+moram**. Os três não se repetem de propósito: regra duplicada só descobre que
+divergiu depois que já foi seguida errada.
+
+---
+
 ## Por que esta arquitetura existe
 
 A skill `qa-api` executada por um único modelo, numa sessão só, apresenta dois
@@ -46,21 +66,15 @@ determinísticos descartam o que não presta. O LLM nunca é o verificador prim�
 
 ### Os seis princípios
 
-1. **O que trafega entre estágios é artefato em disco, nunca histórico de
-   conversa.** Os arquivos (`graph.json`, `cobertura.json`, `inventario.json`, os
-   `.cy.js`, `report.json`) são a única memória compartilhada. Qualquer agente
-   pode morrer e ser reinstanciado do zero sem perda.
-2. **Loop de reparo envia apenas o delta:** `instrucao_fixa_do_estagio +
-   artefato_atual + delta.violacoes`. Nunca o histórico das tentativas. Vive em
-   [`llm/montagem.py`](src/orquestrador/llm/montagem.py), num lugar só, para não
-   escapar por descuido.
-3. **Agentes são stateless entre unidades de trabalho.** Um recurso por vez,
-   histórico zerado entre recursos.
-4. **Quem reprova é script; LLM só cria.** Nenhum LLM decide se a cobertura está
-   completa.
-5. **O auditor semântico fica fora do loop quente.** Caro, com falso positivo
-   alto, sob demanda, com humano triando.
-6. **Modelo configurável por estágio.** Nenhum nome de modelo no código.
+1. O que trafega entre estágios é **artefato em disco**, nunca histórico de conversa.
+2. O loop de reparo envia **apenas o delta**.
+3. Agentes são **stateless** entre unidades de trabalho.
+4. **Quem reprova é script**; LLM só cria.
+5. O auditor semântico fica **fora do loop quente**.
+6. **Nenhum nome de modelo** em código ou prompt.
+
+A razão de cada um está em
+[`docs/arquitetura/os-seis-principios.md`](docs/arquitetura/os-seis-principios.md).
 
 ---
 
@@ -92,93 +106,13 @@ de completude que originou o projeto.
 
 ## Matriz de suporte
 
-Esta seção existe para você decidir, antes de instalar, se o orquestrador serve
-para o seu projeto — e para que a resposta seja a mesma dada aqui, no código e na
-mensagem de erro. **Fora da matriz, a ferramenta falha com diagnóstico**: nunca
-aprova, nunca promete cobertura que não sabe medir.
+Backend **Java/Spring** e projeto de testes **Cypress em JavaScript** são o Tier A —
+a combinação avaliada, em que os quatro blocos funcionam inteiros. Fora dela a
+ferramenta falha com diagnóstico: nunca aprova, nunca promete cobertura que não
+sabe medir.
 
-A tentação óbvia é a oposta — acrescentar uma frase ao prompt dizendo "suporte
-também FastAPI" e chamar isso de suporte. É o defeito de origem do projeto com
-outra roupa: um LLM sempre devolve *alguma* coisa, e o que falta não é a capacidade
-de escrever teste, é o **denominador determinístico** que prova que o teste cobre o
-que existe. Suporte, aqui, significa que existe um verificador que sabe reprovar.
-
-### Tier A — avaliado e suportado
-
-| Papel | O que é |
-| --- | --- |
-| Backend | Java com Spring MVC (`@RestController`, `@RequestMapping`, `@GetMapping` e irmãos) |
-| Projeto de testes | Cypress em JavaScript — `.js`, `.mjs`, `.cjs` |
-
-É a combinação que roda contra backend real aqui, e a única em que os quatro
-blocos funcionam inteiros: o Bloco 0 indexa o backend,
-[`analise_estatica/rotas_java_spring.py`](src/orquestrador/analise_estatica/rotas_java_spring.py)
-lê as rotas do fonte e dá ao Gate A o **denominador** do diff grafo × manifesto, o
-Gate B roda o validador da skill e a lacuna de cobertura, e o Bloco 3 executa a
-suíte.
-
-Esta seção declara para quais linguagens existe denominador; em que fase está o
-gate que o consome é assunto de [O que é stub](#o-que-é-stub). São perguntas
-diferentes e envelhecem em ritmos diferentes — juntá-las numa lista só é como as
-duas ficam desatualizadas ao mesmo tempo.
-
-Os limites que valem **mesmo dentro do Tier A**, porque suporte avaliado não é
-suporte perfeito:
-
-* **A superfície do projeto é lida por heurística, não por AST.**
-  `analise_estatica/exports_javascript.py` reconhece as formas de `export` que a
-  arquitetura-base da skill usa; um módulo escrito de forma exótica (reexport
-  dinâmico, `Object.assign(module.exports, …)`) some da superfície, e o executor
-  passa a não saber que aquele símbolo existe. O sintoma é import que não resolve
-  no Gate B, não silêncio.
-* **Rota que o parser não consegue resolver não é adivinhada.** Caminho montado
-  por constante, concatenação ou `${propriedade}` vira o aviso `QAORQ-001`, com a
-  expressão original — nem endpoint inventado, nem omissão silenciosa.
-* **TypeScript no projeto de testes não é lido.** O extrator aceita as três
-  extensões acima e só elas.
-
-### Tier B — o Graphify indexa, a descoberta é genérica
-
-Vale para backend em linguagem que o extrator AST do Graphify indexa, mas para a
-qual **não existe adaptador de rota** em
-`analise_estatica/extrator_de_endpoints.py`. Quais linguagens são essas é
-informação do Graphify, e este README de propósito não a repete: lista copiada
-envelhece, e o que vale é o que aquela versão fixada realmente indexou.
-
-O que você ganha: o Bloco 0 roda, o grafo existe, e as tools do mapeador
-(`query`, `affected`) localizam código sem varrer o backend. O Bloco 2 e o Gate B
-funcionam normalmente — eles olham o projeto de testes, não o backend.
-
-O que você **não** ganha, e é declarado: sem adaptador não há denominador, então o
-Gate A não consegue provar *"planejei tudo que existe"*. Quando nenhum adaptador lê
-um endpoint sequer do backend, a resposta é **erro de ferramenta** — nem aprovado,
-nem reprovado —, com a mensagem dizendo quantos arquivos o grafo tinha, quantos
-foram analisados e quais extensões ficaram de fora. Aprovar ali seria declarar
-cobertura completa sem ter contra o que comparar; reprovar mandaria o mapeador
-consertar um artefato correto e queimaria as tentativas sem chance de convergir. É
-a mesma escolha que `gates/lacunas.py` faz quando o contador de cobertura não vem.
-
-Confiança declarada: **menor**. A cobertura medida continua sendo a do gabarito
-contra si mesmo, que é exatamente o que o projeto existe para superar.
-
-### Tier C — experimental ou bloqueado
-
-| Item | Estado | O que acontece |
-| --- | --- | --- |
-| Projeto de testes que não seja Cypress/JS | bloqueado | o Bloco 0 falha antes de chamar qualquer modelo: sem export lido, não há superfície |
-| Backend que o Graphify não indexa | bloqueado | sem `graph.json` não há Bloco 0, e o Bloco 1 recusa rodar |
-| Segundo adaptador de linguagem | não existe | a matriz de `extrator_de_endpoints.py` tem uma linha hoje |
-| Auditor semântico | stub | `--auditor` encerra com erro em vez de fingir auditoria |
-| Execução do Cypress (Bloco 3) | opcional | pulado por padrão; sem `--rodar-cypress` o resumo diz `NAO_EXECUTADO`, e a cobertura relatada é estática |
-
-**Onde a matriz mora no código.** A do denominador é a constante
-`MATRIZ_DE_SUPORTE`, em
-[`analise_estatica/extrator_de_endpoints.py`](src/orquestrador/analise_estatica/extrator_de_endpoints.py);
-a do projeto de testes é `EXTENSOES`, em
-[`analise_estatica/extrator_de_superficie.py`](src/orquestrador/analise_estatica/extrator_de_superficie.py).
-Adaptador novo entra lá, com projeto-fixture e teste — não aqui.
-
----
+Os três tiers, os limites que valem **dentro** do Tier A e o que exatamente falta
+em cada um estão em [`docs/referencia/matriz-de-suporte.md`](docs/referencia/matriz-de-suporte.md).
 
 ## Instalação
 
@@ -435,39 +369,9 @@ de uma mudança de formato.
 
 ### Tipos de evento no JSONL
 
-O catálogo abaixo é **gerado** a partir de `TipoDeEvento`, em
-[`observabilidade/eventos.py`](src/orquestrador/observabilidade/eventos.py), e
-[`tests/test_observabilidade_eventos.py`](tests/test_observabilidade_eventos.py) reprova se ele divergir do enum.
-Era uma lista mantida à mão, e ela divergiu duas vezes no mesmo dia — não edite a
-tabela: edite o enum e regenere.
-
-<!-- INICIO DO CATALOGO DE EVENTOS: gerado por observabilidade/eventos.py -->
-| Evento | O que registra |
-| --- | --- |
-| `execucao_iniciada` | abertura: dry-run, recursos pedidos, arquivo de configuração e os dois repositórios |
-| `manifesto_de_execucao` | onde o `manifesto-execucao.json` foi escrito e quais campos não puderam ser coletados |
-| `bloco0` | preparação determinística: se o `graph.json` ficou utilizável, e por quê |
-| `superficie` | módulos compartilhados do projeto de testes e os exports que o executor pode importar |
-| `estagio_tentativa` | uma tentativa de um estágio: tamanho da instrução fixa, da entrada e uso de tools |
-| `chamada_llm` | uma chamada ao modelo: estágio, recurso, tentativa, modelo e tokens de entrada e saída |
-| `tool` | uma chamada de tool do mapeador: ordem, argumentos, tamanho do retorno e erro |
-| `gate` | veredito de um gate numa tentativa, com violações e avisos |
-| `delta` | o delta enviado ao reparo: códigos de violação e tamanho do artefato atual |
-| `artefatos` | arquivos que um estágio escreveu na área de staging da execução |
-| `schemas_preservados` | schemas que já eram do consumidor e o mapeador não sobrescreveu |
-| `schemas_divergentes` | campos que o mapeador achou no backend e o schema preservado não declara |
-| `publicacao` | o que a publicação fez no projeto do consumidor, arquivo a arquivo, com hash e classificação |
-| `artefatos_reprovados` | o que ficou em disco em estado reprovado, e se chegou a ser publicado |
-| `staging_mantido` | o staging do recurso sobreviveu ao fim porque tem artefato para inspecionar |
-| `cypress` | execução da suíte: código de saída e relatório desta execução, ou o motivo de não rodar |
-| `cobertura` | contadores do `qa-cobertura.mjs` e se houve execução de runtime |
-| `recurso_falhou` | o recurso terminou reprovado, com o motivo |
-| `recurso_concluido` | desfecho do recurso: estado, tentativas e execução de testes |
-| `telemetria` | agregados de token e de caracteres por estágio, recurso e tentativa |
-| `execucao_interrompida` | o laço de recursos parou no meio por ferramenta indisponível; lista quem não rodou |
-| `execucao_abortada` | a execução terminou sem veredito, com o motivo |
-| `execucao_concluida` | fechamento: sucesso, interrupção e o resumo por recurso |
-<!-- FIM DO CATALOGO DE EVENTOS -->
+O vocabulário é fechado e a tabela é **gerada** a partir de
+`observabilidade/eventos.py`: veja
+[`docs/referencia/eventos.md`](docs/referencia/eventos.md).
 
 ### `manifesto-execucao.json`
 
@@ -552,165 +456,10 @@ afirmações — e quebram se alguém concatenar histórico "para dar mais conte
 
 ## Estrutura
 
-```
-pyproject.toml       deps + configuração de pytest + empacotamento, num arquivo só
-config.toml          configuração de execução — é do usuário; nasce de `orquestrador init`
-prompts/             instrução fixa de cada estágio (editorial; mapeado para o wheel)
-fixtures/            artefatos do --dry-run — desenvolvimento, fora do wheel
-tests/
-src/orquestrador/
-  __init__.py        docstring do pacote
-  __main__.py        ponto de entrada de `python -m orquestrador`
-  config.py          carga e validação da configuração
-  excecoes.py        FalhaDeGate, FalhaDeEstagio, ErroDeFerramenta, ErroDeConfiguracao
-  raiz.py            resolução da raiz do projeto — único uso de Path(__file__)
-  cli/
-    __init__.py
-    codigos_de_saida.py  0..4 — o contrato com quem automatiza
-    init.py          `orquestrador init`: o config.toml comentado
-    doctor.py        `orquestrador doctor`: 14 diagnósticos do ambiente
-    principal.py     argumentos, montagem da execução e apresentação
-  aplicacao/
-    __init__.py
-    pipeline.py      a ordem dos quatro blocos e o desfecho de cada recurso
-    ciclo_de_reparo.py  gera → persiste → avalia → (delta → repete)
-    persistencia.py  o que sai para o disco, e de quem é cada arquivo que sai
-    simulacao.py     modelo falso dirigido por fixture + sandbox do --dry-run
-  dominio/
-    __init__.py
-    endpoint.py      o vocabulário HTTP que inventário e manifesto compartilham
-    recurso.py       Recurso e NomeDeRecurso — a unidade de trabalho e o nome que vira diretório
-    inventario.py    o que o backend expõe, segundo quem leu o código
-    manifesto.py     o gabarito de cobertura — espelho de _support/cobertura.json
-    veredito.py      Violacao, ResultadoGate, Delta, EstadoDoRecurso
-    artefatos.py     SaidaMapeador, SaidaExecutor e o confinamento de forma de caminho
-    propriedade.py   diário de propriedade, classificação e divergência de schema
-    superficie.py    o que o projeto de testes do consumidor já oferece ao executor
-    auditoria.py     o veredito do auditor semântico
-  llm/
-    __init__.py
-    cliente.py       cliente OpenRouter, seleção por estágio
-    mensagens.py     uso de token, texto e tamanho de entrada
-    estruturado.py   saída estruturada + mini-loop de reparo de schema
-    montagem.py      carga dos prompts e a regra do prompt de reparo
-  observabilidade/
-    __init__.py
-    eventos.py       TipoDeEvento — o vocabulário fechado do JSONL e a versão do formato
-    medidas.py       UsoDeTokens, RegistroDeChamada, RegistroDeTool — o que se mede
-    manifesto_de_execucao.py  manifesto-execucao.json: ambiente, commits, hashes, config redigida
-    registro.py      log estruturado (JSONL) + console
-    telemetria.py    agregação de tokens e caracteres por estágio, recurso, tentativa
-    tabelas.py       as tabelas Rich do resumo final
-  agentes/
-    __init__.py
-    mapeador.py                 a unidade de trabalho do Bloco 1
-    ferramentas_do_mapeador.py  as cinco tools e a medição de cada chamada
-    grafo_react.py              todo o acoplamento com o LangGraph
-    executor.py                 chamada estruturada, sem tools
-    auditor.py                  STUB, interface definida
-  analise_estatica/
-    __init__.py
-    exports_javascript.py    parser puro dos `export` de um módulo JS
-    tags_cypress.py          parser puro das tags @endpoint/@cat de um spec
-    extrator_de_superficie.py  acha os módulos compartilhados e calcula os imports
-    rotas_java_spring.py       parser puro das anotações de rota do Spring MVC
-    extrator_de_endpoints.py   matriz de suporte + grafo → endpoints do backend
-  ferramentas/
-    __init__.py
-    processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
-    graphify.py      wrappers query/affected/reindex
-    arquivos.py      ler/listar/buscar com confinamento de caminho
-    privacidade.py   denylist, .llmignore e redação de segredo antes do envio
-    publicacao.py    staging por recurso, diário de propriedade, publicação atômica
-    scripts_qa.py    wrappers dos .mjs da skill
-    json_externo.py  extrair_json tolerante de stdout de ferramenta (única impl.)
-  gates/
-    __init__.py
-    codigos.py       catálogo dos códigos de violação QAORQ-
-    gate_a.py        --so-manifesto + diff grafo × manifesto
-    gate_b.py        prettier + eslint + validador + lacuna de cobertura
-    lacunas.py       QAORQ-030: categoria planejada que não virou teste
-    saidas.py        JSON dos .mjs → ResultadoGate/Violacao
-```
-
-`analise_estatica/` responde "o que existe neste JavaScript" sem executá-lo, e é a
-razão de `exports_javascript.py` não morar em `ferramentas/`: entra texto, sai
-`ExportJs`. `ferramentas/` fica reservado ao adaptador de disco, de subprocesso e
-de CLI de terceiro.
-
-[`tests/test_invariante_estrutura_do_codigo.py`](tests/test_invariante_estrutura_do_codigo.py) **verifica
-esta árvore**: módulo de produção que não aparece aqui reprova, e linha aqui que
-não corresponde a arquivo também. Foi a omissão de dois módulos que fez um revisor
-externo procurar arquivo no lugar errado — a árvore é documentação executável, não
-enfeite. O mesmo arquivo fixa a lista fechada da raiz do pacote, a direção de
-dependência entre os subpacotes e a proibição de reexport em `__init__.py`.
-
-**Onde o Bloco 1 escreve.** O manifesto vai para `_support/cobertura.json`, dentro do
-diretório do recurso; os **schemas de entrada** vão para
-`[caminhos].dir_schemas` (`cypress/fixtures/schemas/<recurso>/`), que fica **fora**
-dele. Quem os emite é o mapeador, não o executor: o schema é o denominador da
-cobertura por campo, e denominador pertence ao plano. Se o executor o escrevesse,
-estaria escrevendo a própria régua — a circularidade que esta arquitetura existe para
-eliminar. O confinamento do executor ao diretório do recurso continua intacto.
-
-**Quando o projeto do consumidor é tocado.** Uma vez por recurso, depois que os
-dois gates aprovaram. Até lá, cada tentativa do loop escreve numa **área de
-staging** da execução, e é o staging que os gates validam — validar uma coisa e
-publicar outra era o buraco por onde uma tentativa ruim sobrescrevia a suíte de
-quem paga pela ferramenta.
-
-O staging do recurso é um irmão do diretório real, no mesmo nível
-(`cypress/e2e/apis/.qa-staging-<execucao>-<recurso>`). Precisa ser ali, e não em
-`.execucoes/`, por duas resoluções de caminho da skill: os specs importam os
-módulos compartilhados por caminho relativo (`../../../../support/api/...`), que o
-validador resolve a partir do arquivo, e o `cobertura/handlers.mjs` **sobe** do
-recurso procurando `.agents/config/qa-api/handlers.json`. Os schemas, esses, ficam
-em `.execucoes/<ts>/staging/`, porque as duas ferramentas aceitam o diretório
-pronto (`--schemas`). O ponto inicial do nome mantém o staging fora do
-`specPattern` padrão do Cypress.
-
-A publicação é atômica por recurso, com verificação de conflito antes e rollback
-em caso de falha no meio: uma interrupção deixa o projeto byte a byte como estava.
-Cada arquivo tocado vira uma linha no **diário de propriedade**
-(`.execucoes/diario-de-propriedade.json`) com caminho, hash anterior, hash novo e
-classificação `criado` / `modificado` / `preexistente`. É esse diário que devolve
-o `--remover-reprovados`, restrito ao que **nós** criamos e que ninguém editou
-desde então — e que autoriza remover spec obsoleto de execução anterior sob a
-mesma regra. Sem diário, nada é removido.
-
-**Por que `prompts/` fica fora de `src/` e mesmo assim vai no wheel.** Prompt é
-conteúdo editorial, iterado por quem não necessariamente mexe em Python, e por isso
-mora na raiz do repositório, longe do código. Só que sem ele não há estágio de LLM:
-o wheel **precisa** levá-lo, e antes não levava — instalava com sucesso e falhava no
-primeiro comando.
-
-A conciliação é de empacotamento, não de cópia. O `pyproject.toml` mapeia o
-diretório `prompts/` da raiz para o pacote `orquestrador.prompts`
-(`[tool.setuptools].package-dir`), e o build grava ali dentro do wheel o conteúdo
-que já mora na raiz. **Não existe segunda cópia versionada para divergir**: num
-checkout só existe `prompts/`; num ambiente instalado só existe
-`orquestrador/prompts/`. Quem resolve os dois casos é
-[`raiz.py`](src/orquestrador/raiz.py), por `importlib.resources`, e
-`[caminhos].prompts` continua sendo o override declarado.
-
-O preço é uma lista explícita de `packages` no `pyproject.toml` — `packages.find`
-varre `where` e nunca acharia um diretório fora de `src/`. Quem cobra que ela não
-envelheça é `tests/test_invariante_empacotamento.py`: subpacote novo que não apareça lá reprova,
-em vez de sumir do wheel em silêncio.
-
-**Por que `fixtures/` e `config.toml` NÃO vão no wheel.** `fixtures/` é material de
-desenvolvimento do `--dry-run` — backend e projeto Cypress de mentira, roteiros de
-resposta —, e empacotá-lo faria todo usuário baixar o banco de testes deste
-repositório. `config.toml` é do usuário, e nasce de `orquestrador init`. A
-consequência declarada é que a instalação pelo wheel não tem `--dry-run`: quem
-quiser conferir a instalação usa `orquestrador doctor`, que não depende de fixture
-nenhuma.
-
-**Onde mora `Path(__file__)`.** Em [`raiz.py`](src/orquestrador/raiz.py), e só lá.
-Havia cinco módulos calculando a raiz por conta própria; depois que o código desceu
-para `src/`, cada um passaria a apontar para dentro do pacote e uma saída
-configurada como `.execucoes` iria parar em `src/orquestrador/.execucoes/` — sem
-erro nenhum, só no lugar errado.
+Cinco arquivos na raiz do pacote e nove subpacotes, cada um com um único motivo
+dominante de mudança. A árvore anotada — que é **documentação executável**, e
+reprova se divergir dos módulos reais — está em
+[`docs/arquitetura/estrutura.md`](docs/arquitetura/estrutura.md).
 
 ### Contratos de dados
 
@@ -747,20 +496,9 @@ recurso e qual estágio.
 
 ### Códigos de violação
 
-Os `QAAPI-0xx` vêm dos scripts da skill. O orquestrador usa o prefixo `QAORQ-`
-para nunca colidir:
-
-| Código | Significado |
-| --- | --- |
-| `QAORQ-001` | trecho que o diff grafo × manifesto não conseguiu resolver (aviso) |
-| `QAORQ-002` | endpoint existe no backend e não está no gabarito |
-| `QAORQ-003` | endpoint declarado no gabarito sem correspondente no backend |
-| `QAORQ-010` | saída do modelo não valida contra o contrato Pydantic |
-| `QAORQ-011` | o modelo não devolveu JSON no formato pedido |
-| `QAORQ-020` / `-021` | prettier / eslint reprovaram |
-| `QAORQ-022` | formatador configurado mas ausente do PATH |
-| `QAORQ-030` | categoria declarada em `cats` sem nenhum `it` que a cubra |
-| `QAORQ-040` | schema preservado do consumidor não declara campo que o mapeador achou |
+Os `QAAPI-0xx` vêm da skill; os `QAORQ-0xx` são do orquestrador e a tabela deles
+é gerada a partir de `gates/codigos.py`. As duas famílias estão em
+[`docs/referencia/codigos-de-violacao.md`](docs/referencia/codigos-de-violacao.md).
 
 ### A lacuna é um gate, não só um número no relatório
 

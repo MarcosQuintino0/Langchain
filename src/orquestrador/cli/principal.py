@@ -48,12 +48,6 @@ from orquestrador.observabilidade.registro import (
 )
 from orquestrador.raiz import ARQUIVO_ENV, DIR_FIXTURES, RAIZ_PROJETO
 
-#
-# `3` é o terceiro estado do recurso: tudo passou, o artefato foi publicado, e
-# alguma coisa precisa de olho humano — hoje, schema do consumidor que não declara
-# campo que existe no backend. Não é 0 porque um pipeline verde esconderia a
-# revisão pendente, e não é 1 porque nenhum gate reprovou e não há nada para o
-# modelo consertar.
 MARCA_DO_ESTADO: dict[EstadoDoRecurso, str] = {
     EstadoDoRecurso.APROVADO: "[green]OK[/green]",
     EstadoDoRecurso.REPROVADO: "[red]FALHOU[/red]",
@@ -89,7 +83,15 @@ def inteiro_positivo(texto: str) -> int:
     return valor
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def construir_analisador() -> argparse.ArgumentParser:
+    """O analisador, separado de `parse_args` para que a ajuda seja consultável.
+
+    `docs/referencia/cli.md` publica `format_help()` num bloco gerado, e um teste
+    compara os dois: flag nova sem documentação reprova. Com o analisador
+    construído dentro de `parse_args`, a única forma de chegar ao texto seria
+    capturar o stdout de um `SystemExit` — que é frágil e não vale a economia de
+    uma função.
+    """
     analisador = argparse.ArgumentParser(
         prog="orquestrador",
         description="Orquestrador multi-agente de testes de API (skill qa-api).",
@@ -137,7 +139,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "mudou desde que o criamos."
         ),
     )
-    return analisador.parse_args(argv)
+    return analisador
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return construir_analisador().parse_args(argv)
 
 
 def recusar_indisponiveis(args: argparse.Namespace, console: Console) -> int | None:

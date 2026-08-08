@@ -1,0 +1,108 @@
+# Site de documentação.
+#
+# Ele NÃO é publicado. `mkdocs build --strict` roda na CI para reprovar link
+# quebrado e página fora da nav; o resultado é descartado. Quem quiser ler roda
+# `mkdocs serve`. Ver ADR 0011 para a decisão e para o gatilho que a revê.
+#
+# Não há conteúdo aqui além da `nav`: o Markdown de `docs/` é a fonte única, e o
+# MkDocs só o renderiza. Duas superfícies para a mesma verdade é o modo de falha
+# contra o qual este repositório inteiro está organizado.
+
+site_name: Orquestrador qa-api
+site_description: >-
+  Orquestrador multi-agente que gera suítes Cypress de API com cobertura provada
+  por verificador determinístico.
+docs_dir: docs
+# Congelados, e citam caminhos que já não existem — ver docs/historico/LEIA.md.
+# Renderizá-los seria publicar um mapa errado ao lado do certo.
+exclude_docs: |
+  historico/
+# `use_directory_urls: false` deixa o site funcionar aberto do disco (file://),
+# que é como ele vai ser lido enquanto não houver publicação.
+use_directory_urls: false
+
+theme:
+  name: material
+  language: pt-BR
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Tema escuro
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Tema claro
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  # `superfences` com o fence customizado é o que faz ```mermaid virar diagrama em
+  # vez de bloco de código. O mesmo bloco continua renderizando no GitHub, que é
+  # onde a maioria das leituras acontece hoje.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+# A nav é o índice legível por máquina, e tem teste nos dois sentidos:
+# `test_invariante_documentacao.py` exige que todo `.md` sob `docs/` apareça aqui e
+# que todo item daqui exista. Página nova que ninguém linkou é página que ninguém
+# acha.
+nav:
+  - Início: index.md
+  - Glossário: glossario.md
+  - Arquitetura:
+      - Visão geral: arquitetura/visao-geral.md
+      - Os seis princípios: arquitetura/os-seis-principios.md
+      - Fluxo ponta a ponta: arquitetura/fluxo-ponta-a-ponta.md
+      - O loop de reparo: arquitetura/o-loop-de-reparo.md
+      - Fronteiras: arquitetura/fronteiras.md
+      - Estrutura: arquitetura/estrutura.md
+      - Estados do recurso: arquitetura/estados-do-recurso.md
+  - Referência:
+      - CLI: referencia/cli.md
+      - Configuração: referencia/configuracao.md
+      - Códigos de violação: referencia/codigos-de-violacao.md
+      - Eventos: referencia/eventos.md
+      - Artefatos de execução: referencia/artefatos-de-execucao.md
+      - Matriz de suporte: referencia/matriz-de-suporte.md
+  - Desenvolvimento:
+      - Ferramental: desenvolvimento/ferramental.md
+      - Como verificar: desenvolvimento/como-verificar.md
+      - Convenções: desenvolvimento/convencoes.md
+      - Contribuindo: desenvolvimento/contribuindo.md
+  - Decisões (ADR):
+      - Índice: adr/index.md
+      - 0000: adr/0000-template.md
+      - 0001: adr/0001-artefato-em-disco-entre-estagios.md
+      - 0002: adr/0002-prompt-de-reparo-e-so-o-delta.md
+      - 0003: adr/0003-quem-reprova-e-script.md
+      - 0004: adr/0004-tres-estados-de-veredito.md
+      - 0005: adr/0005-raiz-do-pacote-e-lista-fechada.md
+      - 0006: adr/0006-init-nao-reexporta.md
+      - 0007: adr/0007-escrita-transacional-por-staging.md
+      - 0008: adr/0008-nenhum-nome-de-modelo-em-codigo.md
+      - 0009: adr/0009-ci-so-windows-e-python-313.md
+      - 0010: adr/0010-path-como-valor-em-dominio.md
+      - 0011: adr/0011-documentacao-sem-publicacao.md
+      - 0012: adr/0012-marker-classifica-por-dependencia.md
+      - 0013: adr/0013-sem-fachada-em-movimento-de-modulo.md
+      - 0014: adr/0014-contrato-da-skill-fora-da-ci.md
+  - Plano de execução: plano-de-execucao.md

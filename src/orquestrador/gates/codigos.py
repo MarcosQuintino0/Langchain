@@ -23,3 +23,20 @@ CODIGOS_DO_ORQUESTRADOR: dict[str, str] = {
     "QAORQ-030": "categoria declarada em cats sem nenhum `it` que a cubra",
     "QAORQ-040": "schema preservado do consumidor não declara campo que o mapeador achou",
 }
+
+
+def catalogo_markdown() -> str:
+    """A tabela dos códigos `QAORQ-`, como ela é publicada.
+
+    Gerada a partir do dicionário acima, e não escrita à mão, pelo mesmo motivo do
+    catálogo de eventos: uma tabela mantida em paralelo diverge, e diverge no código
+    novo — que é justamente o que ninguém conhece de cabeça.
+
+    Os `QAAPI-` não saem daqui. Eles são da skill, e inventar uma tabela nossa para
+    eles criaria uma segunda fonte de verdade sobre um contrato que não é nosso.
+    """
+    linhas = ["| Código | O que significa |", "| --- | --- |"]
+    linhas += [
+        f"| `{codigo}` | {texto} |" for codigo, texto in sorted(CODIGOS_DO_ORQUESTRADOR.items())
+    ]
+    return "\n".join(linhas)

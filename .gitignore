@@ -9,3 +9,6 @@ build/
 dist/
 .coverage*
 htmlcov/
+
+# O site do MkDocs é construído para ser descartado (ADR 0011).
+site/

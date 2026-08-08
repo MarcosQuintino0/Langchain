@@ -2,8 +2,8 @@
 
 Por que este arquivo existe
 ---------------------------
-A tabela "Onde colocar código novo" do `AGENTS.md` e a árvore de módulos do
-`README.md` descrevem uma estrutura. Descrição não sustenta estrutura: um agente
+A tabela "Onde colocar código novo" do `AGENTS.md` e a árvore de módulos de
+`docs/arquitetura/estrutura.md` descrevem uma estrutura. Descrição não sustenta estrutura: um agente
 que lê o `AGENTS.md` pela metade acrescenta um arquivo na raiz do pacote, o
 revisor não repara, e em três meses a raiz voltou a ter doze arquivos sem dono
 declarado. Foi exatamente assim que `parser.py`, `textos.py` e `javascript.py`
@@ -47,7 +47,9 @@ pytestmark = pytest.mark.unit
 DIR_TESTES = Path(__file__).resolve().parent
 RAIZ_DO_REPOSITORIO = DIR_TESTES.parent
 PACOTE = RAIZ_DO_REPOSITORIO / "src" / "orquestrador"
-README = RAIZ_DO_REPOSITORIO / "README.md"
+# A árvore de módulos mora em `docs/`, não no README: ela é referência, e o
+# README é porta de entrada. O teste segue o arquivo, não o nome.
+ESTRUTURA = RAIZ_DO_REPOSITORIO / "docs" / "arquitetura" / "estrutura.md"
 AGENTS = RAIZ_DO_REPOSITORIO / "AGENTS.md"
 
 # A raiz do pacote é lista fechada: arquivo novo aqui reprova, e é para reprovar.
@@ -229,7 +231,7 @@ def test_raiz_do_pacote_e_lista_fechada():
         "  llm/              cliente, saída estruturada e montagem de prompt\n"
         "  observabilidade/  eventos e métricas\n"
         "Se o arquivo realmente pertence à raiz, a decisão é de arquitetura: "
-        "atualize a tabela do AGENTS.md, a árvore do README.md e RAIZ_PERMITIDA "
+        "atualize a tabela do AGENTS.md, a árvore de docs/arquitetura/estrutura.md e RAIZ_PERMITIDA "
         "aqui, na mesma mudança."
     )
 
@@ -237,7 +239,7 @@ def test_raiz_do_pacote_e_lista_fechada():
     assert not sumidos, (
         f"RAIZ_PERMITIDA lista arquivo(s) que não existem mais: {sumidos}.\n"
         "Se você acabou de movê-los para um subpacote, remova-os de RAIZ_PERMITIDA "
-        "(a lista só encolhe) e atualize a árvore do README.md."
+        "(a lista só encolhe) e atualize a árvore de docs/arquitetura/estrutura.md."
     )
 
 
@@ -497,12 +499,12 @@ def test_todo_codigo_qaorq_esta_catalogado():
         "o significado, não acha, e passa a adivinhar pelo contexto.\n"
         "O que fazer: acrescente a entrada em src/orquestrador/gates/codigos.py "
         "(CODIGOS_DO_ORQUESTRADOR) com a descrição de uma linha, e a linha "
-        "correspondente na tabela 'Códigos de violação' do README.md."
+        "correspondente na tabela 'Códigos de violação' de docs/referencia/codigos-de-violacao.md."
     )
 
 
 # ---------------------------------------------------------------------------
-# 6 — a árvore do README é a árvore real
+# 6 — a árvore da documentação é a árvore real
 # ---------------------------------------------------------------------------
 
 
@@ -530,16 +532,16 @@ def blocos_cercados(arquivo: Path) -> list[str]:
 
 
 def modulos_na_arvore_do_readme() -> set[str]:
-    """Caminhos `.py` que a árvore de `## Estrutura` do README declara.
+    """Caminhos `.py` que a árvore de `## Estrutura` de `docs/arquitetura/estrutura.md` declara.
 
     A árvore é indentada, então o caminho de cada arquivo é reconstruído pela
     pilha de diretórios — comparar só o nome do arquivo deixaria passar um módulo
     listado no pacote errado, que é justamente o erro que manda o leitor procurar
     no lugar errado.
     """
-    arvores = [bloco for bloco in blocos_cercados(README) if "src/orquestrador/" in bloco]
+    arvores = [bloco for bloco in blocos_cercados(ESTRUTURA) if "src/orquestrador/" in bloco]
     assert arvores, (
-        "não achei a árvore de módulos no README.md.\n"
+        "não achei a árvore de módulos em docs/arquitetura/estrutura.md.\n"
         "Ela é um bloco de código cercado por ``` que contém a linha "
         "'src/orquestrador/'. Se você a removeu ou trocou a cerca por outra "
         "linguagem, esta checagem fica cega — restaure a árvore ou ajuste este "
@@ -582,12 +584,12 @@ def test_a_arvore_do_readme_lista_todo_modulo_de_producao():
 
     faltando = sorted(reais - declarados)
     assert not faltando, (
-        f"módulo(s) de produção ausente(s) da árvore do README.md: {faltando}.\n"
+        f"módulo(s) de produção ausente(s) da árvore de docs/arquitetura/estrutura.md: {faltando}.\n"
         "Módulo que não aparece na árvore é módulo que ninguém acha sem `grep` — "
         "foi a omissão de javascript.py e de superficie.py que fez um revisor "
         "externo procurar arquivo no lugar errado.\n"
         "O que fazer: acrescente a linha na árvore da seção '## Estrutura' do "
-        "README.md, com a descrição curta do que o módulo é dono."
+        "docs/arquitetura/estrutura.md, com a descrição curta do que o módulo é dono."
     )
 
 
@@ -597,7 +599,7 @@ def test_a_arvore_do_readme_nao_lista_modulo_que_nao_existe():
 
     fantasmas = sorted(declarados - reais)
     assert not fantasmas, (
-        f"a árvore do README.md lista módulo(s) que não existem: {fantasmas}.\n"
+        f"a árvore de docs/arquitetura/estrutura.md lista módulo(s) que não existem: {fantasmas}.\n"
         "Documentação que promete arquivo inexistente é pior que documentação "
         "ausente: quem procura conclui que a busca dele é que está errada.\n"
         "O que fazer: se o módulo foi movido ou renomeado, corrija a linha na "

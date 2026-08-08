@@ -103,6 +103,36 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  docs:
+    name: Site de documentação
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    # O site NÃO é publicado (ADR 0011). Este job existe pelo `--strict`, que
+    # transforma link quebrado e página fora da navegação em erro — as duas falhas
+    # que um `mkdocs build` normal só avisa, e que ninguém lê num log verde.
+    #
+    # O resultado é descartado. Não há `upload-artifact` nem deploy: publicar
+    # tornaria público o conteúdo do repositório, e essa decisão é do dono.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Instalar o extra de documentação
+        # Só `[docs]`, e não `[dev]`: este job não roda teste, e instalar as duas
+        # coisas dobraria o tempo por nada.
+        run: python -m pip install -e ".[docs]"
+
+      - name: Construir o site em modo estrito
+        run: python -m mkdocs build --strict
+
+  # ---------------------------------------------------------------------------
   integracao:
     name: Integração (Node 24 + skill qa-api)
     runs-on: windows-latest

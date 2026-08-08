@@ -2,9 +2,9 @@
 
 Por que este arquivo existe
 ---------------------------
-O tipo do evento era literal solto em sete módulos, e o catálogo do `README.md`
+O tipo do evento era literal solto em sete módulos, e o catálogo de `docs/referencia/eventos.md`
 era mantido à mão. Duas listas, e elas divergiram duas vezes no mesmo dia: o
-README omitia `execucao_abortada` e `cypress`, prometia um `artefatos_removidos`
+A tabela, mantida à mão, omitia `execucao_abortada` e `cypress`, prometia um `artefatos_removidos`
 que ninguém emitia, e nunca chegou a mencionar `publicacao`, `staging_mantido` e
 `schemas_divergentes`.
 
@@ -17,7 +17,7 @@ O enum resolve metade — passa a existir um dono. A outra metade é esta suíte
   levantaria dentro de um `finally` num ramo raro, derrubando a execução para
   reportar um erro de digitação. A AST pega o mesmo defeito antes de rodar,
   inclusive nos ramos que nenhum teste exercita.
-* `test_o_catalogo_do_readme_e_o_gerado` compara o bloco do README com
+* `test_o_catalogo_da_referencia_e_o_gerado` compara o bloco da referência com
   `catalogo_markdown()`. É o que impede a terceira divergência.
 """
 
@@ -44,7 +44,7 @@ pytestmark = pytest.mark.unit
 DIR_TESTES = Path(__file__).resolve().parent
 RAIZ_DO_REPOSITORIO = DIR_TESTES.parent
 PACOTE = RAIZ_DO_REPOSITORIO / "src" / "orquestrador"
-README = RAIZ_DO_REPOSITORIO / "README.md"
+CATALOGO = RAIZ_DO_REPOSITORIO / "docs" / "referencia" / "eventos.md"
 
 INICIO_DO_CATALOGO = "<!-- INICIO DO CATALOGO DE EVENTOS: gerado por observabilidade/eventos.py -->"
 FIM_DO_CATALOGO = "<!-- FIM DO CATALOGO DE EVENTOS -->"
@@ -66,7 +66,7 @@ def test_nomes_sao_unicos():
     assert not repetidos, (
         f"valor de evento repetido: {repetidos}.\n"
         "Dois membros com o mesmo valor viram alias em Python: o segundo some de "
-        "`list(TipoDeEvento)` e do catálogo do README, mas continua sendo emitido — "
+        "`list(TipoDeEvento)` e do catálogo da referência de eventos, mas continua sendo emitido — "
         "um evento documentado como uma coisa e emitido como outra.\n"
         "O que fazer: renomeie o valor, ou apague o membro duplicado."
     )
@@ -91,7 +91,7 @@ def test_o_valor_segue_o_padrao_de_nome(tipo: TipoDeEvento):
 def test_todo_evento_tem_descricao(tipo: TipoDeEvento):
     assert tipo.descricao.strip(), (
         f"{tipo.name} não tem descrição.\n"
-        "A descrição não é enfeite: é a linha que o catálogo do README publica, e é "
+        "A descrição não é enfeite: é a linha que o catálogo da referência de eventos publica, e é "
         "gerada a partir daqui. Sem ela o catálogo sai com célula vazia.\n"
         "O que fazer: acrescente a descrição de uma linha na tupla do membro, em "
         "src/orquestrador/observabilidade/eventos.py."
@@ -145,21 +145,21 @@ def test_toda_emissao_usa_o_enum(arquivo: Path):
     assert not fora, (
         f"{arquivo.relative_to(PACOTE).as_posix()} emite evento com tipo que não "
         f"vem de TipoDeEvento: {fora}.\n"
-        "String solta é como o catálogo do README divergiu duas vezes: o nome nasce "
+        "String solta é como o catálogo da referência de eventos divergiu duas vezes: o nome nasce "
         "num módulo, ninguém documenta, e um `grep` por aspas não acha o dono.\n"
         "O que fazer: importe TipoDeEvento de "
         "src/orquestrador/observabilidade/eventos.py e passe o membro. Evento novo "
-        "entra como membro novo lá — o catálogo do README é gerado a partir dele."
+        "entra como membro novo lá — o catálogo da referência de eventos é gerado a partir dele."
     )
 
 
 # ---------------------------------------------------------------------------
-# O catálogo do README é gerado
+# O catálogo da referência de eventos é gerado
 # ---------------------------------------------------------------------------
 
 
-def test_o_catalogo_do_readme_e_o_gerado():
-    texto = README.read_text(encoding="utf-8")
+def test_o_catalogo_da_referencia_e_o_gerado():
+    texto = CATALOGO.read_text(encoding="utf-8")
     assert INICIO_DO_CATALOGO in texto and FIM_DO_CATALOGO in texto, (
         "não achei os marcadores do catálogo de eventos no README.md.\n"
         f"Ele fica entre {INICIO_DO_CATALOGO} e {FIM_DO_CATALOGO}. Sem eles esta "
