@@ -13,9 +13,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from orquestrador.config import Config
-from orquestrador.contratos import Recurso, ResultadoGate, Violacao
+from orquestrador.contratos import Manifesto, Recurso, ResultadoGate, Violacao
 from orquestrador.ferramentas.processo import ExecutavelAusente, executar as rodar_processo
 from orquestrador.ferramentas.scripts_qa import Validador
+from orquestrador.gates import cobertura as gate_cobertura
 from orquestrador.gates.parser import resultado_do_validador, violacoes_do_eslint
 
 NOME = "gate_b"
@@ -24,11 +25,22 @@ NOME = "gate_b"
 LIMITE_DE_SAIDA = 4000
 
 
-def executar(config: Config, recurso: Recurso) -> ResultadoGate:
+def executar(
+    config: Config,
+    recurso: Recurso,
+    *,
+    manifesto: Manifesto | None = None,
+    out_cobertura: Path | None = None,
+) -> ResultadoGate:
     partes = [
         _formatador(config, "prettier", "QAORQ-020", config.execucao.prettier, recurso),
         _formatador(config, "eslint", "QAORQ-021", config.execucao.eslint, recurso),
         _validador(config, recurso),
+        # A terceira checagem responde por "planejei e não entreguei", que o
+        # validador da skill não cobre. Ver gates/cobertura.py.
+        gate_cobertura.executar(
+            config, recurso, manifesto=manifesto, gate=NOME, out=out_cobertura
+        ),
     ]
     return ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
 

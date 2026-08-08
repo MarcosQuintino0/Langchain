@@ -34,6 +34,7 @@ def montar_recursos(config: Config, nomes: list[str]) -> list[Recurso]:
         Recurso(
             nome=nome,
             caminho_testes=config.caminhos.recurso(nome),
+            raiz_schemas=config.caminhos.dir_schemas_abs,
             caminhos_backend=[config.caminhos.backend],
         )
         for nome in nomes
@@ -202,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
         console.print(pipeline.telemetria.tabela_por_estagio())
         console.print(pipeline.telemetria.tabela_por_recurso())
         console.print(pipeline.telemetria.tabela_entrada_por_tentativa())
+        # Só o mapeador tem tools; sem elas a tabela seria uma moldura vazia.
+        if pipeline.telemetria.tools:
+            console.print(pipeline.telemetria.tabela_de_tools())
         registro.evento("telemetria", **pipeline.telemetria.resumo_para_log())
 
         registro.titulo("Resumo")

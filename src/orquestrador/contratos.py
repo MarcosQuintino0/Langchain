@@ -164,11 +164,32 @@ class Recurso(BaseModel):
 
     nome: str
     caminho_testes: Path
+    # Raiz do diretório de schemas do projeto de testes, vinda da configuração
+    # (`[caminhos].dir_schemas`) como `caminho_testes`. Não é descoberta aqui: quem
+    # sobe do recurso procurando `cypress/fixtures/schemas` é a skill
+    # (`campos/schema.mjs`), e repetir a busca criaria uma segunda fonte de verdade
+    # para o mesmo diretório.
+    raiz_schemas: Path | None = None
     caminhos_backend: list[Path] = Field(default_factory=list)
 
     @property
     def manifesto_path(self) -> Path:
         return self.caminho_testes / "_support" / "cobertura.json"
+
+    @property
+    def caminho_schemas(self) -> Path:
+        """Raiz onde os schemas do mapeador são gravados (`<raiz>/<recurso>/x.schema.json`).
+
+        Sem `raiz_schemas` não há palpite razoável: gravar no diretório errado é pior
+        que falhar, porque o Gate A continuaria reprovando com QAAPI-027 enquanto o
+        arquivo estaria em disco, parecendo entregue.
+        """
+        if self.raiz_schemas is None:
+            raise ValueError(
+                f"recurso {self.nome!r} sem raiz de schemas. Informe `raiz_schemas` ao "
+                "construir o Recurso (a CLI a preenche de [caminhos].dir_schemas)."
+            )
+        return self.raiz_schemas
 
 
 class Endpoint(BaseModel):
@@ -346,6 +367,66 @@ class Manifesto(BaseModel):
 # Saídas dos estágios de LLM
 # ---------------------------------------------------------------------------
 
+SUFIXO_SCHEMA = ".schema.json"
+
+
+def _caminho_confinado(valor: str, *, base: str) -> str:
+    """Caminho relativo a `base`, com separador POSIX, sem `..` e sem raiz absoluta."""
+    caminho = str(valor).strip().replace("\\", "/")
+    if not caminho:
+        raise ValueError("caminho vazio")
+    if caminho.startswith("/") or re.match(r"^[A-Za-z]:", caminho):
+        raise ValueError(f"caminho deve ser relativo {base}: {valor!r}")
+    if ".." in caminho.split("/"):
+        raise ValueError(f'caminho não pode conter "..": {valor!r}')
+    return caminho
+
+
+def caminho_de_schema(referencia: str, recurso: str) -> str:
+    """Arquivo que um `schemaEntrada` do manifesto exige, relativo à raiz de schemas.
+
+    Espelha `localizarArquivoDeSchema` de `scripts/cobertura/campos/schema.mjs` no
+    layout canônico (`<recurso>/<nome>.schema.json`): referência já pontilhada pelo
+    recurso resolve direto; nome simples desce para a pasta do recurso. O layout
+    achatado com prefixo, que a skill ainda aceita como legado, não é emitido aqui.
+
+    O ponteiro JSON opcional (`entidade#/properties/entity`) escolhe o nó dentro do
+    arquivo, não o arquivo: ele sai antes da comparação.
+    """
+    nome = str(referencia).split("#", 1)[0].strip()
+    if nome.endswith(SUFIXO_SCHEMA):
+        nome = nome[: -len(SUFIXO_SCHEMA)]
+    if not nome:
+        raise ValueError(f"schemaEntrada vazio: {referencia!r}")
+    if "/" in nome:
+        return f"{nome}{SUFIXO_SCHEMA}"
+    return f"{recurso}/{nome}{SUFIXO_SCHEMA}"
+
+
+class ArquivoSchema(BaseModel):
+    """Um schema de entrada que o mapeador escreve na raiz de schemas do projeto.
+
+    Espelha `ArquivoGerado`, com outra raiz: o schema mora fora do diretório do
+    recurso (`cypress/fixtures/schemas/`), então é o mapeador que o emite — ele é
+    quem lê o backend, e o denominador da cobertura por campo pertence ao plano, não
+    à implementação que depois será medida por ele.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    caminho: str
+    conteudo: str
+
+    @field_validator("caminho")
+    @classmethod
+    def _relativo_e_confinado(cls, valor: str) -> str:
+        caminho = _caminho_confinado(valor, base="à raiz do diretório de schemas")
+        if not caminho.endswith(SUFIXO_SCHEMA):
+            raise ValueError(
+                f'schema precisa terminar em "{SUFIXO_SCHEMA}": {valor!r}'
+            )
+        return caminho
+
 
 class SaidaMapeador(BaseModel):
     """O que o Bloco 1 emite para um recurso."""
@@ -354,6 +435,7 @@ class SaidaMapeador(BaseModel):
 
     inventario: Inventario
     manifesto: Manifesto
+    schemas: list[ArquivoSchema] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _mesmo_recurso(self) -> "SaidaMapeador":
@@ -362,6 +444,36 @@ class SaidaMapeador(BaseModel):
                 "inventario.recurso e manifesto.recurso precisam ser o mesmo recurso: "
                 f"{self.inventario.recurso!r} != {self.manifesto.recurso!r}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _schemas_cobrem_o_declarado(self) -> "SaidaMapeador":
+        # Mesma lógica de `EndpointManifesto._canonico`: o Gate A já reprova o schema
+        # ausente (QAAPI-027), mas recusar aqui transforma o desvio num delta de
+        # schema — o reparo mais barato que existe — sem tirar do gate a autoridade
+        # sobre o arquivo em disco.
+        recurso = self.manifesto.recurso
+        emitidos: set[str] = set()
+        for arquivo in self.schemas:
+            if not arquivo.caminho.startswith(f"{recurso}/"):
+                raise ValueError(
+                    f"schema fora do recurso {recurso!r}: {arquivo.caminho!r} "
+                    f'(o layout é "{recurso}/<nome>{SUFIXO_SCHEMA}")'
+                )
+            if arquivo.caminho in emitidos:
+                raise ValueError(f"schema repetido na saída: {arquivo.caminho}")
+            emitidos.add(arquivo.caminho)
+
+        for endpoint in self.manifesto.endpoints:
+            if endpoint.schema_entrada is None:
+                continue
+            esperado = caminho_de_schema(endpoint.schema_entrada, recurso)
+            if esperado not in emitidos:
+                raise ValueError(
+                    f'{endpoint.endpoint} declara schemaEntrada '
+                    f"{endpoint.schema_entrada!r} mas o schema {esperado!r} não está "
+                    'em "schemas". Emita o arquivo ou remova a declaração.'
+                )
         return self
 
 
@@ -376,16 +488,7 @@ class ArquivoGerado(BaseModel):
     @field_validator("caminho")
     @classmethod
     def _relativo_e_confinado(cls, valor: str) -> str:
-        caminho = str(valor).strip().replace("\\", "/")
-        if not caminho:
-            raise ValueError("caminho vazio")
-        if caminho.startswith("/") or re.match(r"^[A-Za-z]:", caminho):
-            raise ValueError(
-                f"caminho deve ser relativo ao diretório do recurso: {valor!r}"
-            )
-        if ".." in caminho.split("/"):
-            raise ValueError(f'caminho não pode conter "..": {valor!r}')
-        return caminho
+        return _caminho_confinado(valor, base="ao diretório do recurso")
 
 
 class SaidaExecutor(BaseModel):
@@ -553,6 +656,37 @@ class RegistroDeChamada(BaseModel):
     detalhe: str = ""
     caracteres_instrucao: int = 0
     caracteres_entrada: int = 0
+
+
+class RegistroDeTool(BaseModel):
+    """Uma chamada de tool do mapeador — o instrumento do custo de exploração.
+
+    O Graphify existe para localizar código sem gastar token varrendo o backend, e a
+    instrução do estágio manda consultá-lo **antes** de ler arquivo. Sem este
+    registro, "ele obedeceu?" e "que fatia da entrada veio de resposta de tool?" são
+    dedução, não medida — e é sobre elas que se decide a otimização do mapeador, que
+    é onde mora quase todo o custo do pipeline.
+
+    `ordem` é a posição na sequência da tentativa: é ela, e não o total, que responde
+    se o grafo foi consultado antes ou depois da leitura de arquivo.
+
+    `caracteres` é o tamanho do retorno. É o número que importa: ele entra na próxima
+    volta do ReAct e é reenviado em todas as seguintes, então resposta de tool grande
+    é multiplicador, não parcela.
+    """
+
+    estagio: str
+    recurso: str
+    tentativa: int
+    ordem: int
+    nome: str
+    argumentos: dict[str, Any] = Field(default_factory=dict)
+    caracteres: int = 0
+    duracao_s: float = 0.0
+    # As tools devolvem a falha como texto (`ERRO: ...`) para o modelo poder se
+    # corrigir sozinho. Sem esta marca, grafo quebrado passa por exploração
+    # bem-sucedida no relatório — e o custo de reindexar aparece como custo de LLM.
+    erro: bool = False
 
 
 def dados_para_log(valor: Any) -> Any:

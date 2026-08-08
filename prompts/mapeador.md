@@ -11,7 +11,7 @@ chaves de propósito: dentro do comentário eles também seriam substituídos, e
   caminho_backend  raiz do backend (raiz do confinamento das tools de arquivo)
   caminho_graph    caminho do graph.json já validado pelo Bloco 0
   caminho_recurso  diretório do recurso no projeto de testes
-  schema_json      JSON Schema de `SaidaMapeador` (inventario + manifesto)
+  schema_json      JSON Schema de `SaidaMapeador` (inventario, manifesto e schemas)
 
 Fontes: SKILL.md passos 1–7, references/descobrir-backend.md e, do
 references/catalogo-de-testes.md, os blocos "Quando aplicar", "Quando não se
@@ -50,7 +50,10 @@ Contexto fixo desta execução:
    a entidade ou o método concreto. Partindo do controller, a travessia sobe na
    superclasse e desce em todos os irmãos, gastando o orçamento com outros recursos.
 3. **`graphify_affected` responde a pergunta inversa** — quem usa este símbolo.
-   Consulte pela **entidade**, não pelo controller.
+   Consulte pela **entidade**, não pelo controller. Rode **sem `relacao` na primeira
+   vez**: o vocabulário de arestas depende do extrator da linguagem, e filtrar por um
+   nome adivinhado devolve `No affected nodes found` — vazio com cara de resposta
+   legítima. Leia os rótulos entre colchetes da saída e só então filtre por um deles.
 4. **O grafo localiza; a fonte confirma.** Sempre leia o backend para comprovar
    método, rota, campos e regras. `buscar_no_backend` é último recurso, não primeiro
    passo: o que o grafo responde, pergunte ao grafo. Nunca busque dentro do
@@ -62,7 +65,9 @@ Armadilhas que se leem ao contrário:
   com o nome exato da classe. O vazio real tem outra frase: `No affected nodes found`.
 - **Confira no cabeçalho da resposta o nome que o Graphify resolveu.** Quando ele
   difere do que você pediu, os dependentes são de outra classe.
-- **Resposta truncada não é resposta completa.** Consulte o símbolo específico.
+- **Resposta truncada não é resposta completa.** Consulte o símbolo específico. Só
+  aumente `budget` quando o alvo continuar sem aparecer: resposta maior é reenviada em
+  toda volta seguinte, então o custo dela se multiplica.
 - O resultado do `affected` inclui os próprios arquivos do recurso; o que interessa é
   o que está **fora** deles.
 
@@ -216,10 +221,57 @@ primeiros aparecem como lacuna no relatório, que é o comportamento correto. Ex
 campo que não existe no schema é erro. Uma decisão que vale para o endpoint inteiro não
 dispensa os campos individualmente.
 
+## Emitir os schemas de entrada
+
+Declarar `schemaEntrada` não basta: o arquivo precisa existir. Todo endpoint que
+declara `schemaEntrada` exige o schema correspondente em `schemas`, no layout
+`<recurso>/<nome>.schema.json` — `schemaEntrada: "entidade"` no recurso `pedidos`
+exige `pedidos/entidade.schema.json`. Sem o arquivo, o gate reprova com `QAAPI-027`
+e nenhum outro estágio pode consertar: o executor não lê o backend e escreve apenas
+dentro do diretório do recurso.
+
+Você é quem emite porque você é quem leu o backend. Derive cada schema do **DTO ou
+da entidade** que o endpoint recebe, copiando as restrições que estão lá:
+
+| No backend | No schema |
+| --- | --- |
+| tipo do campo | `type` |
+| formato (data, e-mail, UUID) | `format` |
+| conjunto fechado de valores | `enum` |
+| obrigatoriedade (anotação, coluna não nula, validação) | `required` |
+| mínimo e máximo | `minimum`, `maximum` |
+| comprimento de texto ou tamanho de coleção | `minLength`, `maxLength`, `minItems`, `maxItems` |
+| expressão regular declarada | `pattern` |
+
+**O schema é o denominador da cobertura por campo.** `CAT-02`, `CAT-03` e `CAT-04`
+são reconciliadas campo a campo contra as `properties` que você escrever aqui: o
+campo que não aparecer no schema não é cobrado de ninguém, não aparece como lacuna
+no relatório e não reprova gate nenhum. Ele simplesmente sai da conta — e a suíte
+fica com uma cobertura alta que ninguém pode contestar, porque a régua encolheu
+junto. É o mesmo defeito que o gabarito escrito antes dos testes existe para
+impedir, só que uma camada abaixo.
+
+Por isso a assimetria vale aqui também: **campo cuja restrição você não confirmou
+entra no schema mesmo assim**, com o tipo que você conhece e sem as palavras-chave
+que você não pôde comprovar. Declarar de menos custa um teste a menos naquele campo;
+omitir o campo apaga o campo inteiro sem deixar rastro.
+
+O arquivo é um JSON Schema válido, com `type: "object"` e `properties` utilizáveis —
+schema sem `properties` não produz campo algum e equivale a não ter emitido nada.
+Quando o schema descreve o envelope da resposta em vez da entidade, aponte o nó com
+o ponteiro na declaração (`entidade#/properties/entity`); o ponteiro escolhe o nó
+dentro do arquivo, nunca outro arquivo.
+
+Um recurso emite apenas os schemas do próprio recurso. Endpoint sem corpo não
+declara `schemaEntrada` e não emite schema: declara `semCorpo` com a justificativa.
+
 ## Profundidade e handler compartilhado
 
-Quando os endpoints herdam de um handler genérico do backend, consulte o registro
-versionado `.agents/config/qa-api/handlers.json` do projeto antes de decidir:
+Quando os endpoints herdam de um handler genérico do backend, confirme os herdeiros
+com `graphify_affected` filtrando pela relação de herança — em Java, `inherits`. É o
+caminho determinístico, e vale mais que reparar no `extends` da primeira linha da
+classe. Depois consulte o registro versionado `.agents/config/qa-api/handlers.json`
+do projeto antes de decidir:
 
 - **handler sem campeão registrado** → este recurso é o campeão: `profundidade:
   "completa"` e `handlerCompartilhado` com o nome do handler;

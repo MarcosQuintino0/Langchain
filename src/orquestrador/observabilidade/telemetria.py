@@ -11,7 +11,7 @@ from typing import Any
 
 from rich.table import Table
 
-from orquestrador.contratos import RegistroDeChamada, UsoDeTokens
+from orquestrador.contratos import RegistroDeChamada, RegistroDeTool, UsoDeTokens
 
 
 @dataclass
@@ -43,11 +43,36 @@ class Agregado:
         }
 
 
+@dataclass
+class AgregadoDeTools:
+    """Soma das chamadas de uma tool."""
+
+    chamadas: int = 0
+    caracteres: int = 0
+    erros: int = 0
+    duracao_s: float = 0.0
+
+    def somar(self, tool: RegistroDeTool) -> None:
+        self.chamadas += 1
+        self.caracteres += tool.caracteres
+        self.erros += int(tool.erro)
+        self.duracao_s += tool.duracao_s
+
+    def para_log(self) -> dict[str, Any]:
+        return {
+            "chamadas": self.chamadas,
+            "caracteres": self.caracteres,
+            "erros": self.erros,
+            "duracao_s": round(self.duracao_s, 3),
+        }
+
+
 class Telemetria:
     """Tokens e tamanho de entrada por chamada, agregados por estágio, recurso e tentativa."""
 
     def __init__(self, registro: Any = None) -> None:
         self.chamadas: list[RegistroDeChamada] = []
+        self.tools: list[RegistroDeTool] = []
         self.registro = registro
 
     def registrar(self, chamada: RegistroDeChamada) -> RegistroDeChamada:
@@ -58,9 +83,20 @@ class Telemetria:
             self.registro.evento("chamada_llm", **chamada.model_dump())
         return chamada
 
+    def registrar_tool(self, tool: RegistroDeTool) -> RegistroDeTool:
+        self.tools.append(tool)
+        if self.registro is not None:
+            # Uma linha por chamada, com a ordem: é o que permite reconstruir a
+            # sequência de exploração sem reexecutar nada.
+            self.registro.evento("tool", **tool.model_dump())
+        return tool
+
     @property
     def simulado(self) -> bool:
         return any(chamada.simulado for chamada in self.chamadas)
+
+    def caracteres_de_tools(self) -> int:
+        return sum(tool.caracteres for tool in self.tools)
 
     def total(self) -> UsoDeTokens:
         soma = UsoDeTokens()
@@ -161,10 +197,64 @@ class Telemetria:
             )
         return tabela
 
+    def tools_por_nome(self) -> dict[str, AgregadoDeTools]:
+        agregado: dict[str, AgregadoDeTools] = {}
+        for tool in self.tools:
+            agregado.setdefault(tool.nome, AgregadoDeTools()).somar(tool)
+        return agregado
+
+    def tabela_de_tools(self) -> Table:
+        """Como o mapeador explorou o backend, e o que isso custou.
+
+        A coluna "devolvido" é o que interessa: cada caractere que uma tool devolve
+        entra no histórico do ReAct e é reenviado em toda volta seguinte. Uma
+        `buscar_no_backend` generosa custa muito mais que o próprio retorno dela.
+
+        `graphify_query` alto com `ler_arquivo` baixo é o comportamento que a
+        instrução pede. O inverso significa que o grafo está sendo ignorado — e o
+        Graphify deixou de pagar o que promete.
+        """
+        tabela = Table(title="Tools do mapeador", title_justify="left")
+        tabela.add_column("tool")
+        tabela.add_column("chamadas", justify="right")
+        tabela.add_column("devolvido", justify="right")
+        tabela.add_column("% do total", justify="right")
+        tabela.add_column("erros", justify="right")
+        tabela.add_column("tempo (s)", justify="right")
+        total = self.caracteres_de_tools()
+        for nome, agregado in sorted(
+            self.tools_por_nome().items(), key=lambda item: -item[1].caracteres
+        ):
+            fatia = (agregado.caracteres / total * 100) if total else 0.0
+            tabela.add_row(
+                nome,
+                str(agregado.chamadas),
+                f"{agregado.caracteres:,}",
+                f"{fatia:.0f}%",
+                f"[red]{agregado.erros}" if agregado.erros else "0",
+                f"{agregado.duracao_s:.1f}",
+            )
+        tabela.add_section()
+        tabela.add_row(
+            "[bold]TOTAL",
+            f"[bold]{len(self.tools)}",
+            f"[bold]{total:,}",
+            "",
+            f"[bold]{sum(t.erro for t in self.tools)}",
+            f"[bold]{sum(t.duracao_s for t in self.tools):.1f}",
+        )
+        return tabela
+
     def resumo_para_log(self) -> dict[str, Any]:
         return {
             "simulado": self.simulado,
             "chamadas": len(self.chamadas),
+            "tools": len(self.tools),
+            "caracteres_de_tools": self.caracteres_de_tools(),
+            "por_tool": {
+                nome: agregado.para_log()
+                for nome, agregado in self.tools_por_nome().items()
+            },
             "total": self.total().model_dump(),
             "por_estagio": {
                 estagio: agregado.para_log()

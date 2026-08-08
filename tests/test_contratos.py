@@ -16,6 +16,7 @@ from orquestrador.contratos import (
     Manifesto,
     SaidaExecutor,
     SaidaMapeador,
+    caminho_de_schema,
     normalizar_endpoint,
 )
 
@@ -129,6 +130,72 @@ def test_saida_do_mapeador_exige_o_mesmo_recurso_nos_dois_artefatos():
             ),
             manifesto=Manifesto.model_validate(manifesto_minimo(recurso="outro")),
         )
+
+
+def saida_do_mapeador(schema_entrada: str | None, schemas: list[dict]) -> SaidaMapeador:
+    """Saída com um POST que declara (ou não) `schemaEntrada`."""
+    endpoint = {"endpoint": "POST /pedidos"}
+    if schema_entrada is not None:
+        endpoint["schemaEntrada"] = schema_entrada
+    return SaidaMapeador(
+        inventario=Inventario(
+            recurso="pedidos",
+            endpoints=[
+                {"metodo": "POST", "rota": "/pedidos", "handler": "criar", "arquivo": "x"}
+            ],
+        ),
+        manifesto=Manifesto.model_validate({"recurso": "pedidos", "endpoints": [endpoint]}),
+        schemas=schemas,
+    )
+
+
+SCHEMA_PEDIDO = {"caminho": "pedidos/entidade.schema.json", "conteudo": "{}"}
+
+
+def test_schema_declarado_sem_arquivo_emitido_e_recusado():
+    # QAAPI-027 reprovaria isto no Gate A; recusar aqui vira delta de schema, e o
+    # mapeador é o único estágio capaz de consertar.
+    with pytest.raises(ValidationError, match="não está"):
+        saida_do_mapeador("entidade", [])
+
+
+def test_nome_simples_resolve_na_pasta_do_recurso():
+    saida = saida_do_mapeador("entidade", [SCHEMA_PEDIDO])
+    assert saida.schemas[0].caminho == "pedidos/entidade.schema.json"
+
+
+def test_referencia_ja_pontilhada_pelo_recurso_resolve_no_mesmo_arquivo():
+    assert saida_do_mapeador("pedidos/entidade", [SCHEMA_PEDIDO]).schemas
+
+
+def test_ponteiro_json_escolhe_o_no_nao_o_arquivo():
+    # "entidade#/properties/entity" continua exigindo pedidos/entidade.schema.json.
+    assert saida_do_mapeador("entidade#/properties/entity", [SCHEMA_PEDIDO]).schemas
+    with pytest.raises(ValidationError, match="não está"):
+        saida_do_mapeador("entidade#/properties/entity", [])
+
+
+def test_schema_repetido_e_recusado():
+    with pytest.raises(ValidationError, match="repetido"):
+        saida_do_mapeador("entidade", [SCHEMA_PEDIDO, dict(SCHEMA_PEDIDO, conteudo="{ }")])
+
+
+def test_endpoint_sem_schema_entrada_nao_exige_nada():
+    assert saida_do_mapeador(None, []).schemas == []
+
+
+@pytest.mark.parametrize(
+    ("referencia", "esperado"),
+    [
+        ("entidade", "pedidos/entidade.schema.json"),
+        ("pedidos/entidade", "pedidos/entidade.schema.json"),
+        ("entidade.schema.json", "pedidos/entidade.schema.json"),
+        ("entidade#/properties/entity", "pedidos/entidade.schema.json"),
+        ("  entidade  ", "pedidos/entidade.schema.json"),
+    ],
+)
+def test_caminho_de_schema_espelha_a_resolucao_da_skill(referencia: str, esperado: str):
+    assert caminho_de_schema(referencia, "pedidos") == esperado
 
 
 @pytest.mark.parametrize("caminho", ["../fora.js", "/absoluto.js", "C:/absoluto.js", ""])

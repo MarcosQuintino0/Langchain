@@ -11,9 +11,11 @@ contrato de saída.
 
 from __future__ import annotations
 
+import functools
 import inspect
+import itertools
 import time
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, StructuredTool
@@ -24,6 +26,7 @@ from orquestrador.config import Config
 from orquestrador.contratos import (
     Delta,
     RegistroDeChamada,
+    RegistroDeTool,
     Recurso,
     SaidaMapeador,
     UsoDeTokens,
@@ -67,6 +70,15 @@ class ArgsGraphifyQuery(BaseModel):
             "não linguagem natural: o matcher é literal, sem stemming nem sinônimos."
         )
     )
+    budget: int | None = Field(
+        default=None,
+        description=(
+            "Orçamento da resposta em tokens (padrão ~2000). Use APENAS quando a "
+            "resposta avisar que truncou E o alvo não tiver aparecido. Prefira "
+            "reconsultar o símbolo específico: resposta maior é reenviada em toda "
+            "volta seguinte, então o custo dela se multiplica."
+        ),
+    )
 
 
 class ArgsGraphifyAffected(BaseModel):
@@ -79,6 +91,18 @@ class ArgsGraphifyAffected(BaseModel):
     depth: int = Field(
         default=1,
         description="Profundidade da travessia. Use 1: o padrão 2 traz alcance transitivo.",
+    )
+    relacao: str | None = Field(
+        default=None,
+        description=(
+            "Filtro de tipo de aresta. NUNCA use na primeira consulta: o vocabulário "
+            "depende do extrator da linguagem, e um nome adivinhado devolve 'No "
+            "affected nodes found' — vazio com cara de resposta legítima, que se lê "
+            "como 'não há dependente'. Rode sem filtro, leia os rótulos entre "
+            "colchetes da saída, e só então filtre por um deles. Em Java a herança "
+            "sai como 'inherits', e é assim que se confirma quem herda de um "
+            "controller abstrato sem depender do 'extends' da primeira linha."
+        ),
     )
 
 
@@ -99,20 +123,66 @@ class ArgsBuscar(BaseModel):
     )
 
 
-def criar_ferramentas(config: Config) -> list[BaseTool]:
-    """As cinco tools do mapeador, já ligadas à configuração desta execução."""
+def criar_ferramentas(
+    config: Config,
+    *,
+    telemetria: Telemetria | None = None,
+    recurso: str = "",
+    tentativa: int = 0,
+) -> list[BaseTool]:
+    """As cinco tools do mapeador, já ligadas à configuração desta execução.
+
+    Com `telemetria`, cada chamada vira um `RegistroDeTool`. A instrumentação é
+    opcional para que as tools continuem construtíveis isoladamente em teste, mas o
+    pipeline sempre a liga: é dela que sai a resposta para "o grafo foi consultado
+    antes de ler arquivo?".
+    """
     grafo = Graphify(config)
     confinamento = fa.Confinamento(config.caminhos.backend)
+    # Escopo por invocação de `criar_ferramentas`, que é por tentativa do estágio —
+    # inclusive as voltas do mini-loop de schema, que são a mesma tentativa.
+    contador = itertools.count(1)
 
-    def _query(simbolo: str) -> str:
+    def observado(nome: str, funcao: Callable[..., str]) -> Callable[..., str]:
+        """Envolve uma tool para medi-la sem tocar no que ela devolve ao modelo."""
+        assinatura = inspect.signature(funcao)
+
+        @functools.wraps(funcao)
+        def envolvida(*posicionais: Any, **nomeados: Any) -> str:
+            inicio = time.perf_counter()
+            saida = funcao(*posicionais, **nomeados)
+            if telemetria is not None:
+                argumentos = assinatura.bind(*posicionais, **nomeados)
+                argumentos.apply_defaults()
+                telemetria.registrar_tool(
+                    RegistroDeTool(
+                        estagio=ESTAGIO,
+                        recurso=recurso,
+                        tentativa=tentativa,
+                        ordem=next(contador),
+                        nome=nome,
+                        argumentos=dict(argumentos.arguments),
+                        caracteres=len(saida),
+                        duracao_s=time.perf_counter() - inicio,
+                        # As tools engolem a exceção e devolvem "ERRO: ..." como texto
+                        # normal, para o modelo poder se corrigir. Este é o único
+                        # lugar onde a falha vira dado.
+                        erro=saida.startswith("ERRO:"),
+                    )
+                )
+            return saida
+
+        return envolvida
+
+    def _query(simbolo: str, budget: int | None = None) -> str:
         try:
-            return grafo.query(simbolo)
+            return grafo.query(simbolo, budget=budget)
         except ErroDeFerramenta as erro:
             return f"ERRO: {erro}"
 
-    def _affected(entidade: str, depth: int = 1) -> str:
+    def _affected(entidade: str, depth: int = 1, relacao: str | None = None) -> str:
         try:
-            return grafo.affected(entidade, depth=depth)
+            return grafo.affected(entidade, depth=depth, relacao=relacao)
         except ErroDeFerramenta as erro:
             return f"ERRO: {erro}"
 
@@ -148,7 +218,7 @@ def criar_ferramentas(config: Config) -> list[BaseTool]:
 
     return [
         StructuredTool.from_function(
-            func=_query,
+            func=observado("graphify_query", _query),
             name="graphify_query",
             args_schema=ArgsGraphifyQuery,
             description=(
@@ -162,7 +232,7 @@ def criar_ferramentas(config: Config) -> list[BaseTool]:
             ),
         ),
         StructuredTool.from_function(
-            func=_affected,
+            func=observado("graphify_affected", _affected),
             name="graphify_affected",
             args_schema=ArgsGraphifyAffected,
             description=(
@@ -171,11 +241,13 @@ def criar_ferramentas(config: Config) -> list[BaseTool]:
                 "AMBÍGUO — reconsulte com o nome exato da classe; o vazio real tem outra "
                 "frase ('No affected nodes found'). Confira no cabeçalho da resposta o "
                 "nome que o Graphify resolveu: quando ele difere do pedido, os "
-                "dependentes são de outra classe."
+                "dependentes são de outra classe. Rode SEM `relacao` primeiro e leia os "
+                "rótulos da saída antes de filtrar; `relacao=\"inherits\"` (em Java) "
+                "lista quem herda de um controller abstrato."
             ),
         ),
         StructuredTool.from_function(
-            func=_ler,
+            func=observado("ler_arquivo", _ler),
             name="ler_arquivo",
             args_schema=ArgsLerArquivo,
             description=(
@@ -184,13 +256,13 @@ def criar_ferramentas(config: Config) -> list[BaseTool]:
             ),
         ),
         StructuredTool.from_function(
-            func=_listar,
+            func=observado("listar_diretorio", _listar),
             name="listar_diretorio",
             args_schema=ArgsListarDiretorio,
             description="Lista o conteúdo de um diretório do backend.",
         ),
         StructuredTool.from_function(
-            func=_buscar,
+            func=observado("buscar_no_backend", _buscar),
             name="buscar_no_backend",
             args_schema=ArgsBuscar,
             description=(
@@ -278,7 +350,9 @@ def executar(
     """
     parametros = config.estagio(ESTAGIO)
     instrucao = instrucao_do_estagio(config, recurso)
-    ferramentas = criar_ferramentas(config)
+    ferramentas = criar_ferramentas(
+        config, telemetria=telemetria, recurso=recurso.nome, tentativa=tentativa
+    )
     agente = _criar_agente(modelo, ferramentas, instrucao)
 
     if delta is not None:

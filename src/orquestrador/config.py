@@ -37,6 +37,10 @@ class ConfigCaminhos(BaseModel):
     projeto_testes: Path
     # Relativos ao projeto de testes.
     dir_recursos: str = "cypress/e2e/apis"
+    # Raiz dos schemas de entrada, emitidos pelo mapeador e lidos pelo validador da
+    # skill. Configurável porque a skill aceita dois layouts (`cypress/fixtures/schemas`
+    # e `fixtures/schemas`) e quem escolhe é o projeto do consumidor.
+    dir_schemas: str = "cypress/fixtures/schemas"
     graph: str = ".agents/state/qa-api/graphify-out/graph.json"
     # Módulos compartilhados que o executor consome (client, rotas, auth, asserts
     # base, schema). Configurável porque a skill manda preservar o padrão do
@@ -63,6 +67,10 @@ class ConfigCaminhos(BaseModel):
     @property
     def dir_recursos_abs(self) -> Path:
         return self.projeto_testes / self.dir_recursos
+
+    @property
+    def dir_schemas_abs(self) -> Path:
+        return self.projeto_testes / self.dir_schemas
 
     @property
     def graph_abs(self) -> Path:
@@ -133,6 +141,10 @@ class ConfigGate(BaseModel):
 
     flags: list[str] = Field(default_factory=list)
     max_tentativas: int = 3
+    # Reprovar quando o gabarito declarar categoria que nenhum `it` cobre. Ligado por
+    # padrão: é a checagem que responde por "planejei e não entreguei", que é o
+    # defeito de origem do projeto. Só o Gate B a consome.
+    exigir_cobertura: bool = True
 
     @model_validator(mode="after")
     def _tentativas_positivas(self) -> "ConfigGate":

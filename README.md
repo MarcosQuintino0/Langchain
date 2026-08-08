@@ -239,12 +239,47 @@ cobertura/<recurso>/cobertura.html
 sandbox/                    só no --dry-run
 ```
 
-Tipos de evento no JSONL: `execucao_iniciada`, `bloco0`, `estagio_tentativa`,
-`chamada_llm`, `gate`, `delta`, `artefatos`, `artefatos_reprovados`,
-`artefatos_removidos`, `cobertura`, `recurso_falhou`, `recurso_concluido`,
-`telemetria`, `execucao_concluida`. Dá para reconstruir o que aconteceu sem
-reexecutar — cada `chamada_llm` traz estágio, recurso, tentativa, modelo e tokens
-de entrada e saída; cada `gate` traz o veredito e os códigos de violação.
+Tipos de evento no JSONL: `execucao_iniciada`, `bloco0`, `superficie`,
+`estagio_tentativa`, `chamada_llm`, `tool`, `gate`, `delta`, `artefatos`,
+`schemas_preservados`, `artefatos_reprovados`, `artefatos_removidos`,
+`cobertura`, `recurso_falhou`, `recurso_concluido`, `telemetria`,
+`execucao_concluida`. Dá para reconstruir o que aconteceu sem reexecutar — cada
+`chamada_llm` traz estágio, recurso, tentativa, modelo e tokens de entrada e
+saída; cada `gate` traz o veredito e os códigos de violação.
+
+`schemas_preservados` é o que separa denominador independente de denominador
+gerado: ele lista os schemas que já existiam no projeto do consumidor e que o
+mapeador **não** sobrescreveu. Schema preservado foi escrito para outra
+finalidade, por outra pessoa — vale mais como régua do que o que o próprio
+modelo emite. Quando o mapeador encontra no backend um campo que o schema
+preservado não declara, sai um aviso no console: o campo fica fora da conta de
+cobertura por campo, e isso precisa ser visível.
+
+### Como conferir se o Graphify está pagando o que promete
+
+O Graphify existe para **localizar** código sem gastar token varrendo o backend, e
+a instrução do mapeador manda consultá-lo antes de procurar na fonte —
+`buscar_no_backend` é último recurso, não primeiro passo. Mas instrução não é
+garantia: o modelo pode ignorar o grafo e sair lendo arquivo, e o custo do estágio
+dobra sem que nada acuse.
+
+Cada chamada de tool vira um evento `tool` com **ordem**, nome, argumentos,
+tamanho do retorno e se ela falhou. Três leituras saem daí:
+
+| Pergunta | Onde |
+| --- | --- |
+| consultou o grafo antes de ler arquivo? | `primeira_tool` no `estagio_tentativa` |
+| que fatia da entrada veio de resposta de tool? | coluna `% do total` na tabela *Tools do mapeador* |
+| o grafo está quebrado e ninguém viu? | coluna `erros` — as tools devolvem `ERRO: ...` como texto normal ao modelo |
+
+A coluna `devolvido` é a que importa no custo, e por um motivo que não é óbvio:
+cada caractere que uma tool devolve entra no histórico do ReAct e é **reenviado em
+toda volta seguinte**. Resposta de tool grande é multiplicador, não parcela — é
+por isso que uma `buscar_no_backend` generosa custa muito mais do que o próprio
+retorno dela sugere.
+
+O `--dry-run` exercita esse caminho de verdade: as tools são chamadas sobre
+arquivos reais, só a resposta do modelo vem de fixture.
 
 ### Como conferir que o custo não é quadrático
 
@@ -306,9 +341,18 @@ src/orquestrador/
     scripts_qa.py    wrappers dos .mjs da skill
   gates/
     gate_a.py        --so-manifesto + STUB do diff grafo×manifesto
-    gate_b.py        prettier + eslint + validador completo
+    gate_b.py        prettier + eslint + validador + lacuna de cobertura
+    cobertura.py     QAORQ-030: categoria planejada que não virou teste
     parser.py        JSON dos .mjs → ResultadoGate/Violacao
 ```
+
+**Onde o Bloco 1 escreve.** O manifesto vai para `_support/cobertura.json`, dentro do
+diretório do recurso; os **schemas de entrada** vão para
+`[caminhos].dir_schemas` (`cypress/fixtures/schemas/<recurso>/`), que fica **fora**
+dele. Quem os emite é o mapeador, não o executor: o schema é o denominador da
+cobertura por campo, e denominador pertence ao plano. Se o executor o escrevesse,
+estaria escrevendo a própria régua — a circularidade que esta arquitetura existe para
+eliminar. O confinamento do executor ao diretório do recurso continua intacto.
 
 **Por que `prompts/`, `fixtures/` e `config.toml` ficam fora do pacote.** Prompt é
 conteúdo, não código: a Fase 2 é trabalho editorial, iterado por quem não
@@ -324,8 +368,17 @@ erro nenhum, só no lugar errado.
 ### Contratos de dados
 
 `Recurso`, `Endpoint`, `Inventario`, `Manifesto`, `Violacao`, `Delta`,
-`ResultadoGate`, `SaidaMapeador`, `SaidaExecutor`, `ResultadoAuditoria` — todos em
-[`contratos.py`](src/orquestrador/contratos.py).
+`ResultadoGate`, `SaidaMapeador`, `ArquivoSchema`, `SaidaExecutor`,
+`ResultadoAuditoria` — todos em [`contratos.py`](src/orquestrador/contratos.py).
+
+`SaidaMapeador.schemas` é uma lista de `ArquivoSchema`, com o caminho relativo à raiz
+de schemas (`<recurso>/<nome>.schema.json`, sem `..` e sem raiz absoluta, como o
+`ArquivoGerado` do executor). Um validador cruzado exige que todo `schemaEntrada`
+declarado no manifesto tenha o arquivo correspondente na lista — o ponteiro JSON
+opcional (`entidade#/properties/entity`) escolhe o nó dentro do arquivo e sai antes da
+comparação. Rejeitar aqui vira um delta de schema, o reparo mais barato que existe,
+sem tirar do Gate A a autoridade sobre o arquivo em disco: quem reprova o schema
+ausente continua sendo o `validar-suite-gerada.mjs`, com `QAAPI-027`.
 
 O `Manifesto` espelha `_support/cobertura.json`, cujo formato é definido **pela
 skill** (SKILL.md passo 6 + `scripts/cobertura/manifesto.mjs` e `estrutura.mjs`).
@@ -357,6 +410,35 @@ para nunca colidir:
 | `QAORQ-011` | o modelo não devolveu JSON no formato pedido |
 | `QAORQ-020` / `-021` | prettier / eslint reprovaram |
 | `QAORQ-022` | formatador configurado mas ausente do PATH |
+| `QAORQ-030` | categoria declarada em `cats` sem nenhum `it` que a cubra |
+
+### A lacuna é um gate, não só um número no relatório
+
+`QAORQ-030` fecha o buraco que sobrou entre os dois scripts da skill. O
+`validar-suite-gerada.mjs` prova **forma** — manifesto contabilizado, specs-base
+presentes, imports resolvidos, campo do schema com teste `@campo` ou exceção. Ele
+não confere se cada categoria declarada em `cats` virou um `it`. Quem sabe disso é
+o `qa-cobertura.mjs`, que classifica cada célula e conta as `lacunas` — só que era
+relatório, rodava no Bloco 3 depois do loop, e saía com código 0 de qualquer jeito.
+
+O número aparecia na tela e ninguém agia sobre ele. Foi assim que uma execução real
+gerou 50 testes, deixou `CAT-07` (regras de negócio) sem um único teste nos cinco
+endpoints, e **passou** no Gate B. É o defeito "planejei e não entreguei" — o
+mesmo que motivou o projeto — uma camada acima de onde os gates olhavam.
+
+Agora o `qa-cobertura.mjs` roda **dentro** do Gate B, e `lacunas > 0` reprova.
+Desligável em `[gates.b].exigir_cobertura`, ligado por padrão.
+
+**Autoridade e detalhe são coisas diferentes.** Quem decide se reprova é o contador
+do script; o orquestrador nunca recalcula esse número. Mas "6 lacunas" não diz ao
+executor o que escrever, então o detalhe é reconstruído cruzando o manifesto com as
+tags dos specs — e **conferido contra o contador antes de ser usado**. Se as duas
+contas divergirem, a lista é descartada e o delta sai só com o número. Um par
+endpoint×categoria errado na lista faria o executor gastar tentativa consertando o
+que não estava quebrado, e palpite com cara de precisão é pior que número honesto.
+Pela mesma razão, spec com tag dinâmica (`@cat ${...}`, a forma data-driven que a
+skill permite) desliga o detalhe: este parser não resolve template, e o que ele não
+resolve pareceria lacuna.
 
 ---
 

@@ -1,0 +1,291 @@
+"""O mapeador emite os schemas de entrada e o Bloco 1 os grava fora do recurso.
+
+Nenhum outro estágio pode fazer isso: o executor não lê o backend e escreve apenas
+dentro do diretório do recurso, e os schemas moram em `cypress/fixtures/schemas/`.
+Sem eles, todo endpoint de escrita reprova no Gate A com QAAPI-027 — de forma
+determinística, não intermitente.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from rich.console import Console
+
+from orquestrador.contratos import Recurso, ResultadoGate, Violacao
+from orquestrador.excecoes import FalhaDeGate
+from orquestrador.gates import gate_a
+from orquestrador.observabilidade.registro import Registro
+from orquestrador.pipeline import Pipeline, nomes_de_campos
+from orquestrador.simulacao import ModeloSimulado
+
+SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Pedido",
+    "type": "object",
+    "required": ["situacao"],
+    "properties": {"situacao": {"type": "string", "enum": ["ABERTO", "FECHADO"]}},
+}
+
+ARTEFATO = {
+    "inventario": {
+        "recurso": "pedidos",
+        "endpoints": [
+            {
+                "metodo": "POST",
+                "rota": "/pedidos",
+                "handler": "PedidoController.criar",
+                "arquivo": "src/controllers/PedidoController.java",
+                "linha": 17,
+            }
+        ],
+    },
+    "manifesto": {
+        "recurso": "pedidos",
+        "endpoints": [{"endpoint": "POST /pedidos", "schemaEntrada": "entidade"}],
+    },
+    "schemas": [
+        {
+            "caminho": "pedidos/entidade.schema.json",
+            "conteudo": json.dumps(SCHEMA, ensure_ascii=False, indent=2) + "\n",
+        }
+    ],
+}
+
+
+@pytest.fixture
+def pipeline(config_falso, tmp_path: Path) -> Pipeline:
+    registro = Registro(
+        tmp_path / "execucao.jsonl",
+        Console(file=(tmp_path / "console.txt").open("w", encoding="utf-8"), width=200),
+    )
+    return Pipeline(
+        config_falso,
+        registro,
+        dry_run=True,
+        roteiros=None,
+        dir_execucao=tmp_path / "execucao",
+    )
+
+
+@pytest.fixture
+def recurso(config_falso) -> Recurso:
+    caminho = config_falso.caminhos.recurso("pedidos")
+    caminho.mkdir(parents=True, exist_ok=True)
+    return Recurso(
+        nome="pedidos",
+        caminho_testes=caminho,
+        raiz_schemas=config_falso.caminhos.dir_schemas_abs,
+    )
+
+
+def preparar(pipeline: Pipeline, monkeypatch, veredito: ResultadoGate) -> None:
+    """Modelo de fixture no lugar do OpenRouter e um Gate A com veredito fixo."""
+    monkeypatch.setattr(
+        pipeline,
+        "modelo",
+        lambda *_a, **_k: ModeloSimulado(passos=[{"tipo": "final", "artefato": ARTEFATO}]),
+    )
+    monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: veredito)
+
+
+def test_bloco1_grava_o_schema_na_raiz_de_schemas(pipeline, recurso, monkeypatch):
+    preparar(pipeline, monkeypatch, ResultadoGate(aprovado=True))
+
+    saida, _resultado, tentativas = pipeline.bloco1(recurso)
+
+    assert tentativas == 1
+    emitido = recurso.caminho_schemas / "pedidos" / "entidade.schema.json"
+    assert emitido.is_file(), "o schema precisa sair do diretório do recurso"
+    assert json.loads(emitido.read_text(encoding="utf-8")) == SCHEMA
+    # O manifesto continua no lugar de sempre, dentro do recurso.
+    assert recurso.manifesto_path.is_file()
+    assert saida.schemas[0].caminho == "pedidos/entidade.schema.json"
+
+
+def test_o_schema_entra_na_conta_do_que_ficou_reprovado(pipeline, recurso, monkeypatch):
+    # A3: ele fica em disco no projeto do usuário, como o manifesto — então precisa
+    # ser anunciado junto, e não sumir da lista por ter sido escrito noutra raiz.
+    preparar(
+        pipeline,
+        monkeypatch,
+        ResultadoGate(
+            aprovado=False,
+            violacoes=[Violacao(codigo="QAAPI-021", mensagem="cat faltando")],
+        ),
+    )
+
+    with pytest.raises(FalhaDeGate) as erro:
+        pipeline.bloco1(recurso)
+
+    assert erro.value.arquivos == [
+        recurso.manifesto_path,
+        recurso.caminho_schemas / "pedidos" / "entidade.schema.json",
+    ]
+
+
+def test_o_evento_artefatos_registra_o_schema(pipeline, recurso, monkeypatch, tmp_path):
+    preparar(pipeline, monkeypatch, ResultadoGate(aprovado=True))
+    pipeline.bloco1(recurso)
+    pipeline.registro.fechar()
+
+    eventos = [
+        json.loads(linha)
+        for linha in (tmp_path / "execucao.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    artefatos = next(
+        evento
+        for evento in eventos
+        if evento["tipo"] == "artefatos" and evento["estagio"] == "mapeador"
+    )
+    assert any("entidade.schema.json" in caminho for caminho in artefatos["arquivos"])
+
+
+def test_recurso_sem_raiz_de_schemas_diz_o_que_falta(config_falso):
+    recurso = Recurso(nome="pedidos", caminho_testes=config_falso.caminhos.recurso("pedidos"))
+    with pytest.raises(ValueError, match="raiz de schemas"):
+        _ = recurso.caminho_schemas
+
+
+# ---------------------------------------------------------------------------
+# O schema do consumidor é dele
+# ---------------------------------------------------------------------------
+#
+# No desenho da skill o schema já existe no projeto do cliente e o AJV valida
+# respostas com ele. A autoridade dele como denominador vem de não ter sido escrito
+# por quem vai ser medido — então o mapeador não pode passar por cima.
+
+DO_CLIENTE = '{"type": "object", "properties": {"situacao": {"type": "string"}}}\n'
+
+
+def caminho_do_schema(recurso: Recurso) -> Path:
+    return recurso.caminho_schemas / "pedidos" / "entidade.schema.json"
+
+
+def semear_schema_do_cliente(recurso: Recurso) -> Path:
+    alvo = caminho_do_schema(recurso)
+    alvo.parent.mkdir(parents=True, exist_ok=True)
+    alvo.write_text(DO_CLIENTE, encoding="utf-8")
+    return alvo
+
+
+def artefato_com_schema(esquema: dict) -> dict:
+    conteudo = json.dumps(esquema, ensure_ascii=False, indent=2) + "\n"
+    return {
+        **ARTEFATO,
+        "schemas": [{"caminho": "pedidos/entidade.schema.json", "conteudo": conteudo}],
+    }
+
+
+def test_schema_preexistente_do_cliente_nao_e_sobrescrito(pipeline, recurso, monkeypatch):
+    alvo = semear_schema_do_cliente(recurso)
+    preparar(pipeline, monkeypatch, ResultadoGate(aprovado=True))
+
+    pipeline.bloco1(recurso)
+
+    assert alvo.read_text(encoding="utf-8") == DO_CLIENTE
+
+
+def test_schema_preservado_fica_fora_da_conta_de_reprovado(pipeline, recurso, monkeypatch):
+    # `--remover-reprovados` chama unlink() em cada caminho desta lista. Arquivo do
+    # cliente que nem chegamos a escrever não pode estar nela.
+    semear_schema_do_cliente(recurso)
+    preparar(
+        pipeline,
+        monkeypatch,
+        ResultadoGate(
+            aprovado=False,
+            violacoes=[Violacao(codigo="QAAPI-021", mensagem="cat faltando")],
+        ),
+    )
+
+    with pytest.raises(FalhaDeGate) as erro:
+        pipeline.bloco1(recurso)
+
+    assert erro.value.arquivos == [recurso.manifesto_path]
+
+
+def test_divergencia_com_o_schema_preservado_vira_aviso(pipeline, recurso, monkeypatch):
+    semear_schema_do_cliente(recurso)
+    com_campo_a_mais = {
+        "type": "object",
+        "properties": {"situacao": {"type": "string"}, "total": {"type": "number"}},
+    }
+    monkeypatch.setattr(
+        pipeline,
+        "modelo",
+        lambda *_a, **_k: ModeloSimulado(
+            passos=[{"tipo": "final", "artefato": artefato_com_schema(com_campo_a_mais)}]
+        ),
+    )
+    monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: ResultadoGate(aprovado=True))
+    avisos: list[str] = []
+    monkeypatch.setattr(pipeline.registro, "aviso", avisos.append)
+
+    pipeline.bloco1(recurso)
+
+    assert any("total" in aviso for aviso in avisos), (
+        "campo achado no backend e ausente do schema do cliente sai do denominador "
+        "sem deixar rastro — precisa ser anunciado"
+    )
+
+
+def test_schema_desta_execucao_e_reescrito_no_reparo(pipeline, recurso, monkeypatch):
+    # Sem isto o loop do Gate A não converge: o mapeador corrigiria o schema e a
+    # correção seria descartada por parecer arquivo alheio.
+    corrigido = {
+        "type": "object",
+        "properties": {"situacao": {"type": "string"}, "total": {"type": "number"}},
+    }
+
+    def modelo(_estagio: str, _recurso: str, tentativa: int) -> ModeloSimulado:
+        esquema = corrigido if tentativa > 1 else SCHEMA
+        return ModeloSimulado(
+            passos=[{"tipo": "final", "artefato": artefato_com_schema(esquema)}]
+        )
+
+    vereditos = iter(
+        [
+            ResultadoGate(
+                aprovado=False,
+                violacoes=[Violacao(codigo="QAAPI-021", mensagem="cat faltando")],
+            ),
+            ResultadoGate(aprovado=True),
+        ]
+    )
+    monkeypatch.setattr(pipeline, "modelo", modelo)
+    monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: next(vereditos))
+
+    _saida, _resultado, tentativas = pipeline.bloco1(recurso)
+
+    assert tentativas == 2
+    assert json.loads(caminho_do_schema(recurso).read_text(encoding="utf-8")) == corrigido
+
+
+# ---------------------------------------------------------------------------
+# Varredura de campos
+# ---------------------------------------------------------------------------
+
+
+def test_nomes_de_campos_atravessa_o_envelope_da_resposta():
+    # O schema do consumidor costuma validar {code, entity}, com a entidade aninhada.
+    envelope = {
+        "type": "object",
+        "properties": {
+            "code": {"type": "integer"},
+            "entity": {"type": "object", "properties": {"sku": {"type": "string"}}},
+        },
+    }
+    assert nomes_de_campos(envelope) == {"code", "entity", "sku"}
+
+
+def test_nomes_de_campos_desce_em_lista():
+    lista = {"type": "array", "items": {"properties": {"sku": {"type": "string"}}}}
+    assert nomes_de_campos(lista) == {"sku"}
+
+
+def test_nomes_de_campos_tolera_schema_sem_properties():
+    assert nomes_de_campos({"type": "string"}) == set()
+    assert nomes_de_campos("nem é objeto") == set()

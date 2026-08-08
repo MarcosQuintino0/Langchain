@@ -7,17 +7,21 @@
 # A skill `qa-api` mora em OUTRO projeto e é apenas consumida, nunca modificada.
 # Caminho absoluto de propósito: os dois repositórios são independentes e não têm
 # posição relativa garantida.
-skill = "C:/agentesQualidade/qa-agent-skills/skills/qa-api"
+skill = "C:/Agents/skills/qa-api"
 # scripts = ".../skills/qa-api/scripts"   # derivado de `skill` quando omitido
 
 # AJUSTE OS DOIS ABAIXO antes de rodar sem --dry-run.
 # O --dry-run ignora ambos e usa a sandbox de fixtures.
-backend = "../backend"
+backend = "../Backend-"
 projeto_testes = "../projeto-de-testes"
 
 # Relativos ao projeto de testes.
 dir_recursos = "cypress/e2e/apis"
 graph = ".agents/state/qa-api/graphify-out/graph.json"
+
+# Raiz dos schemas de entrada. O mapeador grava aqui, em <recurso>/<nome>.schema.json,
+# e é daqui que o validador da skill tira o denominador da cobertura por campo.
+dir_schemas = "cypress/fixtures/schemas"
 
 # Módulos compartilhados (client, rotas, auth, asserts base, schema) que o executor
 # importa. O Bloco 0 extrai deles a superfície — nomes de export, assinaturas
@@ -50,20 +54,20 @@ max_retries = 2
 # um delta de estágio "schema" é reenviado sozinho.
 
 [estagios.mapeador]
-modelo = "<defina: id do modelo no OpenRouter, ex. vendor/modelo>"
+modelo = "deepseek/deepseek-v4-flash-0731"
 temperatura = 0.0
 modo_estruturado = "prompt"
 max_tentativas_schema = 3
 limite_passos = 60
 
 [estagios.executor]
-modelo = "<defina: id do modelo no OpenRouter, ex. vendor/modelo>"
+modelo = "deepseek/deepseek-v4-flash-0731"
 temperatura = 0.0
 modo_estruturado = "prompt"
 max_tentativas_schema = 3
 
 [estagios.auditor]
-modelo = "<defina: id do modelo no OpenRouter, ex. vendor/modelo>"
+modelo = "deepseek/deepseek-v4-flash-0731"
 temperatura = 0.0
 modo_estruturado = "prompt"
 
@@ -79,6 +83,9 @@ max_tentativas = 3
 [gates.b]
 flags = ["--exigir-campos"]
 max_tentativas = 3
+# Reprova quando o gabarito declara uma categoria em `cats` e nenhum `it` a cobre —
+# a lacuna que o qa-cobertura.mjs conta e o validar-suite-gerada.mjs não enxerga.
+exigir_cobertura = true
 
 # ---------------------------------------------------------------------------
 # Execução

@@ -19,6 +19,7 @@ A CLI que dirige tudo isto vive em `cli.py`.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -71,6 +72,32 @@ def _unir_caminhos(atuais: list[Path], novos: list[Path] | None) -> list[Path]:
     return unidos
 
 
+# Guarda contra schema recursivo, no mesmo espírito do PROFUNDIDADE_MAXIMA de
+# `campos/schema.mjs`.
+_PROFUNDIDADE_DE_CAMPOS = 4
+
+
+def nomes_de_campos(esquema: Any, *, profundidade: int = _PROFUNDIDADE_DE_CAMPOS) -> set[str]:
+    """Todo nome que aparece sob algum `properties` do schema, até uma profundidade.
+
+    Varredura deliberadamente rasa e tolerante: ela serve para responder "este nome
+    não aparece em lugar nenhum do arquivo", não para decidir qual nó é a entidade.
+    Quem decide isso é `campos/schema.mjs`, e reimplementar a heurística aqui criaria
+    uma segunda fonte de verdade para o denominador da cobertura.
+    """
+    if profundidade <= 0 or not isinstance(esquema, dict):
+        return set()
+    nomes: set[str] = set()
+    propriedades = esquema.get("properties")
+    if isinstance(propriedades, dict):
+        for nome, subesquema in propriedades.items():
+            nomes.add(str(nome))
+            nomes |= nomes_de_campos(subesquema, profundidade=profundidade - 1)
+    if (itens := esquema.get("items")) is not None:
+        nomes |= nomes_de_campos(itens, profundidade=profundidade - 1)
+    return nomes
+
+
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -95,6 +122,10 @@ class Pipeline:
         self.dir_execucao = dir_execucao
         self.pular_cypress = pular_cypress
         self._modelos_reais: dict[str, Any] = {}
+        # Schemas que ESTA execução criou. É o que separa "arquivo do cliente", que
+        # não pode ser sobrescrito, de "arquivo nosso", que o loop de reparo precisa
+        # poder reescrever a cada tentativa.
+        self._schemas_gravados: set[Path] = set()
         # Preenchida no Bloco 0: é do projeto, não do recurso, então é extraída uma
         # vez e viaja pela instrução fixa do executor.
         self.superficie: SuperficieDoProjeto | None = None
@@ -195,14 +226,25 @@ class Pipeline:
             recurso.manifesto_path.write_text(
                 saida.manifesto.para_json(), encoding="utf-8", newline="\n"
             )
+            # Os schemas de entrada ficam fora do diretório do recurso: são o
+            # denominador da cobertura por campo e o Gate A os lê do disco, não da
+            # saída do modelo.
+            escritos = [recurso.manifesto_path, *self._persistir_schemas(recurso, saida)]
+            self.registro.evento(
+                "artefatos",
+                estagio=agente_mapeador.ESTAGIO,
+                recurso=recurso.nome,
+                arquivos=[str(caminho) for caminho in escritos],
+            )
+
             destino = self.dir_execucao / "artefatos" / recurso.nome
             destino.mkdir(parents=True, exist_ok=True)
             (destino / "inventario.json").write_text(
                 saida.inventario.para_json(), encoding="utf-8", newline="\n"
             )
-            # Só o manifesto entra na conta de "reprovado": ele fica no projeto do
+            # Manifesto e schemas entram na conta de "reprovado": ficam no projeto do
             # usuário. O inventário fica no diretório da execução, que é nosso.
-            return [recurso.manifesto_path]
+            return escritos
 
         def avaliar(saida: SaidaMapeador) -> ResultadoGate:
             return gate_a.executar(
@@ -221,6 +263,69 @@ class Pipeline:
             avaliar=avaliar,
             texto_do_artefato=lambda saida: saida.manifesto.para_json(),
         )
+
+    def _persistir_schemas(self, recurso: Recurso, saida: SaidaMapeador) -> list[Path]:
+        """Grava os schemas do mapeador sem passar por cima do que é do cliente.
+
+        No desenho da skill o schema de entrada é artefato **pré-existente** do
+        projeto consumidor — o AJV valida respostas com ele e ele quebra os testes se
+        estiver errado (`scripts/cobertura/campos/schema.mjs`). É dessa independência
+        que vem a autoridade dele como denominador: ele não foi escrito por quem vai
+        ser medido. Sobrescrever em silêncio quebraria suíte alheia e trocaria uma
+        régua independente pela régua do próprio modelo.
+
+        Daí a regra: arquivo que já existia é preservado; arquivo que **esta execução**
+        criou é reescrito à vontade, senão o loop de reparo do Gate A nunca convergiria
+        sobre o schema.
+
+        Só o que foi realmente escrito volta na lista. O preservado não pode entrar na
+        conta de "reprovado" — é ela que `--remover-reprovados` apaga, e apagar arquivo
+        do cliente que nem chegamos a tocar seria destruição de dado alheio.
+        """
+        escritos: list[Path] = []
+        preservados: list[Path] = []
+
+        for arquivo in saida.schemas:
+            alvo = recurso.caminho_schemas / arquivo.caminho
+            if alvo.is_file() and alvo not in self._schemas_gravados:
+                preservados.append(alvo)
+                self._avisar_divergencia(alvo, arquivo.conteudo)
+                continue
+            alvo.parent.mkdir(parents=True, exist_ok=True)
+            alvo.write_text(arquivo.conteudo, encoding="utf-8", newline="\n")
+            self._schemas_gravados.add(alvo)
+            escritos.append(alvo)
+
+        if preservados:
+            self.registro.evento(
+                "schemas_preservados",
+                recurso=recurso.nome,
+                arquivos=[str(caminho) for caminho in preservados],
+            )
+        return escritos
+
+    def _avisar_divergencia(self, alvo: Path, conteudo_emitido: str) -> None:
+        """Avisa quando o mapeador achou campo que o schema preservado não declara.
+
+        Não reprova: a autoridade sobre o arquivo é do Gate A, e o arquivo é do
+        consumidor. Mas a divergência não pode passar calada — campo que existe no
+        backend e não está no schema sai do denominador sem deixar rastro, e a
+        cobertura sobe porque a régua encolheu.
+        """
+        try:
+            existente = nomes_de_campos(json.loads(alvo.read_text(encoding="utf-8")))
+            emitido = nomes_de_campos(json.loads(conteudo_emitido))
+        except (OSError, ValueError):
+            # Schema ilegível é caso do gate, que reprova com a mensagem certa. Aqui
+            # só desistimos da comparação.
+            return
+        if ausentes := sorted(emitido - existente):
+            self.registro.aviso(
+                f"schema preservado {alvo.name}: o mapeador encontrou no backend "
+                f"{len(ausentes)} campo(s) que ele não declara "
+                f"({', '.join(ausentes)}) — eles ficam fora do denominador da "
+                "cobertura por campo"
+            )
 
     # -- Bloco 2 + Gate B ---------------------------------------------------
 
@@ -259,7 +364,15 @@ class Pipeline:
             recurso=recurso,
             produzir=produzir,
             persistir=persistir,
-            avaliar=lambda _saida: gate_b.executar(self.config, recurso),
+            # O manifesto vai junto para o gate poder nomear a categoria que ficou
+            # sem teste; o `out` mantém o HTML de cada tentativa dentro da execução,
+            # em vez de sujar o projeto do usuário a cada volta do loop.
+            avaliar=lambda _saida: gate_b.executar(
+                self.config,
+                recurso,
+                manifesto=manifesto,
+                out_cobertura=self.dir_execucao / "cobertura" / recurso.nome / "gate.html",
+            ),
             texto_do_artefato=lambda saida: agente_executor.artefato_em_disco(recurso, saida),
         )
 
@@ -324,6 +437,7 @@ class Pipeline:
 
         for tentativa in range(1, maximo + 1):
             marca = len(self.telemetria.chamadas)
+            marca_tools = len(self.telemetria.tools)
             try:
                 artefato = produzir(tentativa, delta, artefato_atual)
             except FalhaDeEstagio as erro:
@@ -340,6 +454,7 @@ class Pipeline:
                     tentativa=tentativa,
                     delta=delta,
                     desde=marca,
+                    desde_tools=marca_tools,
                 )
             persistidos = _unir_caminhos(persistidos, persistir(artefato))
             resultado = avaliar(artefato)
@@ -405,14 +520,24 @@ class Pipeline:
         tentativa: int,
         delta: Delta | None,
         desde: int,
+        desde_tools: int = 0,
     ) -> None:
         """Evento `estagio_tentativa` com o que foi efetivamente enviado ao modelo.
 
         Os tamanhos vêm das chamadas registradas durante esta tentativa: a
         instrução fixa (constante, linha de base) e a entrada. É o par que torna o
         princípio 2 verificável a partir do log, sem reexecutar nada.
+
+        O resumo de tools responde a outra pergunta, do mesmo log: a exploração
+        seguiu a instrução do estágio? `primeira_tool` é o teste mais direto — a
+        instrução manda consultar o grafo antes de procurar no backend, então
+        qualquer coisa diferente de `graphify_query` aqui é desvio.
         """
         chamadas = self.telemetria.chamadas[desde:]
+        tools = self.telemetria.tools[desde_tools:]
+        por_nome: dict[str, int] = {}
+        for tool in tools:
+            por_nome[tool.nome] = por_nome.get(tool.nome, 0) + 1
         self.registro.evento(
             "estagio_tentativa",
             estagio=estagio,
@@ -423,6 +548,11 @@ class Pipeline:
             chamadas=len(chamadas),
             caracteres_instrucao=max((c.caracteres_instrucao for c in chamadas), default=0),
             caracteres_entrada=sum(c.caracteres_entrada for c in chamadas),
+            tools=len(tools),
+            tools_por_nome=por_nome,
+            caracteres_de_tools=sum(tool.caracteres for tool in tools),
+            tools_com_erro=sum(tool.erro for tool in tools),
+            primeira_tool=tools[0].nome if tools else None,
         )
 
     # -- orquestração -------------------------------------------------------
