@@ -344,6 +344,14 @@ def coletar(
             }
             for nome, estagio in config.estagios.items()
         },
+        # Sobe ao topo, embora também esteja dentro de `configuracao`: a pergunta
+        # "para onde foi o código-fonte deste cliente?" é a que alguém faz num
+        # incidente, e ela não pode depender de escavar um dump. O nome diz o que o
+        # campo é — política **declarada**, o que foi pedido ao roteador. O provedor
+        # que de fato executou cada chamada viria da resposta, e o orquestrador
+        # ainda não a lê; chamar isto de "rota efetiva" seria dizer que temos
+        # evidência quando temos declaração.
+        "politica_de_privacidade_declarada": config.openrouter.politica_declarada(),
         "configuracao": redigir(config.model_dump(mode="json")),
         "hashes": {
             "prompts": _hashes(config.caminhos.prompts, "*.md", "hashes.prompts", ausencias),

@@ -587,15 +587,40 @@ Empacotar prompts como package-data e acessar por `importlib.resources`. Criar
 `orquestrador init` e `orquestrador doctor`. Toda release constrói o wheel e o testa em
 ambiente limpo.
 
-## 5.2 — Fronteira de privacidade `[G]`
+## 5.2 — Fronteira de privacidade `[G]` — **CONCLUÍDO**
 
 Requisito de venda, não polimento. Nenhuma empresa aprova mandar o código-fonte dela para um
 provedor sem política clara.
 
-`PoliticaDePrivacidade` com allowlist de raízes e extensões, `.llmignore`, denylist forte
-(`.env*`, PEM, credenciais) e scanner de segredo que bloqueia ou redige **antes** do envio.
-Zero Data Retention e allowlist de provedor como configuração conservadora, sem fallback para
-fora da política. Logs sem código-fonte por padrão.
+✅ **Lado do disco** — `ferramentas/privacidade.py`: denylist forte (`.env*`, PEM,
+credenciais), `.llmignore` do consumidor e redação de conteúdo preservando a contagem de
+linhas. As tools do mapeador consultam a política pelo próprio `Confinamento`.
+
+✅ **Lado do provedor** — `[openrouter]` ganhou três campos:
+
+* `hosts_permitidos`, conjunto **fechado**, conferido na carga da configuração. `base_url`
+  fora dele não carrega, e não há fallback: trocar o destino é a mudança de uma linha que
+  passa despercebida numa revisão, e declarar o host novo junto é o que a torna revisável.
+* `retencao_de_dados = "deny"` por padrão, pedindo ao roteador que use só provedores que não
+  retêm o conteúdo.
+* `provedores_permitidos`, que quando preenchido **desliga o fallback** junto — restringir a
+  lista sem desligar o fallback não restringe nada, porque o primeiro provedor indisponível
+  faz o roteador cair para outro qualquer.
+
+A política viaja no corpo de **toda** chamada, e não numa configuração de conta: o OpenRouter
+escolhe o provedor por requisição, então política que mora em outro lugar é preferência.
+
+✅ **Logs sem código-fonte** — auditado, e já era verdade por construção: `RegistroDeTool`
+grava `len(saida)` e o prefixo `ERRO:`, nunca o texto. `test_observabilidade_medidas.py` fecha
+o conjunto de campos dos dois registros, para que o campo que faltaria — fácil de acrescentar
+por um bom motivo, difícil de reverter depois que já está em todo artefato de CI — exija uma
+decisão explícita.
+
+**Pendência declarada: o provedor efetivo de cada chamada não é registrado.** O manifesto
+carrega `politica_de_privacidade_declarada`, e o nome é literal — é o que foi **pedido** ao
+roteador. Ler quem de fato executou exigiria consumir o `response_metadata` da resposta, cujo
+formato depende do provedor. Chamar o campo de "rota efetiva" seria dizer que temos evidência
+quando temos declaração.
 
 ## 5.3 — Orçamento antes, não depois `[M]`
 

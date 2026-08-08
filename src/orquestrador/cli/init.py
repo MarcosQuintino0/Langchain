@@ -67,6 +67,25 @@ api_key_env = "OPENROUTER_API_KEY"
 timeout_s = 180.0
 max_retries = 2
 
+# Para onde o código-fonte do seu backend pode ir. Conjunto FECHADO: uma `base_url`
+# fora daqui não carrega, e não há fallback. Trocar o destino é a mudança de uma
+# linha que passa despercebida numa revisão — declarar o host novo aqui, na mesma
+# mudança, é o que a torna revisável.
+hosts_permitidos = ["openrouter.ai"]
+
+# O OpenRouter é um ROTEADOR: o endpoint é um só, e quem executa a inferência é
+# escolhido por ele a cada requisição. Estes dois campos são o que se pede a esse
+# roteador, e viajam no corpo de toda chamada.
+#
+# "deny" restringe a provedores que não retêm o conteúdo enviado. É o padrão, e é o
+# que a maioria das empresas precisa antes de aprovar mandar código para fora.
+retencao_de_dados = "deny"
+
+# Vazio = o roteador escolhe. Preenchido = só estes, e o fallback é DESLIGADO junto
+# — restringir a lista sem desligar o fallback não restringe nada, porque o primeiro
+# provedor indisponível faz o roteador cair para outro qualquer.
+provedores_permitidos = []
+
 # Identificador do modelo no provedor, na forma que ele espera.
 # O mapeador tem o julgamento mais difícil e o menor volume de saída: pede o modelo
 # mais capaz. O executor tem o volume de tokens e trabalho mecânico se o gabarito

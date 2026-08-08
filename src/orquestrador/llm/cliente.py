@@ -99,6 +99,12 @@ def criar_modelo(config: Config, estagio: str) -> BaseChatModel:
     cabecalhos = config.openrouter.headers()
     if cabecalhos:
         extras["default_headers"] = cabecalhos
+
+    # A política de roteamento viaja no corpo de **toda** chamada, e não numa
+    # configuração de conta: o OpenRouter escolhe o provedor por requisição, então
+    # uma política que mora em outro lugar não é política — é preferência. O que
+    # ela pede está em `ConfigOpenRouter.roteamento`.
+    extras["extra_body"] = {"provider": config.openrouter.roteamento()}
     return ChatOpenAI(
         model=parametros.modelo,
         base_url=str(config.openrouter.base_url),

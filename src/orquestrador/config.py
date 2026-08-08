@@ -157,6 +157,66 @@ class ConfigOpenRouter(BaseModel):
     # Zero é legítimo: significa "não tente de novo".
     max_retries: Annotated[NonNegativeInt, Field(le=10)] = 2
 
+    # Para onde o código-fonte do cliente pode ir. Conjunto fechado, conferido na
+    # carga da configuração: `base_url` fora daqui é `ErroDeConfiguracao`, e não
+    # aviso. Trocar a `base_url` é a mudança de uma linha que passa despercebida
+    # numa revisão e manda o backend de quem nos contratou para outro lugar.
+    hosts_permitidos: list[str] = Field(default_factory=lambda: ["openrouter.ai"])
+
+    # O OpenRouter é um roteador: o endpoint é um só, e o provedor que de fato
+    # executa a inferência é escolhido por ele. Sem estes dois campos, "mandei para
+    # o openrouter.ai" não diz nada sobre quem leu o código.
+    #
+    # `retencao_de_dados="deny"` pede ao roteador que use apenas provedores que não
+    # retêm o conteúdo. `provedores_permitidos`, quando preenchido, restringe a
+    # lista e **desliga o fallback**: sem essa segunda parte, um provedor
+    # indisponível faria o roteador escolher outro qualquer, que é exatamente o
+    # caso em que a política importa.
+    retencao_de_dados: Literal["deny", "allow"] = "deny"
+    provedores_permitidos: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _base_url_esta_na_allowlist(self) -> ConfigOpenRouter:
+        host = self.base_url.host or ""
+        if host not in self.hosts_permitidos:
+            raise ValueError(
+                f"[openrouter].base_url aponta para {host!r}, que não está em "
+                f"hosts_permitidos ({', '.join(self.hosts_permitidos)}).\n"
+                "Não há fallback aqui de propósito: o que atravessa esta fronteira é "
+                "o código-fonte de quem nos contratou. Se o destino novo é "
+                "legítimo, declare-o em [openrouter].hosts_permitidos, na mesma "
+                "mudança — a declaração é o que torna a escolha revisável."
+            )
+        return self
+
+    def roteamento(self) -> dict[str, Any]:
+        """O bloco `provider` que acompanha cada chamada ao OpenRouter.
+
+        Vazio só se a política for `allow` sem lista de provedores — o que é uma
+        escolha explícita de quem configurou, não um padrão.
+        """
+        politica: dict[str, Any] = {"data_collection": self.retencao_de_dados}
+        if self.provedores_permitidos:
+            politica["only"] = list(self.provedores_permitidos)
+            politica["allow_fallbacks"] = False
+        return politica
+
+    def politica_declarada(self) -> dict[str, Any]:
+        """A política, como ela vai para o manifesto de execução.
+
+        É **o que foi pedido**, não o que aconteceu: o provedor efetivo de cada
+        chamada viria da resposta, e hoje o orquestrador não o lê. A distinção está
+        no nome do campo de propósito — chamá-lo de "rota efetiva" seria dizer que
+        temos evidência quando temos declaração.
+        """
+        return {
+            "host": self.base_url.host,
+            "hosts_permitidos": list(self.hosts_permitidos),
+            "retencao_de_dados": self.retencao_de_dados,
+            "provedores_permitidos": list(self.provedores_permitidos),
+            "fallback_permitido": not self.provedores_permitidos,
+        }
+
     def chave(self) -> str:
         chave = os.environ.get(self.api_key_env, "").strip()
         if not chave:
