@@ -23,13 +23,15 @@ from orquestrador.contratos import (
     SaidaExecutor,
     SuperficieDoProjeto,
 )
-from orquestrador.ferramentas.arquivos import confinar
+from orquestrador.ferramentas.publicacao import AreaDeStaging
 from orquestrador.llm.estruturado import GeradorEstruturado
 from orquestrador.llm.montagem import (
+    LIMITE_PADRAO,
     carregar_prompt,
     esquema_json,
     montar_entrada_inicial,
     montar_entrada_reparo,
+    recortar_por_violacoes,
 )
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
@@ -110,37 +112,35 @@ def executar(
     )
 
 
-def escrever(recurso: Recurso, saida: SaidaExecutor) -> list[Path]:
-    """Materializa os arquivos no diretório do recurso — o handoff é o disco.
+def escrever(area: AreaDeStaging, saida: SaidaExecutor) -> list[Path]:
+    """Materializa os arquivos na área de staging — o handoff é o disco.
 
-    Cinto e suspensório: o contrato de `ArquivoGerado` já recusa `..` e caminho
-    absoluto; `confinar` recusa o que sobra — junction ou symlink dentro do recurso
-    apontando para fora dele. Quem decide isso é `ferramentas.arquivos`, dono da
-    regra: a comparação textual que vivia aqui aceitava o diretório irmão de prefixo
-    comum (`.../pedidos-antigos` passava por `.../pedidos`).
+    A escrita vai para o staging da execução, nunca para o diretório do recurso: é
+    o gate que decide se aquilo chega ao projeto de quem nos contratou, e ele só
+    decide depois de rodar. Quem publica é `ferramentas.publicacao`, e é lá que
+    mora também o confinamento — `AreaDeStaging.escrever` chama `confinar`, então a
+    comparação textual que vivia aqui (e aceitava `.../pedidos-antigos` por
+    `.../pedidos`) não voltou por outra porta.
     """
-    escritos: list[Path] = []
-    raiz = recurso.caminho_testes
-    for arquivo in saida.arquivos:
-        destino = confinar(raiz, arquivo.caminho)
-        destino.parent.mkdir(parents=True, exist_ok=True)
-        destino.write_text(arquivo.conteudo, encoding="utf-8", newline="\n")
-        escritos.append(destino)
-    return escritos
+    return [area.escrever(arquivo.caminho, arquivo.conteudo) for arquivo in saida.arquivos]
 
 
-def artefato_em_disco(recurso: Recurso, saida: SaidaExecutor, *, limite: int = 60_000) -> str:
-    """Texto do artefato atual para o prompt de reparo (o que está no disco).
+def artefato_em_disco(
+    dir_recurso: Path,
+    saida: SaidaExecutor,
+    delta: Delta | None = None,
+    *,
+    limite: int = LIMITE_PADRAO,
+) -> str:
+    """Texto do artefato atual para o prompt de reparo (o que está no staging).
 
-    Truncado: o delta precisa do bastante para localizar o erro, não da suíte
-    inteira — reenviar tudo é o custo quadrático voltando pela janela.
+    Lê do disco, e não da saída do modelo, porque é o disco que o gate mediu. A
+    escolha do que cabe é de `llm.montagem.recortar_por_violacoes`: aqui só o I/O.
     """
-    partes: list[str] = []
+    arquivos: dict[str, str] = {}
     for arquivo in saida.arquivos:
-        caminho = recurso.caminho_testes / arquivo.caminho
-        conteudo = caminho.read_text(encoding="utf-8") if caminho.is_file() else arquivo.conteudo
-        partes.append(f"--- {arquivo.caminho} ---\n{conteudo}")
-    texto = "\n\n".join(partes)
-    if len(texto) > limite:
-        texto = texto[:limite] + "\n... (truncado)"
-    return texto
+        caminho = dir_recurso / arquivo.caminho
+        arquivos[arquivo.caminho] = (
+            caminho.read_text(encoding="utf-8") if caminho.is_file() else arquivo.conteudo
+        )
+    return recortar_por_violacoes(arquivos, delta.violacoes if delta else [], limite=limite)

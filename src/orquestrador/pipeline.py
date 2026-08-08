@@ -8,11 +8,16 @@
 Os seis princípios que o desenho serve estão no README. Os dois que aparecem
 literalmente neste arquivo:
 
-* princípio 1 — o handoff entre estágios é **artefato em disco**. O manifesto vai
-  para `_support/cobertura.json`, os specs para o diretório do recurso, o
-  inventário para o diretório da execução. Nenhum estágio recebe conversa.
+* princípio 1 — o handoff entre estágios é **artefato em disco**. O manifesto, os
+  specs e os schemas vão para a área de staging da execução; o inventário, para o
+  diretório da execução. Nenhum estágio recebe conversa.
 * princípio 2 — o loop de reparo envia **só o delta**: instrução fixa do estágio +
   artefato atual + violações. Sem histórico de tentativas.
+
+O disco do consumidor só é tocado **uma vez por recurso**, depois que os dois
+gates aprovaram, e por `ferramentas/publicacao.py`. Enquanto o loop roda, cada
+tentativa reescreve o staging; o que uma tentativa ruim destrói é a tentativa
+anterior, nunca o projeto de quem nos contratou.
 
 A CLI que dirige tudo isto vive em `cli.py`.
 """
@@ -32,7 +37,11 @@ from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.analise_estatica.extrator_de_superficie import extrair as extrair_superficie
 from orquestrador.config import Config
 from orquestrador.contratos import (
+    Classificacao,
     Delta,
+    DivergenciaDeSchema,
+    EntradaDoDiario,
+    EstadoDoRecurso,
     EstagioDelta,
     Manifesto,
     Recurso,
@@ -47,10 +56,19 @@ from orquestrador.excecoes import (
     FalhaDaExecucaoDeTestes,
     FalhaDeEstagio,
     FalhaDeGate,
+    FalhaDePublicacao,
     GrafoNaoPreparado,
 )
+from orquestrador.ferramentas.arquivos import sob_a_raiz
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
 from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS
+from orquestrador.ferramentas.publicacao import (
+    NOME_DO_DIARIO,
+    AreaDeStaging,
+    Diario,
+    criar_area,
+    remover_criados,
+)
 from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.gates import gate_a, gate_b
 from orquestrador.gates.saidas import resumo_da_cobertura
@@ -103,20 +121,38 @@ class InterrupcaoDaExecucao:
 @dataclass
 class ResultadoDoRecurso:
     recurso: str
-    sucesso: bool = False
+    # Nunca começa aprovado: o padrão de um campo é o que vale quando o recurso
+    # falha antes de chegar ao fim, e o padrão errado aqui é um falso sucesso.
+    estado: EstadoDoRecurso = EstadoDoRecurso.REPROVADO
     tentativas_mapeador: int = 0
     tentativas_executor: int = 0
     gate_a: ResultadoGate | None = None
     gate_b: ResultadoGate | None = None
     cobertura: dict[str, Any] = field(default_factory=dict[str, Any])
-    # Nunca começa como "executado": o padrão de um campo é o que vale quando o
-    # recurso falha antes do Bloco 3, e o padrão errado aqui é um falso positivo.
+    # Nunca começa como "executado": mesmo raciocínio do estado acima.
     execucao_de_testes: str = NAO_EXECUTADO
     motivo_da_execucao_de_testes: str = "o Bloco 3 não chegou a rodar para este recurso"
     motivo: str = ""
     # A3: o que ficou em disco em estado reprovado. Não é apagado por padrão.
     arquivos_reprovados: list[Path] = field(default_factory=list[Path])
     codigos_remanescentes: list[str] = field(default_factory=list[str])
+    # O que a publicação fez no projeto do consumidor, arquivo a arquivo.
+    diario: list[EntradaDoDiario] = field(default_factory=list[EntradaDoDiario])
+    publicado: bool = False
+    # Só sobrevive ao fim do recurso quando ele falhou: é o que se inspeciona.
+    staging: Path | None = None
+    divergencias: list[DivergenciaDeSchema] = field(default_factory=list[DivergenciaDeSchema])
+
+    @property
+    def sucesso(self) -> bool:
+        """Aprovado, e só isso.
+
+        Propriedade e não campo: com os dois, `sucesso=True, estado=REPROVADO` seria
+        escrevível, e a pergunta "o recurso passou?" passaria a ter duas respostas.
+        `REQUER_REVISAO` responde `False` aqui de propósito — o recurso não terminou
+        aprovado —, e quem precisa distinguir revisão de reprovação lê `estado`.
+        """
+        return self.estado is EstadoDoRecurso.APROVADO
 
 
 def _unir_caminhos(atuais: list[Path], novos: list[Path] | None) -> list[Path]:
@@ -182,10 +218,10 @@ class Pipeline:
         self.dir_execucao = dir_execucao
         self.pular_cypress = pular_cypress
         self._modelos_reais: dict[str, BaseChatModel] = {}
-        # Schemas que ESTA execução criou. É o que separa "arquivo do cliente", que
-        # não pode ser sobrescrito, de "arquivo nosso", que o loop de reparo precisa
-        # poder reescrever a cada tentativa.
-        self._schemas_gravados: set[Path] = set()
+        # O diário mora na raiz do diretório de saída — acima desta execução, porque
+        # a pergunta que ele responde ("este arquivo é nosso?") atravessa execuções.
+        # Ver `ferramentas/publicacao.py`.
+        self.diario = Diario(dir_execucao.parent / NOME_DO_DIARIO)
         # Preenchida no Bloco 0: é do projeto, não do recurso, então é extraída uma
         # vez e viaja pela instrução fixa do executor.
         self.superficie: SuperficieDoProjeto | None = None
@@ -193,6 +229,10 @@ class Pipeline:
         # no retorno de `rodar`, para que quem já lê a lista de resultados continue
         # lendo a lista de resultados — inclusive a parcial.
         self.interrupcao: InterrupcaoDaExecucao | None = None
+        # Divergências de schema do recurso em curso. Zerada a cada recurso: é o
+        # princípio 3 aplicado ao próprio pipeline — nada de um recurso pode
+        # decidir o desfecho do seguinte.
+        self._divergencias: list[DivergenciaDeSchema] = []
 
     # -- modelos ------------------------------------------------------------
 
@@ -276,8 +316,11 @@ class Pipeline:
 
     # -- Bloco 1 + Gate A ---------------------------------------------------
 
-    def bloco1(self, recurso: Recurso) -> tuple[SaidaMapeador, ResultadoGate, int]:
+    def bloco1(
+        self, recurso: Recurso, area: AreaDeStaging
+    ) -> tuple[SaidaMapeador, ResultadoGate, int]:
         self.registro.titulo(f"Bloco 1 — mapeador · {recurso.nome}")
+        inventario_path = self.dir_execucao / "artefatos" / recurso.nome / "inventario.json"
 
         def produzir(tentativa: int, delta: Delta | None, atual: str | None) -> SaidaMapeador:
             return agente_mapeador.executar(
@@ -292,14 +335,13 @@ class Pipeline:
             )
 
         def persistir(saida: SaidaMapeador) -> list[Path]:
-            recurso.manifesto_path.parent.mkdir(parents=True, exist_ok=True)
-            recurso.manifesto_path.write_text(
-                saida.manifesto.para_json(), encoding="utf-8", newline="\n"
-            )
-            # Os schemas de entrada ficam fora do diretório do recurso: são o
-            # denominador da cobertura por campo e o Gate A os lê do disco, não da
-            # saída do modelo.
-            escritos = [recurso.manifesto_path, *self._persistir_schemas(recurso, saida)]
+            escritos = [
+                area.escrever("_support/cobertura.json", saida.manifesto.para_json()),
+                # Os schemas de entrada ficam fora do diretório do recurso: são o
+                # denominador da cobertura por campo e o Gate A os lê do disco, não
+                # da saída do modelo.
+                *self._persistir_schemas(recurso, saida, area),
+            ]
             self.registro.evento(
                 "artefatos",
                 estagio=agente_mapeador.ESTAGIO,
@@ -307,19 +349,18 @@ class Pipeline:
                 arquivos=[str(caminho) for caminho in escritos],
             )
 
-            destino = self.dir_execucao / "artefatos" / recurso.nome
-            destino.mkdir(parents=True, exist_ok=True)
-            (destino / "inventario.json").write_text(
-                saida.inventario.para_json(), encoding="utf-8", newline="\n"
-            )
-            # Manifesto e schemas entram na conta de "reprovado": ficam no projeto do
-            # usuário. O inventário fica no diretório da execução, que é nosso.
+            inventario_path.parent.mkdir(parents=True, exist_ok=True)
+            inventario_path.write_text(saida.inventario.para_json(), encoding="utf-8", newline="\n")
+            # O inventário fica no diretório da execução, que é nosso, e por isso
+            # não entra na conta do que precisa ser publicado.
             return escritos
 
         def avaliar(saida: SaidaMapeador) -> ResultadoGate:
             return gate_a.executar(
                 self.config,
                 recurso,
+                dir_recurso=area.dir_recurso,
+                dir_schemas=area.dir_schemas,
                 inventario=saida.inventario,
                 manifesto=saida.manifesto,
             )
@@ -331,10 +372,17 @@ class Pipeline:
             produzir=produzir,
             persistir=persistir,
             avaliar=avaliar,
-            texto_do_artefato=lambda saida: saida.manifesto.para_json(),
+            texto_do_artefato=lambda _saida, _delta: agente_mapeador.artefato_em_disco(
+                manifesto=area.dir_recurso / "_support" / "cobertura.json",
+                inventario=inventario_path,
+                dir_schemas=area.dir_schemas,
+                recurso=recurso.nome,
+            ),
         )
 
-    def _persistir_schemas(self, recurso: Recurso, saida: SaidaMapeador) -> list[Path]:
+    def _persistir_schemas(
+        self, recurso: Recurso, saida: SaidaMapeador, area: AreaDeStaging
+    ) -> list[Path]:
         """Grava os schemas do mapeador sem passar por cima do que é do cliente.
 
         No desenho da skill o schema de entrada é artefato **pré-existente** do
@@ -344,27 +392,28 @@ class Pipeline:
         ser medido. Sobrescrever em silêncio quebraria suíte alheia e trocaria uma
         régua independente pela régua do próprio modelo.
 
-        Daí a regra: arquivo que já existia é preservado; arquivo que **esta execução**
-        criou é reescrito à vontade, senão o loop de reparo do Gate A nunca convergiria
-        sobre o schema.
+        Daí a regra: arquivo que já era do consumidor é copiado para o staging e
+        preservado; o resto é escrito à vontade a cada tentativa, senão o loop de
+        reparo do Gate A nunca convergiria sobre o schema.
 
-        Só o que foi realmente escrito volta na lista. O preservado não pode entrar na
-        conta de "reprovado" — é ela que `--remover-reprovados` apaga, e apagar arquivo
-        do cliente que nem chegamos a tocar seria destruição de dado alheio.
+        Quem responde "já era do consumidor?" é a área de staging, que fotografou o
+        destino no início do recurso. O conjunto de schemas gravados que esta classe
+        mantinha respondia à mesma pergunta com estado próprio — e estado próprio
+        para uma pergunta sobre o disco erra na primeira vez que o disco muda por
+        fora.
         """
         escritos: list[Path] = []
         preservados: list[Path] = []
 
         for arquivo in saida.schemas:
             alvo = recurso.caminho_schemas / arquivo.caminho
-            if alvo.is_file() and alvo not in self._schemas_gravados:
+            if area.ja_era_do_consumidor(alvo):
                 preservados.append(alvo)
-                self._avisar_divergencia(alvo, arquivo.conteudo)
+                if divergencia := self._divergencia(recurso, alvo, arquivo.conteudo):
+                    self._divergencias.append(divergencia)
+                area.preservar_schema(arquivo.caminho)
                 continue
-            alvo.parent.mkdir(parents=True, exist_ok=True)
-            alvo.write_text(arquivo.conteudo, encoding="utf-8", newline="\n")
-            self._schemas_gravados.add(alvo)
-            escritos.append(alvo)
+            escritos.append(area.escrever_schema(arquivo.caminho, arquivo.conteudo))
 
         if preservados:
             self.registro.evento(
@@ -374,13 +423,16 @@ class Pipeline:
             )
         return escritos
 
-    def _avisar_divergencia(self, alvo: Path, conteudo_emitido: str) -> None:
-        """Avisa quando o mapeador achou campo que o schema preservado não declara.
+    def _divergencia(
+        self, recurso: Recurso, alvo: Path, conteudo_emitido: str
+    ) -> DivergenciaDeSchema | None:
+        """O que o mapeador achou no backend e o schema preservado não declara.
 
         Não reprova: a autoridade sobre o arquivo é do Gate A, e o arquivo é do
-        consumidor. Mas a divergência não pode passar calada — campo que existe no
-        backend e não está no schema sai do denominador sem deixar rastro, e a
-        cobertura sobe porque a régua encolheu.
+        consumidor. Mas também não pode passar como aviso e o recurso terminar
+        aprovado — campo que existe no backend e não está no schema sai do
+        denominador sem deixar rastro, e a cobertura sobe porque a régua encolheu.
+        O desfecho é `REQUER_REVISAO`; ver `_rodar_recurso`.
         """
         try:
             existente = nomes_de_campos(json.loads(alvo.read_text(encoding="utf-8")))
@@ -388,19 +440,16 @@ class Pipeline:
         except (OSError, ValueError):
             # Schema ilegível é caso do gate, que reprova com a mensagem certa. Aqui
             # só desistimos da comparação.
-            return
-        if ausentes := sorted(emitido - existente):
-            self.registro.aviso(
-                f"schema preservado {alvo.name}: o mapeador encontrou no backend "
-                f"{len(ausentes)} campo(s) que ele não declara "
-                f"({', '.join(ausentes)}) — eles ficam fora do denominador da "
-                "cobertura por campo"
-            )
+            return None
+        ausentes = sorted(emitido - existente)
+        if not ausentes:
+            return None
+        return DivergenciaDeSchema(recurso=recurso.nome, arquivo=alvo, campos_ausentes=ausentes)
 
     # -- Bloco 2 + Gate B ---------------------------------------------------
 
     def bloco2(
-        self, recurso: Recurso, manifesto: Manifesto
+        self, recurso: Recurso, manifesto: Manifesto, area: AreaDeStaging
     ) -> tuple[SaidaExecutor, ResultadoGate, int]:
         self.registro.titulo(f"Bloco 2 — executor · {recurso.nome}")
 
@@ -419,7 +468,7 @@ class Pipeline:
             )
 
         def persistir(saida: SaidaExecutor) -> list[Path]:
-            escritos = agente_executor.escrever(recurso, saida)
+            escritos = agente_executor.escrever(area, saida)
             self.registro.evento(
                 "artefatos",
                 estagio=agente_executor.ESTAGIO,
@@ -440,10 +489,14 @@ class Pipeline:
             avaliar=lambda _saida: gate_b.executar(
                 self.config,
                 recurso,
+                dir_recurso=area.dir_recurso,
+                dir_schemas=area.dir_schemas,
                 manifesto=manifesto,
                 out_cobertura=self.dir_execucao / "cobertura" / recurso.nome / "gate.html",
             ),
-            texto_do_artefato=lambda saida: agente_executor.artefato_em_disco(recurso, saida),
+            texto_do_artefato=lambda saida, delta: agente_executor.artefato_em_disco(
+                area.dir_recurso, saida, delta
+            ),
         )
 
     # -- Bloco 3 ------------------------------------------------------------
@@ -576,7 +629,7 @@ class Pipeline:
         produzir: Callable[[int, Delta | None, str | None], Artefato],
         persistir: Callable[[Artefato], list[Path]],
         avaliar: Callable[[Artefato], ResultadoGate],
-        texto_do_artefato: Callable[[Artefato], str],
+        texto_do_artefato: Callable[[Artefato, Delta], str],
     ) -> tuple[Artefato, ResultadoGate, int]:
         """Gera → persiste → avalia → (delta → repete). O coração da arquitetura.
 
@@ -650,7 +703,9 @@ class Pipeline:
                 violacoes=resultado.violacoes,
                 tentativa=tentativa,
             )
-            artefato_atual = texto_do_artefato(artefato)
+            # O delta entra na projeção do artefato: é ele que diz quais arquivos e
+            # quais linhas precisam estar à vista. Ver `llm.montagem`.
+            artefato_atual = texto_do_artefato(artefato, delta)
             self.registro.evento(
                 "delta",
                 estagio=f"gate_{gate}",
@@ -755,43 +810,153 @@ class Pipeline:
 
     def _rodar_recurso(self, recurso: Recurso) -> ResultadoDoRecurso:
         resultado = ResultadoDoRecurso(recurso=recurso.nome)
+        self._divergencias = []
+        area = criar_area(
+            recurso=recurso.nome,
+            destino_recurso=recurso.caminho_testes,
+            destino_schemas=recurso.caminho_schemas,
+            dir_execucao=self.dir_execucao,
+            criados_antes=self.diario.criados(),
+        )
         try:
-            saida_mapeador, gate_a_ok, tentativas_a = self.bloco1(recurso)
+            saida_mapeador, gate_a_ok, tentativas_a = self.bloco1(recurso, area)
             resultado.gate_a = gate_a_ok
             resultado.tentativas_mapeador = tentativas_a
 
             _saida_executor, gate_b_ok, tentativas_b = self.bloco2(
-                recurso, saida_mapeador.manifesto
+                recurso, saida_mapeador.manifesto, area
             )
             resultado.gate_b = gate_b_ok
             resultado.tentativas_executor = tentativas_b
+
+            # Só aqui o projeto do consumidor é tocado. Antes desta linha, uma queda
+            # em qualquer ponto o deixa exatamente como estava.
+            self._publicar(recurso, area, resultado)
 
             execucao_de_testes = self.bloco3(recurso)
             resultado.cobertura = execucao_de_testes.contadores
             resultado.execucao_de_testes = execucao_de_testes.estado
             resultado.motivo_da_execucao_de_testes = execucao_de_testes.motivo
-            resultado.sucesso = True
-        except (FalhaDeGate, FalhaDeEstagio) as erro:
+            resultado.divergencias = list(self._divergencias)
+            resultado.estado = (
+                EstadoDoRecurso.REQUER_REVISAO
+                if resultado.divergencias
+                else EstadoDoRecurso.APROVADO
+            )
+            area.descartar()
+        except (FalhaDeGate, FalhaDeEstagio, FalhaDePublicacao) as erro:
+            resultado.estado = EstadoDoRecurso.REPROVADO
+            resultado.staging = area.dir_recurso
             resultado.motivo = str(erro)
             resultado.arquivos_reprovados = list(erro.arquivos)
             resultado.codigos_remanescentes = erro.codigos
+            resultado.divergencias = list(self._divergencias)
             self.registro.falha(str(erro))
             self.registro.evento("recurso_falhou", recurso=recurso.nome, motivo=str(erro))
             if erro.arquivos:
                 # A3: os arquivos ficam em disco de propósito (é o que se inspeciona
-                # para entender a falha), mas o efeito não pode ser silencioso.
+                # para entender a falha), mas o efeito não pode ser silencioso. Com o
+                # staging, "em disco" passou a significar "no diretório da execução"
+                # quando a falha veio antes da publicação.
                 self.registro.evento(
                     "artefatos_reprovados",
                     recurso=recurso.nome,
                     codigos=erro.codigos,
+                    publicado=resultado.publicado,
                     arquivos=[str(caminho) for caminho in erro.arquivos],
                 )
+        finally:
+            # O staging é o único diretório nosso que fica dentro do projeto do
+            # consumidor. Quando sobra, ou está vazio — e aí é só lixo, some — ou
+            # tem o artefato reprovado, e aí precisa ser dito onde ele está. O
+            # `finally` cobre também a saída por `ErroDeFerramenta`, que não passa
+            # pelo `except` acima e antes deixava o diretório sem menção nenhuma.
+            if area.dir_recurso.is_dir():
+                if any(area.dir_recurso.rglob("*")):
+                    self.registro.evento(
+                        "staging_mantido", recurso=recurso.nome, diretorio=area.dir_recurso
+                    )
+                else:
+                    area.descartar()
         self.registro.evento(
             "recurso_concluido",
             recurso=recurso.nome,
+            estado=resultado.estado.value,
             sucesso=resultado.sucesso,
             tentativas_mapeador=resultado.tentativas_mapeador,
             tentativas_executor=resultado.tentativas_executor,
             execucao_de_testes=resultado.execucao_de_testes,
         )
         return resultado
+
+    def _publicar(
+        self, recurso: Recurso, area: AreaDeStaging, resultado: ResultadoDoRecurso
+    ) -> None:
+        """Leva o staging aprovado para o projeto do consumidor e registra o diário."""
+        anteriores = [
+            entrada
+            for entrada in self.diario.carregar().entradas
+            if entrada.recurso == recurso.nome
+            and entrada.classificacao is Classificacao.CRIADO
+            and sob_a_raiz(entrada.destino, recurso.caminho_testes)
+        ]
+
+        entradas = area.publicar()
+        resultado.diario = entradas
+        resultado.publicado = True
+
+        publicados = {entrada.destino for entrada in entradas}
+        obsoletos = [entrada for entrada in anteriores if entrada.destino not in publicados]
+        removidos, recusados = remover_criados(obsoletos, sob=recurso.caminho_testes)
+
+        self.diario.registrar(entradas, esquecer=set(removidos))
+        self.registro.evento(
+            "publicacao",
+            recurso=recurso.nome,
+            arquivos=[
+                {
+                    "destino": str(entrada.destino),
+                    "classificacao": entrada.classificacao.value,
+                    "hash_anterior": entrada.hash_anterior,
+                    "hash_novo": entrada.hash_novo,
+                }
+                for entrada in entradas
+            ],
+            obsoletos_removidos=[str(caminho) for caminho in removidos],
+            obsoletos_mantidos=[str(caminho) for caminho in recusados],
+        )
+        criados = sum(1 for e in entradas if e.classificacao is Classificacao.CRIADO)
+        modificados = sum(1 for e in entradas if e.classificacao is Classificacao.MODIFICADO)
+        self.registro.ok(
+            f"{recurso.nome} publicado: {criados} arquivo(s) criado(s), "
+            f"{modificados} modificado(s), {len(removidos)} obsoleto(s) removido(s)"
+        )
+        if recusados:
+            # Spec que nasceu conosco e alguém editou depois. Não é nosso para
+            # apagar, e o silêncio faria parecer que a limpeza foi completa.
+            self.registro.aviso(
+                f"{len(recusados)} arquivo(s) que criamos em execução anterior "
+                "mudaram desde então e NÃO foram removidos: "
+                + ", ".join(str(caminho) for caminho in recusados)
+            )
+        for divergencia in self._divergencias:
+            self.registro.aviso(divergencia.render())
+        if self._divergencias:
+            destino = self.dir_execucao / "artefatos" / recurso.nome / "divergencias-de-schema.json"
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            destino.write_text(
+                json.dumps(
+                    [d.model_dump(mode="json") for d in self._divergencias],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            self.registro.evento(
+                "schemas_divergentes",
+                recurso=recurso.nome,
+                artefato=destino,
+                divergencias=[d.model_dump(mode="json") for d in self._divergencias],
+            )

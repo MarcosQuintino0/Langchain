@@ -10,6 +10,7 @@ Só argumentos, montagem da execução e apresentação: os loops de controle vi
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -18,8 +19,9 @@ from rich.console import Console
 from rich.markup import escape
 
 from orquestrador.config import Config
-from orquestrador.contratos import Recurso
+from orquestrador.contratos import EstadoDoRecurso, Recurso
 from orquestrador.excecoes import ErroDeConfiguracao, ErroDeFerramenta
+from orquestrador.ferramentas.publicacao import remover_criados
 from orquestrador.observabilidade import tabelas
 from orquestrador.observabilidade.registro import (
     Registro,
@@ -33,9 +35,22 @@ from orquestrador.simulacao import Roteiros, preparar_sandbox
 # Códigos de saída. `2` cobre tudo que é erro do operador ou indisponibilidade da
 # ferramenta — configuração inválida, invocação impossível, comando que ainda não
 # existe. O que importa é não ser 0: em CI, 0 é indistinguível de trabalho feito.
+#
+# `3` é o terceiro estado do recurso: tudo passou, o artefato foi publicado, e
+# alguma coisa precisa de olho humano — hoje, schema do consumidor que não declara
+# campo que existe no backend. Não é 0 porque um pipeline verde esconderia a
+# revisão pendente, e não é 1 porque nenhum gate reprovou e não há nada para o
+# modelo consertar.
 SUCESSO = 0
 FALHA_DE_GATE = 1
 ERRO_DE_USO = 2
+REQUER_REVISAO = 3
+
+MARCA_DO_ESTADO: dict[EstadoDoRecurso, str] = {
+    EstadoDoRecurso.APROVADO: "[green]OK[/green]",
+    EstadoDoRecurso.REPROVADO: "[red]FALHOU[/red]",
+    EstadoDoRecurso.REQUER_REVISAO: "[yellow]REVISAR[/yellow]",
+}
 
 
 def montar_recursos(config: Config, nomes: list[str]) -> list[Recurso]:
@@ -95,8 +110,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="executa o Cypress no Bloco 3 (por padrão é pulado).",
     )
-    # As duas abaixo continuam reconhecidas pelo argparse para não quebrar script
-    # existente, e as duas recusam a execução. Ver `recusar_indisponiveis`.
     analisador.add_argument(
         "--auditor",
         action="store_true",
@@ -106,9 +119,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--remover-reprovados",
         action="store_true",
         help=(
-            "RECUSADO: sem diário de propriedade não há como saber o que é nosso. "
-            "Os artefatos reprovados são MANTIDOS — é o que se inspeciona para "
-            "entender a falha."
+            "apaga o que ESTA ferramenta criou nos recursos que não terminaram "
+            "aprovados. Nunca toca em arquivo preexistente nem em arquivo que "
+            "mudou desde que o criamos."
         ),
     )
     return analisador.parse_args(argv)
@@ -121,11 +134,6 @@ def recusar_indisponiveis(args: argparse.Namespace, console: Console) -> int | N
     frase "auditoria feita" na única linguagem que a CI lê; enquanto o auditor não
     existir, a resposta honesta é indisponibilidade.
 
-    `--remover-reprovados` chamava `unlink()` em toda a lista de artefatos
-    reprovados, sem distinguir o que **nós** criamos do que já era do consumidor.
-    Essa distinção não existe hoje — ela é o diário de propriedade da Etapa 2 — e
-    apagar arquivo alheio é o único erro deste projeto que não tem volta.
-
     Devolve o código de saída quando recusa, ou `None` para seguir.
     """
     if args.auditor:
@@ -134,16 +142,6 @@ def recusar_indisponiveis(args: argparse.Namespace, console: Console) -> int | N
             "devolveria um veredito vazio, e encerrar com código 0 faria a CI registrar "
             "uma auditoria que não aconteceu.\n"
             "Ele continua fora do loop quente; nada no pipeline depende dele."
-        )
-        return ERRO_DE_USO
-    if args.remover_reprovados:
-        console.print(
-            "[red]--remover-reprovados está desabilitado.[/red] A remoção apagava toda a "
-            "lista de artefatos reprovados sem distinguir arquivo criado por esta "
-            "execução de arquivo preexistente do seu projeto.\n"
-            "A flag volta quando existir o diário de propriedade (Etapa 2), que registra "
-            "por arquivo se ele foi criado, modificado ou preexistente — aí a remoção fica "
-            "restrita ao que criamos. Até lá, apague à mão o que a lista final apontar."
         )
         return ERRO_DE_USO
     return None
@@ -155,15 +153,45 @@ def avisar_reprovados(resultados: list[ResultadoDoRecurso], registro: Registro) 
     if not com_lixo:
         return
     registro.aviso(
-        "Artefatos deixados em estado REPROVADO no projeto de testes "
-        "(mantidos de propósito — a remoção automática está desabilitada; "
-        "apague à mão o que não quiser guardar):"
+        "Artefatos deixados em estado REPROVADO (mantidos de propósito — é o que se "
+        "inspeciona para entender a falha). Use --remover-reprovados para apagar o "
+        "que foi criado por esta ferramenta:"
     )
     for resultado in com_lixo:
         codigos = ", ".join(resultado.codigos_remanescentes) or "(sem código)"
-        registro.info(f"  {resultado.recurso} [{codigos}]")
+        onde = "publicado no projeto" if resultado.publicado else "em staging, não publicado"
+        registro.info(f"  {resultado.recurso} [{codigos}] — {onde}")
         for caminho in resultado.arquivos_reprovados:
             registro.info(f"    {caminho}")
+
+
+def remover_reprovados(resultados: list[ResultadoDoRecurso], registro: Registro) -> None:
+    """Apaga o que **esta ferramenta criou** nos recursos que não foram aprovados.
+
+    A versão anterior desta função foi desligada porque chamava `unlink()` na lista
+    inteira, sem distinguir arquivo nosso de arquivo do consumidor. O que a traz de
+    volta é o diário: `remover_criados` recusa tudo que não é `criado` e tudo cujo
+    hash mudou desde que o gravamos. Um spec que nasceu conosco e o desenvolvedor
+    editou à mão deixa de ser descartável no instante em que ele o salva.
+
+    O staging é caso à parte e é apagado inteiro: ele nasceu nesta execução, é
+    nosso do primeiro ao último byte, e é o único diretório nosso que fica dentro
+    do projeto de quem nos contratou.
+    """
+    for resultado in resultados:
+        if resultado.sucesso:
+            continue
+        removidos, recusados = remover_criados(resultado.diario)
+        if resultado.staging is not None and resultado.staging.is_dir():
+            shutil.rmtree(resultado.staging, ignore_errors=True)
+            registro.info(f"  {resultado.recurso}: staging removido ({resultado.staging})")
+        for caminho in removidos:
+            registro.info(f"  {resultado.recurso}: removido {caminho}")
+        for caminho in recusados:
+            registro.aviso(
+                f"  {resultado.recurso}: MANTIDO {caminho} — não fomos nós que o "
+                "criamos, ou ele mudou depois que o criamos"
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -254,13 +282,21 @@ def main(argv: list[str] | None = None) -> int:
 
         registro.titulo("Resumo")
         for resultado in resultados:
-            marca = "[green]OK[/green]" if resultado.sucesso else "[red]FALHOU[/red]"
+            marca = MARCA_DO_ESTADO[resultado.estado]
             console.print(
                 f"{marca} {resultado.recurso}: "
                 f"mapeador {resultado.tentativas_mapeador} tentativa(s), "
                 f"executor {resultado.tentativas_executor} tentativa(s)"
                 + (f" — {resultado.motivo}" if resultado.motivo else "")
             )
+            # O terceiro estado precisa dizer o que revisar, e onde. Sem isto ele
+            # seria só uma palavra diferente de OK, e quem lê trataria como falha.
+            for divergencia in resultado.divergencias:
+                console.print(f"     [yellow]{escape(divergencia.render())}[/yellow]")
+                console.print(
+                    "     o schema do seu projeto tem precedência e NÃO foi alterado: "
+                    "declare os campos nele ou confirme que a ausência é intencional"
+                )
             # Dito recurso a recurso, e não uma vez no rodapé: é a diferença entre
             # "os testes passaram" e "os testes não rodaram", e ela precisa estar
             # onde alguém lê o veredito daquele recurso.
@@ -273,6 +309,9 @@ def main(argv: list[str] | None = None) -> int:
                     "a cobertura acima é estática, não é prova de runtime"
                 )
         avisar_reprovados(resultados, registro)
+        if args.remover_reprovados:
+            registro.titulo("Remoção do que esta ferramenta criou")
+            remover_reprovados(resultados, registro)
         interrupcao = pipeline.interrupcao
         if interrupcao is not None:
             # O resumo acima é dos recursos que terminaram. Sem esta linha ele
@@ -294,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             resultados=[
                 {
                     "recurso": resultado.recurso,
+                    "estado": resultado.estado.value,
                     "sucesso": resultado.sucesso,
                     "tentativas_mapeador": resultado.tentativas_mapeador,
                     "tentativas_executor": resultado.tentativas_executor,
@@ -309,7 +349,22 @@ def main(argv: list[str] | None = None) -> int:
         # Distinto do 1 de gate esgotado: ali o pipeline funcionou e o artefato não
         # passou; aqui o pipeline não conseguiu emitir veredito nenhum.
         return ERRO_DE_USO
-    return SUCESSO if all(r.sucesso for r in resultados) else FALHA_DE_GATE
+    return codigo_de_saida(resultados)
+
+
+def codigo_de_saida(resultados: list[ResultadoDoRecurso]) -> int:
+    """O pior desfecho manda, e revisão pendente nunca vira 0.
+
+    A ordem é reprovado > requer revisão > aprovado. Um recurso reprovado e outro
+    pedindo revisão saem como reprovação: o código de saída é um número só, e o
+    número precisa apontar para a coisa mais grave que aconteceu.
+    """
+    estados = {resultado.estado for resultado in resultados}
+    if EstadoDoRecurso.REPROVADO in estados:
+        return FALHA_DE_GATE
+    if EstadoDoRecurso.REQUER_REVISAO in estados:
+        return REQUER_REVISAO
+    return SUCESSO
 
 
 if __name__ == "__main__":

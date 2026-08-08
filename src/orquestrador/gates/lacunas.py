@@ -62,6 +62,8 @@ def executar(
     config: Config,
     recurso: Recurso,
     *,
+    dir_recurso: Path,
+    dir_schemas: Path,
     manifesto: Manifesto | None = None,
     gate: str,
     out: Path | None = None,
@@ -70,11 +72,15 @@ def executar(
 
     Devolve `None` quando a checagem está desligada em `[gates.b].exigir_cobertura` —
     desligada é decisão de quem configura, e não tem veredito nenhum a somar.
+
+    `dir_recurso` é o staging: é dele que sai o contador e é nele que as tags são
+    lidas. `recurso` continua vindo junto porque a mensagem da violação nomeia o
+    recurso, não o diretório.
     """
     if not config.gate("b").exigir_cobertura:
         return None
 
-    saida = Cobertura(config).executar(recurso.caminho_testes, out=out, json=True)
+    saida = Cobertura(config).executar(dir_recurso, out=out, schemas=dir_schemas, json=True)
     contadores = resumo_da_cobertura(saida)
     if not contadores:
         # O script sai 0 mesmo sem conseguir gerar o relatório, então JSON ausente é
@@ -84,7 +90,7 @@ def executar(
         return ResultadoGate.erro_da_ferramenta(
             "qa-cobertura.mjs não produziu contadores, então a lacuna de cobertura "
             "ficou sem medida. Rode o script à mão sobre "
-            f"{recurso.caminho_testes} para ver o erro, ou desligue a checagem em "
+            f"{dir_recurso} para ver o erro, ou desligue a checagem em "
             f"[gates.b].exigir_cobertura.\n{saida.texto[:400] or '(sem saída)'}",
             gate=gate,
             saida_bruta=saida.texto,
@@ -94,7 +100,7 @@ def executar(
     if lacunas <= 0:
         return ResultadoGate.aprovado_por(saida_bruta=saida.stdout, gate=gate)
 
-    faltando = _reconstruir_faltantes(recurso, manifesto)
+    faltando = _reconstruir_faltantes(dir_recurso, manifesto)
     if faltando is not None and len(faltando) != lacunas:
         # As duas contas divergiram: a nossa leitura das tags não reproduz a do
         # script. O veredito continua sendo o dele; o detalhe vai fora.
@@ -151,7 +157,7 @@ def _violacoes(
 
 
 def _reconstruir_faltantes(
-    recurso: Recurso, manifesto: Manifesto | None
+    dir_recurso: Path, manifesto: Manifesto | None
 ) -> list[tuple[str, str]] | None:
     """Pares `(endpoint, cat)` do gabarito sem tag correspondente nos specs.
 
@@ -163,7 +169,7 @@ def _reconstruir_faltantes(
         return None
 
     marcados: set[tuple[str, str]] = set()
-    for spec in sorted(recurso.caminho_testes.rglob("*.cy.js")):
+    for spec in sorted(dir_recurso.rglob("*.cy.js")):
         tags = extrair_tags(spec.read_text(encoding="utf-8", errors="replace"))
         if tags.dinamicas:
             return None

@@ -76,7 +76,10 @@ max_tentativas = 3
 
 
 def ultima_execucao(base: Path) -> Path:
-    return max(base.iterdir(), key=lambda caminho: caminho.stat().st_mtime)
+    # Só diretório: a raiz de saída também guarda o diário de propriedade, que é
+    # um arquivo e é reescrito por último — sem o filtro, ele seria "a execução".
+    diretorios = [caminho for caminho in base.iterdir() if caminho.is_dir()]
+    return max(diretorios, key=lambda caminho: caminho.stat().st_mtime)
 
 
 @precisa_de_node

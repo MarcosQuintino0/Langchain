@@ -29,15 +29,24 @@ def executar(
     config: Config,
     recurso: Recurso,
     *,
+    dir_recurso: Path,
+    dir_schemas: Path,
     inventario: Inventario | None = None,
     manifesto: Manifesto | None = None,
 ) -> ResultadoGate:
-    """Roda as duas checagens do Gate A sobre o artefato já em disco."""
+    """Roda as duas checagens do Gate A sobre o artefato em disco.
+
+    `dir_recurso` e `dir_schemas` são obrigatórios e apontam para o **staging** da
+    execução, não para o destino final. Não têm valor padrão de propósito: um
+    padrão que caísse no diretório do recurso faria o gate aprovar o que está
+    publicado enquanto o loop de reparo trabalha em outro lugar — validar um
+    artefato e publicar outro é o defeito que o staging existe para fechar.
+    """
     flags = list(config.gate("a").flags)
     if "--so-manifesto" not in flags:
         flags.insert(0, "--so-manifesto")
 
-    saida = Validador(config).executar(recurso.caminho_testes, flags)
+    saida = Validador(config).executar(dir_recurso, flags, schemas=dir_schemas)
     manifesto_ok = resultado_do_validador(saida, gate=NOME)
     diff = diff_grafo_manifesto(
         graph=config.caminhos.graph_abs,

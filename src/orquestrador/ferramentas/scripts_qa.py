@@ -18,14 +18,29 @@ class Validador:
 
     Códigos de saída: 0 = válido, 1 = inválido, 2 = erro de uso.
     Fluxo: stdout quando aprova, stderr quando reprova — os dois são capturados.
+
+    `schemas` é o que permite validar um diretório de staging: sem ele o
+    `campos/schema.mjs` **sobe** a partir do diretório recebido procurando
+    `cypress/fixtures/schemas`, e acharia o do projeto do consumidor — isto é, o
+    denominador do artefato que ainda não foi publicado. A flag só existe na forma
+    com sinal de igual (`--schemas=<dir>`); o parser da skill não aceita o valor
+    como argumento seguinte.
     """
 
     def __init__(self, config: Config) -> None:
         self.config = config
         self.script = config.caminhos.script("validar-suite-gerada.mjs")
 
-    def executar(self, recurso: Path, flags: list[str] | None = None) -> SaidaProcesso:
+    def executar(
+        self,
+        recurso: Path,
+        flags: list[str] | None = None,
+        *,
+        schemas: Path | None = None,
+    ) -> SaidaProcesso:
         argumentos = [str(recurso), *(flags or [])]
+        if schemas is not None and not any(a.startswith("--schemas=") for a in argumentos):
+            argumentos.append(f"--schemas={schemas}")
         if "--json" not in argumentos:
             argumentos.append("--json")
         return executar_node(
@@ -55,6 +70,7 @@ class Cobertura:
         *,
         report: Path | None = None,
         out: Path | None = None,
+        schemas: Path | None = None,
         json: bool = True,
     ) -> SaidaProcesso:
         argumentos = [str(dir_specs)]
@@ -62,6 +78,11 @@ class Cobertura:
             argumentos += ["--report", str(report)]
         if out:
             argumentos += ["--out", str(out)]
+        # Mesmo motivo do `--schemas` do Validador: sem ele o denominador de campos
+        # é procurado subindo a partir de `dir_specs`, o que aponta para o projeto
+        # publicado em vez do staging que está sendo medido.
+        if schemas is not None:
+            argumentos += ["--schemas", str(schemas)]
         if json:
             argumentos.append("--json")
         return executar_node(

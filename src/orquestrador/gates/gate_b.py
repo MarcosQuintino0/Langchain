@@ -30,16 +30,31 @@ def executar(
     config: Config,
     recurso: Recurso,
     *,
+    dir_recurso: Path,
+    dir_schemas: Path,
     manifesto: Manifesto | None = None,
     out_cobertura: Path | None = None,
 ) -> ResultadoGate:
+    """As quatro checagens do Gate B sobre o **staging** da execução.
+
+    Ver `gate_a.executar` sobre por que `dir_recurso` e `dir_schemas` não têm
+    padrão.
+    """
     partes = [
-        _formatador(config, "prettier", "QAORQ-020", config.execucao.prettier, recurso),
-        _formatador(config, "eslint", "QAORQ-021", config.execucao.eslint, recurso),
-        _validador(config, recurso),
+        _formatador(config, "prettier", "QAORQ-020", config.execucao.prettier, dir_recurso),
+        _formatador(config, "eslint", "QAORQ-021", config.execucao.eslint, dir_recurso),
+        _validador(config, dir_recurso, dir_schemas),
         # A terceira checagem responde por "planejei e não entreguei", que o
         # validador da skill não cobre. Ver gates/lacunas.py.
-        gate_lacunas.executar(config, recurso, manifesto=manifesto, gate=NOME, out=out_cobertura),
+        gate_lacunas.executar(
+            config,
+            recurso,
+            dir_recurso=dir_recurso,
+            dir_schemas=dir_schemas,
+            manifesto=manifesto,
+            gate=NOME,
+            out=out_cobertura,
+        ),
     ]
     combinado = ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
     # Checagem que não rodou não vira delta: `exigir_veredito` interrompe o recurso
@@ -47,8 +62,10 @@ def executar(
     return combinado.exigir_veredito()
 
 
-def _validador(config: Config, recurso: Recurso) -> ResultadoGate:
-    saida = Validador(config).executar(recurso.caminho_testes, list(config.gate("b").flags))
+def _validador(config: Config, dir_recurso: Path, dir_schemas: Path) -> ResultadoGate:
+    saida = Validador(config).executar(
+        dir_recurso, list(config.gate("b").flags), schemas=dir_schemas
+    )
     return resultado_do_validador(saida, gate=NOME)
 
 
@@ -57,13 +74,13 @@ def _formatador(
     nome: str,
     codigo: str,
     comando: list[str],
-    recurso: Recurso,
+    dir_recurso: Path,
 ) -> ResultadoGate | None:
     """Roda prettier/eslint sobre o diretório do recurso. Lista vazia = desligado."""
     if not comando:
         return None
 
-    alvo = _relativo_ao_projeto(recurso.caminho_testes, config.caminhos.projeto_testes)
+    alvo = _relativo_ao_projeto(dir_recurso, config.caminhos.projeto_testes)
     try:
         saida = rodar_processo(
             [*comando, alvo],

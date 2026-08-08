@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,12 +21,21 @@ from orquestrador.gates import lacunas as gate_lacunas
 def recurso_de(config) -> Recurso:
     caminho = config.caminhos.recurso("pedidos")
     caminho.mkdir(parents=True, exist_ok=True)
-    return Recurso(nome="pedidos", caminho_testes=caminho)
+    return Recurso(
+        nome="pedidos", caminho_testes=caminho, raiz_schemas=config.caminhos.dir_schemas_abs
+    )
+
+
+def staging_de(config) -> Path:
+    """O diretório que o gate realmente valida: o staging, não o destino."""
+    caminho = config.caminhos.recurso(".qa-staging-teste-pedidos")
+    caminho.mkdir(parents=True, exist_ok=True)
+    return caminho
 
 
 def test_formatador_desligado_nao_produz_veredito(config_falso):
     assert (
-        gate_b._formatador(config_falso, "prettier", "QAORQ-020", [], recurso_de(config_falso))
+        gate_b._formatador(config_falso, "prettier", "QAORQ-020", [], staging_de(config_falso))
         is None
     )
 
@@ -36,7 +46,7 @@ def test_formatador_que_passa_aprova(config_falso):
         "prettier",
         "QAORQ-020",
         [sys.executable, "-c", "import sys"],
-        recurso_de(config_falso),
+        staging_de(config_falso),
     )
     assert resultado is not None and resultado.aprovado is True
 
@@ -47,7 +57,7 @@ def test_formatador_que_reprova_vira_violacao(config_falso):
         "prettier",
         "QAORQ-020",
         [sys.executable, "-c", "import sys; print('mal formatado'); sys.exit(1)"],
-        recurso_de(config_falso),
+        staging_de(config_falso),
     )
     assert resultado is not None and resultado.aprovado is False
     assert resultado.codigos == ["QAORQ-020"]
@@ -60,7 +70,7 @@ def test_formatador_ausente_vira_aviso_por_padrao(config_falso):
         "eslint",
         "QAORQ-021",
         ["ferramenta-que-nao-existe-no-path"],
-        recurso_de(config_falso),
+        staging_de(config_falso),
     )
     assert resultado is not None and resultado.aprovado is True
     assert [aviso.codigo for aviso in resultado.avisos] == ["QAORQ-022"]
@@ -75,7 +85,7 @@ def test_formatador_ausente_e_exigido_e_erro_da_ferramenta(config_falso):
         "eslint",
         "QAORQ-021",
         ["ferramenta-que-nao-existe-no-path"],
-        recurso_de(config_falso),
+        staging_de(config_falso),
     )
     assert resultado is not None
     assert resultado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
@@ -120,7 +130,12 @@ def test_checagem_que_nao_rodou_interrompe_em_vez_de_virar_delta(
     com_cobertura("falha ao gerar o relatório")
 
     with pytest.raises(ErroDeFerramenta, match="qa-cobertura"):
-        gate_b.executar(config_falso, recurso_de(config_falso))
+        gate_b.executar(
+            config_falso,
+            recurso_de(config_falso),
+            dir_recurso=staging_de(config_falso),
+            dir_schemas=config_falso.caminhos.dir_schemas_abs,
+        )
 
 
 def test_reprovacao_normal_atravessa_a_uniao(config_falso, com_validador, com_cobertura):
@@ -130,20 +145,26 @@ def test_reprovacao_normal_atravessa_a_uniao(config_falso, com_validador, com_co
     )
     com_cobertura(json.dumps({"lacunas": 0}))
 
-    resultado = gate_b.executar(config_falso, recurso_de(config_falso))
+    resultado = gate_b.executar(
+        config_falso,
+        recurso_de(config_falso),
+        dir_recurso=staging_de(config_falso),
+        dir_schemas=config_falso.caminhos.dir_schemas_abs,
+    )
 
     assert resultado.veredito is VereditoDeGate.REPROVADO
     assert resultado.codigos == ["QAAPI-025"]
 
 
 def test_o_recurso_e_passado_relativo_ao_projeto(config_falso):
-    recurso = recurso_de(config_falso)
     resultado = gate_b._formatador(
         config_falso,
         "prettier",
         "QAORQ-020",
         [sys.executable, "-c", "import sys; print(sys.argv[1]); sys.exit(1)"],
-        recurso,
+        staging_de(config_falso),
     )
     assert resultado is not None
-    assert "cypress/e2e/apis/pedidos" in resultado.violacoes[0].mensagem
+    # É o staging que vai ao formatador: formatar o destino seria formatar o que
+    # ainda não foi aprovado.
+    assert "cypress/e2e/apis/.qa-staging-teste-pedidos" in resultado.violacoes[0].mensagem

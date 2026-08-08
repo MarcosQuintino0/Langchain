@@ -25,7 +25,6 @@ from orquestrador.contratos import (
     ArquivoSchema,
     Inventario,
     Manifesto,
-    Recurso,
     SaidaExecutor,
     SaidaMapeador,
 )
@@ -43,6 +42,7 @@ from orquestrador.ferramentas.processo import (
     executar,
     montar_ambiente,
 )
+from orquestrador.ferramentas.publicacao import AreaDeStaging
 
 
 @pytest.fixture
@@ -279,8 +279,21 @@ def test_junction_para_fora_do_recurso_nao_esta_sob_a_raiz(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def recurso_em(caminho: Path) -> Recurso:
-    return Recurso(nome="pedidos", caminho_testes=caminho)
+def area_em(caminho: Path) -> AreaDeStaging:
+    """Área cujo staging é `caminho` — é nele que o executor grava.
+
+    O destino aponta para um irmão porque a publicação não entra nestes testes: o
+    que está sob teste é o confinamento da escrita, e ele acontece no staging.
+    """
+    return AreaDeStaging(
+        recurso="pedidos",
+        execucao="teste",
+        dir_recurso=caminho,
+        destino_recurso=caminho.parent / "destino" / "pedidos",
+        dir_schemas=caminho.parent / "execucao" / "schemas",
+        destino_schemas=caminho.parent / "destino" / "schemas",
+        dir_reserva=caminho.parent / "execucao" / "reserva",
+    )
 
 
 def saida_executor(caminho: str) -> SaidaExecutor:
@@ -290,8 +303,7 @@ def saida_executor(caminho: str) -> SaidaExecutor:
 
 
 def test_executor_grava_dentro_do_recurso(tmp_path: Path):
-    recurso = recurso_em(tmp_path / "pedidos")
-    escritos = escrever(recurso, saida_executor("crud.cy.js"))
+    escritos = escrever(area_em(tmp_path / "pedidos"), saida_executor("crud.cy.js"))
     assert escritos == [(tmp_path / "pedidos" / "crud.cy.js").resolve()]
     assert escritos[0].read_text(encoding="utf-8") == "// spec\n"
 
@@ -312,7 +324,7 @@ def test_executor_recusa_gravar_atraves_de_junction(tmp_path: Path):
         pytest.skip("não foi possível criar junction neste ambiente")
 
     with pytest.raises(CaminhoForaDaRaiz):
-        escrever(recurso_em(recurso_dir), saida_executor("atalho/crud.cy.js"))
+        escrever(area_em(recurso_dir), saida_executor("atalho/crud.cy.js"))
     assert not (irmao / "crud.cy.js").exists()
 
 

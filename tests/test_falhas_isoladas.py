@@ -25,7 +25,7 @@ from rich.console import Console
 from orquestrador import cli as modulo_cli
 from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.cli import avisar_reprovados
-from orquestrador.contratos import Recurso, ResultadoGate, Violacao
+from orquestrador.contratos import EstadoDoRecurso, Recurso, ResultadoGate, Violacao
 from orquestrador.excecoes import (
     ErroDeConfiguracao,
     ErroDeFerramenta,
@@ -87,7 +87,7 @@ def execucao_de_testes_falsa() -> ResultadoDaExecucaoDeTestes:
 def recurso_de(config, nome: str = "pedidos") -> Recurso:
     caminho = config.caminhos.recurso(nome)
     caminho.mkdir(parents=True, exist_ok=True)
-    return Recurso(nome=nome, caminho_testes=caminho)
+    return Recurso(nome=nome, caminho_testes=caminho, raiz_schemas=config.caminhos.dir_schemas_abs)
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ def test_falha_de_estagio_e_capturavel_pelo_pipeline():
 def test_recurso_que_falha_nao_derruba_os_seguintes(pipeline: Pipeline, monkeypatch):
     processados: list[str] = []
 
-    def bloco1_falso(recurso: Recurso):
+    def bloco1_falso(recurso: Recurso, _area):
         processados.append(recurso.nome)
         if recurso.nome == "explode":
             raise FalhaDeEstagio("estourou o limite de passos", arquivos=[])
@@ -154,6 +154,7 @@ def test_recurso_que_falha_nao_derruba_os_seguintes(pipeline: Pipeline, monkeypa
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
+    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline, "bloco3", lambda _recurso: execucao_de_testes_falsa())
 
     resultados = pipeline.rodar(
@@ -179,7 +180,7 @@ def test_ferramenta_indisponivel_interrompe_sem_perder_o_que_terminou(
     # recursos que já tinham terminado.
     processados: list[str] = []
 
-    def bloco1_falso(recurso: Recurso):
+    def bloco1_falso(recurso: Recurso, _area):
         processados.append(recurso.nome)
         if recurso.nome == "quebra":
             raise ErroDeFerramenta("gate_b não pôde emitir veredito: saída não-JSON")
@@ -190,6 +191,7 @@ def test_ferramenta_indisponivel_interrompe_sem_perder_o_que_terminou(
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
+    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline, "bloco3", lambda _r: execucao_de_testes_falsa())
 
     resultados = pipeline.rodar(
@@ -239,7 +241,7 @@ def test_falha_de_gate_carrega_os_arquivos_persistidos(pipeline: Pipeline, tmp_p
             avaliar=lambda _artefato: ResultadoGate.reprovado_por(
                 [Violacao(codigo="QAAPI-025", mensagem="campo sem teste")],
             ),
-            texto_do_artefato=str,
+            texto_do_artefato=lambda artefato, _delta: str(artefato),
         )
 
     assert erro.value.arquivos == [escrito]
@@ -254,7 +256,7 @@ def test_resultado_do_recurso_registra_o_que_ficou_reprovado(
     escrito = tmp_path / "crud.cy.js"
     escrito.write_text("// reprovado", encoding="utf-8")
 
-    def bloco1_falso(recurso: Recurso):
+    def bloco1_falso(recurso: Recurso, _area):
         raise FalhaDeGate(
             "gate_a reprovou",
             arquivos=[escrito],
@@ -274,7 +276,6 @@ def test_aviso_final_lista_arquivos_e_codigos(tmp_path: Path):
     registro = Registro(tmp_path / "log.jsonl", console_de_arquivo(saida))
     resultado = ResultadoDoRecurso(
         recurso="pedidos",
-        sucesso=False,
         arquivos_reprovados=[Path("C:/projeto/pedidos/_support/cobertura.json")],
         codigos_remanescentes=["QAAPI-021", "QAAPI-025"],
     )
@@ -286,16 +287,17 @@ def test_aviso_final_lista_arquivos_e_codigos(tmp_path: Path):
     assert "REPROVADO" in texto
     assert "cobertura.json" in texto
     assert "QAAPI-021" in texto
-    # O aviso diz o que fazer com os arquivos. Ele não pode mais mandar usar
-    # --remover-reprovados: a flag foi desabilitada.
-    assert "--remover-reprovados" not in texto
-    assert "à mão" in texto
+    # Com o diário de propriedade a flag voltou, e o aviso volta a apontá-la —
+    # restrita ao que criamos. Ver tests/test_publicacao.py.
+    assert "--remover-reprovados" in texto
 
 
 def test_aviso_final_cala_quando_nao_ha_lixo(tmp_path: Path):
     saida = tmp_path / "console.txt"
     registro = Registro(tmp_path / "log.jsonl", console_de_arquivo(saida))
-    avisar_reprovados([ResultadoDoRecurso(recurso="pedidos", sucesso=True)], registro)
+    avisar_reprovados(
+        [ResultadoDoRecurso(recurso="pedidos", estado=EstadoDoRecurso.APROVADO)], registro
+    )
     registro.console.file.close()
     assert saida.read_text(encoding="utf-8").strip() == ""
 
@@ -306,7 +308,7 @@ def test_o_aviso_sozinho_nao_apaga_nada(tmp_path: Path):
     registro = Registro(tmp_path / "log.jsonl", console_de_arquivo(tmp_path / "c.txt"))
 
     avisar_reprovados(
-        [ResultadoDoRecurso(recurso="pedidos", sucesso=False, arquivos_reprovados=[alvo])],
+        [ResultadoDoRecurso(recurso="pedidos", arquivos_reprovados=[alvo])],
         registro,
     )
 
@@ -326,7 +328,7 @@ def test_bloco0_reprovado_interrompe_antes_de_qualquer_modelo(pipeline: Pipeline
     monkeypatch.setattr(
         pipeline, "modelo", lambda *_a, **_k: pytest.fail("nenhum modelo pode ser criado")
     )
-    monkeypatch.setattr(pipeline, "bloco1", lambda _r: pytest.fail("o Bloco 1 não pode começar"))
+    monkeypatch.setattr(pipeline, "bloco1", lambda *_a: pytest.fail("o Bloco 1 não pode começar"))
 
     with pytest.raises(GrafoNaoPreparado) as erro:
         pipeline.rodar([recurso_de(pipeline.config)])
@@ -338,11 +340,12 @@ def test_bloco0_aprovado_segue_para_os_recursos(pipeline: Pipeline, monkeypatch)
     # O contrapeso do teste acima: o veredito é lido, não ignorado nos dois sentidos.
     monkeypatch.setattr(pipeline, "bloco0", lambda: preparacao(ok=True))
     monkeypatch.setattr(
-        pipeline, "bloco1", lambda _r: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
+        pipeline, "bloco1", lambda *_a: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
     )
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
+    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline, "bloco3", lambda _r: execucao_de_testes_falsa())
 
     assert [r.sucesso for r in pipeline.rodar([recurso_de(pipeline.config)])] == [True]
@@ -459,11 +462,12 @@ def test_sem_cypress_o_resultado_diz_que_nao_executou(pipeline: Pipeline, monkey
 def test_recurso_que_nao_rodou_cypress_nao_finge_ter_rodado(pipeline: Pipeline, monkeypatch):
     # O estado precisa sobreviver até o resumo do recurso, que é onde alguém lê.
     monkeypatch.setattr(
-        pipeline, "bloco1", lambda _r: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
+        pipeline, "bloco1", lambda *_a: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
     )
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
+    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
     cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
     pipeline.pular_cypress = True
 
@@ -480,28 +484,8 @@ def test_o_padrao_do_resultado_nunca_e_executado():
 
 
 # ---------------------------------------------------------------------------
-# As duas flags que a CLI recusa
+# A flag que a CLI recusa
 # ---------------------------------------------------------------------------
-
-
-def test_nao_existe_mais_remocao_automatica():
-    # Enquanto não houver diário de propriedade (Etapa 2) não há como distinguir
-    # arquivo criado por nós de arquivo preexistente do consumidor, então a função
-    # que apagava a lista inteira não pode existir nem para ser chamada por engano.
-    assert not hasattr(modulo_cli, "remover_reprovados")
-
-
-def test_remover_reprovados_recusa_sem_apagar(tmp_path: Path, capsys):
-    alvo = tmp_path / "cobertura.json"
-    alvo.write_text("{}", encoding="utf-8")
-
-    codigo = modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--remover-reprovados"])
-
-    assert codigo != 0, "código 0 faria a CI tratar a recusa como remoção feita"
-    assert alvo.is_file()
-    saida = capsys.readouterr().out
-    assert "desabilitado" in saida
-    assert "Etapa 2" in saida
 
 
 def test_a_flag_continua_reconhecida_pelo_argparse():
@@ -558,7 +542,7 @@ def test_ferramenta_indisponivel_nao_apaga_o_resumo_do_que_terminou(
                 recurso="segundo",
                 recursos_nao_executados=["terceiro"],
             )
-            return [ResultadoDoRecurso(recurso="primeiro", sucesso=True)]
+            return [ResultadoDoRecurso(recurso="primeiro", estado=EstadoDoRecurso.APROVADO)]
 
     monkeypatch.setattr(modulo_cli, "Pipeline", PipelineInterrompido)
 

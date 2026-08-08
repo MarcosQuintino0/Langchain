@@ -16,6 +16,7 @@ import inspect
 import itertools
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol, TypedDict, cast
 
 from langchain_core.language_models import BaseChatModel
@@ -26,6 +27,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from orquestrador.config import Config
 from orquestrador.contratos import (
+    SUFIXO_SCHEMA,
     Delta,
     Recurso,
     RegistroDeChamada,
@@ -477,6 +479,41 @@ def executar(
         f"mapeador não produziu SaidaMapeador válida para o recurso {recurso.nome!r} "
         f"em {parametros.max_tentativas_schema} tentativa(s) de schema. Violações: {detalhes}"
     )
+
+
+def artefato_em_disco(*, manifesto: Path, inventario: Path, dir_schemas: Path, recurso: str) -> str:
+    """O artefato **inteiro** do Bloco 1, lido do staging, para o prompt de reparo.
+
+    `SaidaMapeador` tem três partes — inventário, manifesto e schemas — e o reparo
+    recebia só o manifesto. Uma violação sobre campo (`QAAPI-025`) ou sobre schema
+    ausente (`QAAPI-027`) fala de um arquivo que não estava à vista: o modelo
+    reescrevia o manifesto adivinhando o que o schema declara, e o gate reprovava
+    de novo pelo mesmo motivo.
+
+    Isto **não** afrouxa o princípio 2. A fórmula continua
+    `instrução_fixa + artefato_atual + delta.violacoes`; o que muda é que "artefato
+    atual" passou a significar o artefato, e não uma fatia arbitrária dele. Nada de
+    histórico, de tentativa anterior nem de raciocínio entra aqui — e o bundle é
+    função apenas do estado do disco, então repetir a tentativa não o faz crescer.
+
+    A ordem das seções é fixa e os schemas saem ordenados por caminho: bundle que
+    muda de ordem entre tentativas invalida cache de prompt e faz diff de log
+    parecer mudança de conteúdo.
+    """
+    partes = [
+        _secao("inventario.json", inventario),
+        _secao("_support/cobertura.json", manifesto),
+    ]
+    raiz_do_recurso = dir_schemas / recurso
+    if raiz_do_recurso.is_dir():
+        for arquivo in sorted(raiz_do_recurso.rglob(f"*{SUFIXO_SCHEMA}")):
+            partes.append(_secao(f"schemas/{arquivo.relative_to(dir_schemas).as_posix()}", arquivo))
+    return "\n\n".join(partes)
+
+
+def _secao(rotulo: str, arquivo: Path) -> str:
+    conteudo = arquivo.read_text(encoding="utf-8") if arquivo.is_file() else "(ausente)"
+    return f"--- {rotulo} ---\n{conteudo.rstrip()}"
 
 
 def _sem_passos(limite: int, recurso: str, detalhe: str) -> FalhaDeEstagio:

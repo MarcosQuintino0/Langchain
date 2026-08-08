@@ -109,3 +109,16 @@ class FalhaDaExecucaoDeTestes(FalhaDeEstagio):
 
 class FalhaDeGate(FalhaComArtefatos):
     """Um gate reprovou em todas as tentativas permitidas."""
+
+
+class FalhaDePublicacao(FalhaComArtefatos):
+    """A publicação no projeto do consumidor foi abortada e desfeita.
+
+    Duas causas: o arquivo de destino mudou entre o começo do recurso e a
+    publicação (alguém editou, outra ferramenta escreveu), ou a substituição em si
+    falhou no meio. Nos dois casos o projeto volta ao estado anterior — a falha é
+    **do recurso**, e os artefatos continuam no staging para inspeção.
+
+    É irmã de `FalhaDeGate`, e não filha de `ErroDeFerramenta`: não há ferramenta
+    quebrada nem ambiente errado, e o recurso seguinte pode perfeitamente publicar.
+    """

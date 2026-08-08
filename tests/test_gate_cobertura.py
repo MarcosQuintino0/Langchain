@@ -61,6 +61,14 @@ def recurso(config_falso, tmp_path: Path) -> Recurso:
 
 
 @pytest.fixture
+def staging(config_falso) -> Path:
+    """O diretório que o gate mede: o staging da execução, não o destino final."""
+    caminho = config_falso.caminhos.recurso(".qa-staging-teste-pedidos")
+    caminho.mkdir(parents=True, exist_ok=True)
+    return caminho
+
+
+@pytest.fixture
 def com_contadores(monkeypatch, saida_de_processo):
     """Substitui o qa-cobertura.mjs: o veredito continua vindo do contador dele."""
 
@@ -77,26 +85,40 @@ def com_contadores(monkeypatch, saida_de_processo):
     return aplicar
 
 
-def escrever_spec(recurso: Recurso, conteudo: str) -> None:
-    (recurso.caminho_testes / "crud.cy.js").write_text(conteudo, encoding="utf-8")
+def escrever_spec(diretorio: Path, conteudo: str) -> None:
+    (diretorio / "crud.cy.js").write_text(conteudo, encoding="utf-8")
 
 
-def test_sem_lacuna_aprova(config_falso, recurso, com_contadores):
+def test_sem_lacuna_aprova(config_falso, recurso, staging, com_contadores):
     com_contadores(0)
-    escrever_spec(recurso, SPEC_COMPLETO)
+    escrever_spec(staging, SPEC_COMPLETO)
 
-    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(
+        config_falso,
+        recurso,
+        dir_recurso=staging,
+        dir_schemas=config_falso.caminhos.dir_schemas_abs,
+        manifesto=MANIFESTO,
+        gate="gate_b",
+    )
 
     # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
     assert resultado is not None
     assert resultado.aprovado is True
 
 
-def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, com_contadores):
+def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, staging, com_contadores):
     com_contadores(1)
-    escrever_spec(recurso, SPEC_COM_LACUNA)
+    escrever_spec(staging, SPEC_COM_LACUNA)
 
-    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(
+        config_falso,
+        recurso,
+        dir_recurso=staging,
+        dir_schemas=config_falso.caminhos.dir_schemas_abs,
+        manifesto=MANIFESTO,
+        gate="gate_b",
+    )
 
     # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
     assert resultado is not None
@@ -108,14 +130,21 @@ def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, com_contador
     assert "@cat CAT-07" in mensagem
 
 
-def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, com_contadores):
+def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, staging, com_contadores):
     # O script diz 2, a leitura local acha 1. Nomear um par errado faria o executor
     # gastar tentativa consertando o que não estava quebrado — então o detalhe cai e
     # sobra o número, que é do script.
     com_contadores(2)
-    escrever_spec(recurso, SPEC_COM_LACUNA)
+    escrever_spec(staging, SPEC_COM_LACUNA)
 
-    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(
+        config_falso,
+        recurso,
+        dir_recurso=staging,
+        dir_schemas=config_falso.caminhos.dir_schemas_abs,
+        manifesto=MANIFESTO,
+        gate="gate_b",
+    )
 
     # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
     assert resultado is not None
@@ -125,16 +154,25 @@ def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, com_conta
     assert "CAT-07" not in resultado.violacoes[0].mensagem
 
 
-def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(config_falso, recurso, com_contadores):
+def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(
+    config_falso, recurso, staging, com_contadores
+):
     # A forma data-driven da skill resolve a tag em tempo de execução; este parser
     # não. Sem isto, um `it` coberto por template pareceria lacuna.
     com_contadores(1)
     escrever_spec(
-        recurso,
+        staging,
         SPEC_COM_LACUNA + "\n// @endpoint POST /pedidos @cat ${cenario.cat}\n",
     )
 
-    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(
+        config_falso,
+        recurso,
+        dir_recurso=staging,
+        dir_schemas=config_falso.caminhos.dir_schemas_abs,
+        manifesto=MANIFESTO,
+        gate="gate_b",
+    )
 
     # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
     assert resultado is not None
@@ -142,15 +180,22 @@ def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(config_falso, recurso,
     assert "1 categoria(s)" in resultado.violacoes[0].mensagem
 
 
-def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, com_contadores):
+def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, staging, com_contadores):
     # O script sai 0 mesmo sem gerar relatório, então JSON ausente é o único sinal.
     # Aprovar aqui era declarar cobertura sem tê-la medido — é o falso sucesso que
     # este gate existe para fechar. Reprovar seria pior ainda: o executor gastaria
     # tentativa reescrevendo specs por causa de um script que não rodou.
     com_contadores(0, json_valido=False)
-    escrever_spec(recurso, SPEC_COMPLETO)
+    escrever_spec(staging, SPEC_COMPLETO)
 
-    resultado = gate_lacunas.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
+    resultado = gate_lacunas.executar(
+        config_falso,
+        recurso,
+        dir_recurso=staging,
+        dir_schemas=config_falso.caminhos.dir_schemas_abs,
+        manifesto=MANIFESTO,
+        gate="gate_b",
+    )
 
     # `executar` devolve `None` quando a checagem está desligada; aqui ela está ligada.
     assert resultado is not None
@@ -172,9 +217,16 @@ def test_qaorq_030_esta_no_catalogo():
     assert gate_lacunas.CODIGO in CODIGOS_DO_ORQUESTRADOR
 
 
-def test_desligado_na_configuracao_nao_roda(config_falso, recurso):
+def test_desligado_na_configuracao_nao_roda(config_falso, recurso, staging):
     config_falso.gates["b"].exigir_cobertura = False
-    assert gate_lacunas.executar(config_falso, recurso, gate="gate_b") is None
+    resultado = gate_lacunas.executar(
+        config_falso,
+        recurso,
+        dir_recurso=staging,
+        dir_schemas=config_falso.caminhos.dir_schemas_abs,
+        gate="gate_b",
+    )
+    assert resultado is None
 
 
 # ---------------------------------------------------------------------------

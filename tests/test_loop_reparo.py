@@ -37,7 +37,11 @@ def pipeline(config_falso, tmp_path: Path) -> Pipeline:
 
 
 def recurso_de(config) -> Recurso:
-    return Recurso(nome="pedidos", caminho_testes=config.caminhos.recurso("pedidos"))
+    return Recurso(
+        nome="pedidos",
+        caminho_testes=config.caminhos.recurso("pedidos"),
+        raiz_schemas=config.caminhos.dir_schemas_abs,
+    )
 
 
 def reprovado(*codigos: str) -> ResultadoGate:
@@ -56,7 +60,7 @@ def test_aprova_de_primeira_nao_monta_delta(pipeline: Pipeline):
         produzir=lambda numero, delta, atual: recebidos.append(delta) or "artefato",
         persistir=lambda _artefato: [],
         avaliar=lambda _artefato: ResultadoGate.aprovado_por(),
-        texto_do_artefato=lambda artefato: str(artefato),
+        texto_do_artefato=lambda artefato, _delta: str(artefato),
     )
 
     assert (artefato, tentativas, resultado.aprovado) == ("artefato", 1, True)
@@ -78,7 +82,7 @@ def test_reprova_uma_vez_e_repara_com_o_delta(pipeline: Pipeline):
         produzir=produzir,
         persistir=lambda _artefato: [],
         avaliar=lambda _artefato: vereditos.pop(0),
-        texto_do_artefato=lambda artefato: f"texto de {artefato}",
+        texto_do_artefato=lambda artefato, _delta: f"texto de {artefato}",
     )
 
     assert tentativas == 2
@@ -104,7 +108,7 @@ def test_esgotar_as_tentativas_falha_com_os_codigos_remanescentes(pipeline: Pipe
             produzir=lambda numero, delta, atual: "artefato",
             persistir=lambda _artefato: [],
             avaliar=lambda _artefato: reprovado("QAAPI-025"),
-            texto_do_artefato=lambda artefato: str(artefato),
+            texto_do_artefato=lambda artefato, _delta: str(artefato),
         )
     assert "2 tentativa(s)" in str(erro.value)
     assert "QAAPI-025" in str(erro.value)
@@ -120,7 +124,7 @@ def test_o_artefato_e_persistido_antes_de_ser_avaliado(pipeline: Pipeline):
         produzir=lambda numero, delta, atual: ordem.append("produzir") or "a",
         persistir=lambda _artefato: ordem.append("persistir") or [],
         avaliar=lambda _artefato: ordem.append("avaliar") or ResultadoGate.aprovado_por(),
-        texto_do_artefato=str,
+        texto_do_artefato=lambda artefato, _delta: str(artefato),
     )
     assert ordem == ["produzir", "persistir", "avaliar"]
 
@@ -136,7 +140,7 @@ def test_cada_tentativa_recebe_apenas_o_delta_mais_recente(pipeline: Pipeline):
         produzir=lambda numero, delta, atual: deltas.append(delta) or "a",
         persistir=lambda _artefato: [],
         avaliar=lambda _artefato: vereditos.pop(0),
-        texto_do_artefato=str,
+        texto_do_artefato=lambda artefato, _delta: str(artefato),
     )
 
     reparos = [delta for delta in deltas[1:] if delta is not None]
@@ -208,5 +212,5 @@ def test_o_limite_da_cli_chega_ao_ciclo(config_falso, tmp_path: Path):
             produzir=lambda numero, delta, atual: "artefato",
             persistir=lambda _artefato: [],
             avaliar=lambda _artefato: reprovado("QAAPI-025"),
-            texto_do_artefato=str,
+            texto_do_artefato=lambda artefato, _delta: str(artefato),
         )

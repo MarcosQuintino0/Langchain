@@ -59,7 +59,9 @@ def espiao_de(estagio: str) -> ModeloEspiao:
 def recurso_de(config) -> Recurso:
     caminho = config.caminhos.recurso("pedidos")
     caminho.mkdir(parents=True, exist_ok=True)
-    return Recurso(nome="pedidos", caminho_testes=caminho)
+    return Recurso(
+        nome="pedidos", caminho_testes=caminho, raiz_schemas=config.caminhos.dir_schemas_abs
+    )
 
 
 def manifesto_de_fixture() -> Manifesto:

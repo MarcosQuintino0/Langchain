@@ -16,6 +16,7 @@ from rich.console import Console
 
 from orquestrador.contratos import Recurso, ResultadoGate, Violacao
 from orquestrador.excecoes import FalhaDeGate
+from orquestrador.ferramentas.publicacao import AreaDeStaging, criar_area
 from orquestrador.gates import gate_a
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.pipeline import Pipeline, nomes_de_campos
@@ -81,6 +82,21 @@ def recurso(config_falso) -> Recurso:
     )
 
 
+@pytest.fixture
+def area(pipeline: Pipeline, recurso: Recurso) -> AreaDeStaging:
+    """A área de staging do Bloco 1. Nada dela chega ao projeto sem publicação."""
+    return criar_area(
+        recurso=recurso.nome,
+        destino_recurso=recurso.caminho_testes,
+        destino_schemas=recurso.caminho_schemas,
+        dir_execucao=pipeline.dir_execucao,
+    )
+
+
+def staged(area: AreaDeStaging) -> Path:
+    return area.dir_schemas / "pedidos" / "entidade.schema.json"
+
+
 def preparar(pipeline: Pipeline, monkeypatch, veredito: ResultadoGate) -> None:
     """Modelo de fixture no lugar do OpenRouter e um Gate A com veredito fixo."""
     monkeypatch.setattr(
@@ -91,21 +107,33 @@ def preparar(pipeline: Pipeline, monkeypatch, veredito: ResultadoGate) -> None:
     monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: veredito)
 
 
-def test_bloco1_grava_o_schema_na_raiz_de_schemas(pipeline, recurso, monkeypatch):
+def test_bloco1_grava_o_schema_no_staging_e_nao_no_projeto(pipeline, recurso, area, monkeypatch):
     preparar(pipeline, monkeypatch, ResultadoGate.aprovado_por())
 
-    saida, _resultado, tentativas = pipeline.bloco1(recurso)
+    saida, _resultado, tentativas = pipeline.bloco1(recurso, area)
 
     assert tentativas == 1
-    emitido = recurso.caminho_schemas / "pedidos" / "entidade.schema.json"
-    assert emitido.is_file(), "o schema precisa sair do diretório do recurso"
-    assert json.loads(emitido.read_text(encoding="utf-8")) == SCHEMA
-    # O manifesto continua no lugar de sempre, dentro do recurso.
-    assert recurso.manifesto_path.is_file()
+    assert staged(area).is_file(), "o schema precisa sair do diretório do recurso"
+    assert json.loads(staged(area).read_text(encoding="utf-8")) == SCHEMA
+    assert (area.dir_recurso / "_support" / "cobertura.json").is_file()
     assert saida.schemas[0].caminho == "pedidos/entidade.schema.json"
+    # E nada disso encostou no projeto do consumidor.
+    assert not recurso.manifesto_path.exists()
+    assert not (recurso.caminho_schemas / "pedidos" / "entidade.schema.json").exists()
 
 
-def test_o_schema_entra_na_conta_do_que_ficou_reprovado(pipeline, recurso, monkeypatch):
+def test_a_publicacao_leva_manifesto_e_schema_ao_projeto(pipeline, recurso, area, monkeypatch):
+    preparar(pipeline, monkeypatch, ResultadoGate.aprovado_por())
+    pipeline.bloco1(recurso, area)
+
+    area.publicar()
+
+    assert recurso.manifesto_path.is_file()
+    emitido = recurso.caminho_schemas / "pedidos" / "entidade.schema.json"
+    assert json.loads(emitido.read_text(encoding="utf-8")) == SCHEMA
+
+
+def test_o_schema_entra_na_conta_do_que_ficou_reprovado(pipeline, recurso, area, monkeypatch):
     # A3: ele fica em disco no projeto do usuário, como o manifesto — então precisa
     # ser anunciado junto, e não sumir da lista por ter sido escrito noutra raiz.
     preparar(
@@ -115,17 +143,17 @@ def test_o_schema_entra_na_conta_do_que_ficou_reprovado(pipeline, recurso, monke
     )
 
     with pytest.raises(FalhaDeGate) as erro:
-        pipeline.bloco1(recurso)
+        pipeline.bloco1(recurso, area)
 
     assert erro.value.arquivos == [
-        recurso.manifesto_path,
-        recurso.caminho_schemas / "pedidos" / "entidade.schema.json",
+        area.dir_recurso / "_support" / "cobertura.json",
+        staged(area),
     ]
 
 
-def test_o_evento_artefatos_registra_o_schema(pipeline, recurso, monkeypatch, tmp_path):
+def test_o_evento_artefatos_registra_o_schema(pipeline, recurso, area, monkeypatch, tmp_path):
     preparar(pipeline, monkeypatch, ResultadoGate.aprovado_por())
-    pipeline.bloco1(recurso)
+    pipeline.bloco1(recurso, area)
     pipeline.registro.fechar()
 
     eventos = [
@@ -176,18 +204,22 @@ def artefato_com_schema(esquema: dict) -> dict:
     }
 
 
-def test_schema_preexistente_do_cliente_nao_e_sobrescrito(pipeline, recurso, monkeypatch):
+def test_schema_preexistente_do_cliente_nao_e_sobrescrito(pipeline, recurso, area, monkeypatch):
     alvo = semear_schema_do_cliente(recurso)
     preparar(pipeline, monkeypatch, ResultadoGate.aprovado_por())
 
-    pipeline.bloco1(recurso)
+    pipeline.bloco1(recurso, area)
+    area.publicar()
 
     assert alvo.read_text(encoding="utf-8") == DO_CLIENTE
+    # E a cópia no staging é a do cliente, não a do modelo: é ela o denominador
+    # que o gate mede.
+    assert staged(area).read_text(encoding="utf-8") == DO_CLIENTE
 
 
-def test_schema_preservado_fica_fora_da_conta_de_reprovado(pipeline, recurso, monkeypatch):
-    # `--remover-reprovados` chama unlink() em cada caminho desta lista. Arquivo do
-    # cliente que nem chegamos a escrever não pode estar nela.
+def test_schema_preservado_fica_fora_da_conta_de_reprovado(pipeline, recurso, area, monkeypatch):
+    # `--remover-reprovados` percorre esta lista. Arquivo do cliente que nem
+    # chegamos a escrever não pode estar nela.
     semear_schema_do_cliente(recurso)
     preparar(
         pipeline,
@@ -196,12 +228,12 @@ def test_schema_preservado_fica_fora_da_conta_de_reprovado(pipeline, recurso, mo
     )
 
     with pytest.raises(FalhaDeGate) as erro:
-        pipeline.bloco1(recurso)
+        pipeline.bloco1(recurso, area)
 
-    assert erro.value.arquivos == [recurso.manifesto_path]
+    assert erro.value.arquivos == [area.dir_recurso / "_support" / "cobertura.json"]
 
 
-def test_divergencia_com_o_schema_preservado_vira_aviso(pipeline, recurso, monkeypatch):
+def test_divergencia_com_o_schema_preservado_e_registrada(pipeline, recurso, area, monkeypatch):
     semear_schema_do_cliente(recurso)
     com_campo_a_mais = {
         "type": "object",
@@ -215,18 +247,17 @@ def test_divergencia_com_o_schema_preservado_vira_aviso(pipeline, recurso, monke
         ),
     )
     monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: ResultadoGate.aprovado_por())
-    avisos: list[str] = []
-    monkeypatch.setattr(pipeline.registro, "aviso", avisos.append)
 
-    pipeline.bloco1(recurso)
+    pipeline._divergencias = []
+    pipeline.bloco1(recurso, area)
 
-    assert any("total" in aviso for aviso in avisos), (
+    assert [d.campos_ausentes for d in pipeline._divergencias] == [["total"]], (
         "campo achado no backend e ausente do schema do cliente sai do denominador "
-        "sem deixar rastro — precisa ser anunciado"
+        "sem deixar rastro — precisa virar diff, não só aviso"
     )
 
 
-def test_schema_desta_execucao_e_reescrito_no_reparo(pipeline, recurso, monkeypatch):
+def test_schema_desta_execucao_e_reescrito_no_reparo(pipeline, recurso, area, monkeypatch):
     # Sem isto o loop do Gate A não converge: o mapeador corrigiria o schema e a
     # correção seria descartada por parecer arquivo alheio.
     corrigido = {
@@ -249,10 +280,10 @@ def test_schema_desta_execucao_e_reescrito_no_reparo(pipeline, recurso, monkeypa
     monkeypatch.setattr(pipeline, "modelo", modelo)
     monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: next(vereditos))
 
-    _saida, _resultado, tentativas = pipeline.bloco1(recurso)
+    _saida, _resultado, tentativas = pipeline.bloco1(recurso, area)
 
     assert tentativas == 2
-    assert json.loads(caminho_do_schema(recurso).read_text(encoding="utf-8")) == corrigido
+    assert json.loads(staged(area).read_text(encoding="utf-8")) == corrigido
 
 
 # ---------------------------------------------------------------------------
