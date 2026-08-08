@@ -14,9 +14,11 @@ condensação **manual** das `references/` dela. Por isso
 `[skill].impressao_esperada` fixa o hash dos `.mjs` invocados — se a skill mudar,
 o pipeline recusa rodar até alguém conferir o contrato.
 
-> **O que ainda é stub:** o diff grafo × manifesto do Gate A e o auditor
-> semântico. Veja [O que é stub](#o-que-é-stub). O resto do fluxo roda ponta a
-> ponta, com escrita transacional e verificação determinística em cada gate.
+> **O que ainda é stub:** o auditor semântico. Veja
+> [O que é stub](#o-que-é-stub). O resto do fluxo roda ponta a ponta, com escrita
+> transacional e verificação determinística em cada gate — inclusive o diff
+> grafo × manifesto, que só existe hoje para backend Java/Spring (veja
+> [Matriz de suporte](#matriz-de-suporte)).
 
 ---
 
@@ -69,7 +71,7 @@ BLOCO 0  qa-reindex.mjs (Graphify, AST)          determinístico, zero token
          → .agents/state/qa-api/graphify-out/graph.json
 BLOCO 1  MAPEADOR (LLM + tools, ReAct)           um recurso por vez
          → inventario.json + _support/cobertura.json
-         GATE A: validar-suite-gerada --so-manifesto  +  diff grafo×manifesto [STUB]
+         GATE A: validar-suite-gerada --so-manifesto  +  diff grafo × manifesto
          reprova → delta → volta ao mapeador
 BLOCO 2  EXECUTOR (LLM, sem tools)               um recurso por vez
          → specs *.cy.js com tags @endpoint @cat @campo
@@ -88,9 +90,125 @@ de completude que originou o projeto.
 
 ---
 
+## Matriz de suporte
+
+Esta seção existe para você decidir, antes de instalar, se o orquestrador serve
+para o seu projeto — e para que a resposta seja a mesma dada aqui, no código e na
+mensagem de erro. **Fora da matriz, a ferramenta falha com diagnóstico**: nunca
+aprova, nunca promete cobertura que não sabe medir.
+
+A tentação óbvia é a oposta — acrescentar uma frase ao prompt dizendo "suporte
+também FastAPI" e chamar isso de suporte. É o defeito de origem do projeto com
+outra roupa: um LLM sempre devolve *alguma* coisa, e o que falta não é a capacidade
+de escrever teste, é o **denominador determinístico** que prova que o teste cobre o
+que existe. Suporte, aqui, significa que existe um verificador que sabe reprovar.
+
+### Tier A — avaliado e suportado
+
+| Papel | O que é |
+| --- | --- |
+| Backend | Java com Spring MVC (`@RestController`, `@RequestMapping`, `@GetMapping` e irmãos) |
+| Projeto de testes | Cypress em JavaScript — `.js`, `.mjs`, `.cjs` |
+
+É a combinação que roda contra backend real aqui, e a única em que os quatro
+blocos funcionam inteiros: o Bloco 0 indexa o backend,
+[`analise_estatica/rotas_java_spring.py`](src/orquestrador/analise_estatica/rotas_java_spring.py)
+lê as rotas do fonte e dá ao Gate A o **denominador** do diff grafo × manifesto, o
+Gate B roda o validador da skill e a lacuna de cobertura, e o Bloco 3 executa a
+suíte.
+
+Esta seção declara para quais linguagens existe denominador; em que fase está o
+gate que o consome é assunto de [O que é stub](#o-que-é-stub). São perguntas
+diferentes e envelhecem em ritmos diferentes — juntá-las numa lista só é como as
+duas ficam desatualizadas ao mesmo tempo.
+
+Os limites que valem **mesmo dentro do Tier A**, porque suporte avaliado não é
+suporte perfeito:
+
+* **A superfície do projeto é lida por heurística, não por AST.**
+  `analise_estatica/exports_javascript.py` reconhece as formas de `export` que a
+  arquitetura-base da skill usa; um módulo escrito de forma exótica (reexport
+  dinâmico, `Object.assign(module.exports, …)`) some da superfície, e o executor
+  passa a não saber que aquele símbolo existe. O sintoma é import que não resolve
+  no Gate B, não silêncio.
+* **Rota que o parser não consegue resolver não é adivinhada.** Caminho montado
+  por constante, concatenação ou `${propriedade}` vira o aviso `QAORQ-001`, com a
+  expressão original — nem endpoint inventado, nem omissão silenciosa.
+* **TypeScript no projeto de testes não é lido.** O extrator aceita as três
+  extensões acima e só elas.
+
+### Tier B — o Graphify indexa, a descoberta é genérica
+
+Vale para backend em linguagem que o extrator AST do Graphify indexa, mas para a
+qual **não existe adaptador de rota** em
+`analise_estatica/extrator_de_endpoints.py`. Quais linguagens são essas é
+informação do Graphify, e este README de propósito não a repete: lista copiada
+envelhece, e o que vale é o que aquela versão fixada realmente indexou.
+
+O que você ganha: o Bloco 0 roda, o grafo existe, e as tools do mapeador
+(`query`, `affected`) localizam código sem varrer o backend. O Bloco 2 e o Gate B
+funcionam normalmente — eles olham o projeto de testes, não o backend.
+
+O que você **não** ganha, e é declarado: sem adaptador não há denominador, então o
+Gate A não consegue provar *"planejei tudo que existe"*. Quando nenhum adaptador lê
+um endpoint sequer do backend, a resposta é **erro de ferramenta** — nem aprovado,
+nem reprovado —, com a mensagem dizendo quantos arquivos o grafo tinha, quantos
+foram analisados e quais extensões ficaram de fora. Aprovar ali seria declarar
+cobertura completa sem ter contra o que comparar; reprovar mandaria o mapeador
+consertar um artefato correto e queimaria as tentativas sem chance de convergir. É
+a mesma escolha que `gates/lacunas.py` faz quando o contador de cobertura não vem.
+
+Confiança declarada: **menor**. A cobertura medida continua sendo a do gabarito
+contra si mesmo, que é exatamente o que o projeto existe para superar.
+
+### Tier C — experimental ou bloqueado
+
+| Item | Estado | O que acontece |
+| --- | --- | --- |
+| Projeto de testes que não seja Cypress/JS | bloqueado | o Bloco 0 falha antes de chamar qualquer modelo: sem export lido, não há superfície |
+| Backend que o Graphify não indexa | bloqueado | sem `graph.json` não há Bloco 0, e o Bloco 1 recusa rodar |
+| Segundo adaptador de linguagem | não existe | a matriz de `extrator_de_endpoints.py` tem uma linha hoje |
+| Auditor semântico | stub | `--auditor` encerra com erro em vez de fingir auditoria |
+| Execução do Cypress (Bloco 3) | opcional | pulado por padrão; sem `--rodar-cypress` o resumo diz `NAO_EXECUTADO`, e a cobertura relatada é estática |
+
+**Onde a matriz mora no código.** A do denominador é a constante
+`MATRIZ_DE_SUPORTE`, em
+[`analise_estatica/extrator_de_endpoints.py`](src/orquestrador/analise_estatica/extrator_de_endpoints.py);
+a do projeto de testes é `EXTENSOES`, em
+[`analise_estatica/extrator_de_superficie.py`](src/orquestrador/analise_estatica/extrator_de_superficie.py).
+Adaptador novo entra lá, com projeto-fixture e teste — não aqui.
+
+---
+
 ## Instalação
 
 Requer Python 3.13, Node 24+ e Git já instalados. Sem Docker, sem container.
+
+### A partir do wheel (uso)
+
+```bash
+pip install orquestrador-0.1.0-py3-none-any.whl
+orquestrador init      # escreve o config.toml do projeto, comentado
+orquestrador doctor    # diagnostica o ambiente e diz o que falta
+```
+
+`init` escreve um `config.toml` no diretório atual (ou no de `--em`) com os campos
+marcados `PREENCHA` e os dois `[estagios.*].modelo` vazios — os únicos que não têm
+padrão possível. Ele **recusa sobrescrever** um arquivo existente; `--forcar` cede.
+
+`doctor` verifica, com veredito e instrução de conserto em cada item: versão do
+Python, de onde o pacote está rodando, os prompts empacotados, o `config.toml`, o
+modelo de cada estágio, a skill `qa-api` e sua impressão, o Node (24+), o Graphify
+contra a versão fixada no `manifest.json` da skill, o projeto de testes e seus
+módulos compartilhados, o backend e a presença da chave do provedor — **a presença,
+nunca o valor**. Sai com código 2 se algum item reprovar, para servir de porta de
+CI.
+
+O `--dry-run` **não** existe na instalação pelo wheel: ele depende de `fixtures/`,
+que é material de desenvolvimento deste repositório e não vai no pacote. A recusa é
+explícita e manda usar o `doctor`.
+
+### A partir do checkout (desenvolvimento)
 
 ```bash
 python -m venv .venv
@@ -105,6 +223,25 @@ vivem num arquivo só: [`pyproject.toml`](pyproject.toml).
 
 Confira também `[caminhos].skill` no `config.toml`: ele aponta para o repositório
 da skill `qa-api`, que é outro projeto. Sem ele, os gates não têm o que invocar.
+
+`orquestrador doctor` também vale no checkout, e é a forma mais rápida de conferir
+tudo isso de uma vez.
+
+### Como construir e testar o wheel
+
+```bash
+uv build --wheel
+```
+
+Toda release constrói o wheel e o **testa num ambiente vazio** — é o que
+`tests/test_empacotamento.py::test_wheel_limpo` faz: constrói, cria um venv novo,
+instala só o wheel, e roda `orquestrador --help`, `doctor`, `init`, `doctor` de
+novo e um `--dry-run`. O teste é marcado `integration` e pula sozinho sem o `uv`.
+
+Ele existe porque nenhum outro teste da suíte podia pegar o defeito que motivou
+isto: todos rodam de dentro do checkout, onde `prompts/`, `fixtures/` e
+`config.toml` estão a um `parents[2]` de distância. Instalado, não estão — e o
+wheel instalava com sucesso para falhar no primeiro comando.
 
 ### Pré-condição: o projeto de testes já preparado
 
@@ -154,7 +291,9 @@ diretório do próprio arquivo.
 
 Antes do primeiro uso real, ajuste `backend`, `projeto_testes` e os três
 `estagios.*.modelo`. O `config.toml` versionado aponta para o backend e o projeto
-de exemplo desta máquina — troque pelos seus.
+de exemplo desta máquina — troque pelos seus, ou comece do zero com `orquestrador
+init`, que escreve um arquivo comentado com os campos por preencher e **não** vai
+no pacote instalável, porque configuração é do usuário.
 
 **Escolha de modelo por estágio.** O mapeador tem o julgamento mais difícil
 (inferir regra implícita, decidir honestamente o que é `naoAplica`) e o menor
@@ -414,10 +553,10 @@ afirmações — e quebram se alguém concatenar histórico "para dar mais conte
 ## Estrutura
 
 ```
-pyproject.toml       deps + configuração de pytest, num arquivo só
-config.toml          configuração de execução — é do usuário, fica na raiz
-prompts/             instrução fixa de cada estágio (conteúdo editorial)
-fixtures/            artefatos do --dry-run
+pyproject.toml       deps + configuração de pytest + empacotamento, num arquivo só
+config.toml          configuração de execução — é do usuário; nasce de `orquestrador init`
+prompts/             instrução fixa de cada estágio (editorial; mapeado para o wheel)
+fixtures/            artefatos do --dry-run — desenvolvimento, fora do wheel
 tests/
 src/orquestrador/
   __init__.py        docstring do pacote
@@ -452,18 +591,21 @@ src/orquestrador/
     exports_javascript.py    parser puro dos `export` de um módulo JS
     tags_cypress.py          parser puro das tags @endpoint/@cat de um spec
     extrator_de_superficie.py  acha os módulos compartilhados e calcula os imports
+    rotas_java_spring.py       parser puro das anotações de rota do Spring MVC
+    extrator_de_endpoints.py   matriz de suporte + grafo → endpoints do backend
   ferramentas/
     __init__.py
     processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
     graphify.py      wrappers query/affected/reindex
     arquivos.py      ler/listar/buscar com confinamento de caminho
+    privacidade.py   denylist, .llmignore e redação de segredo antes do envio
     publicacao.py    staging por recurso, diário de propriedade, publicação atômica
     scripts_qa.py    wrappers dos .mjs da skill
     json_externo.py  extrair_json tolerante de stdout de ferramenta (única impl.)
   gates/
     __init__.py
     codigos.py       catálogo dos códigos de violação QAORQ-
-    gate_a.py        --so-manifesto + STUB do diff grafo×manifesto
+    gate_a.py        --so-manifesto + diff grafo × manifesto
     gate_b.py        prettier + eslint + validador + lacuna de cobertura
     lacunas.py       QAORQ-030: categoria planejada que não virou teste
     saidas.py        JSON dos .mjs → ResultadoGate/Violacao
@@ -514,10 +656,33 @@ o `--remover-reprovados`, restrito ao que **nós** criamos e que ninguém editou
 desde então — e que autoriza remover spec obsoleto de execução anterior sob a
 mesma regra. Sem diário, nada é removido.
 
-**Por que `prompts/`, `fixtures/` e `config.toml` ficam fora do pacote.** Prompt é
-conteúdo, não código: prompt é trabalho editorial, iterado por quem não
-necessariamente mexe em Python. O caminho vem da configuração
-(`[caminhos].prompts`), com padrão na raiz.
+**Por que `prompts/` fica fora de `src/` e mesmo assim vai no wheel.** Prompt é
+conteúdo editorial, iterado por quem não necessariamente mexe em Python, e por isso
+mora na raiz do repositório, longe do código. Só que sem ele não há estágio de LLM:
+o wheel **precisa** levá-lo, e antes não levava — instalava com sucesso e falhava no
+primeiro comando.
+
+A conciliação é de empacotamento, não de cópia. O `pyproject.toml` mapeia o
+diretório `prompts/` da raiz para o pacote `orquestrador.prompts`
+(`[tool.setuptools].package-dir`), e o build grava ali dentro do wheel o conteúdo
+que já mora na raiz. **Não existe segunda cópia versionada para divergir**: num
+checkout só existe `prompts/`; num ambiente instalado só existe
+`orquestrador/prompts/`. Quem resolve os dois casos é
+[`raiz.py`](src/orquestrador/raiz.py), por `importlib.resources`, e
+`[caminhos].prompts` continua sendo o override declarado.
+
+O preço é uma lista explícita de `packages` no `pyproject.toml` — `packages.find`
+varre `where` e nunca acharia um diretório fora de `src/`. Quem cobra que ela não
+envelheça é `tests/test_empacotamento.py`: subpacote novo que não apareça lá reprova,
+em vez de sumir do wheel em silêncio.
+
+**Por que `fixtures/` e `config.toml` NÃO vão no wheel.** `fixtures/` é material de
+desenvolvimento do `--dry-run` — backend e projeto Cypress de mentira, roteiros de
+resposta —, e empacotá-lo faria todo usuário baixar o banco de testes deste
+repositório. `config.toml` é do usuário, e nasce de `orquestrador init`. A
+consequência declarada é que a instalação pelo wheel não tem `--dry-run`: quem
+quiser conferir a instalação usa `orquestrador doctor`, que não depende de fixture
+nenhuma.
 
 **Onde mora `Path(__file__)`.** Em [`raiz.py`](src/orquestrador/raiz.py), e só lá.
 Havia cinco módulos calculando a raiz por conta própria; depois que o código desceu
@@ -564,8 +729,9 @@ para nunca colidir:
 
 | Código | Significado |
 | --- | --- |
-| `QAORQ-001` | diff grafo × manifesto ainda não implementado (aviso do stub) |
-| `QAORQ-002` / `-003` | reservados para o diff quando implementado |
+| `QAORQ-001` | trecho que o diff grafo × manifesto não conseguiu resolver (aviso) |
+| `QAORQ-002` | endpoint existe no backend e não está no gabarito |
+| `QAORQ-003` | endpoint declarado no gabarito sem correspondente no backend |
 | `QAORQ-010` | saída do modelo não valida contra o contrato Pydantic |
 | `QAORQ-011` | o modelo não devolveu JSON no formato pedido |
 | `QAORQ-020` / `-021` | prettier / eslint reprovaram |
@@ -631,12 +797,22 @@ que uma refatoração quebraria em silêncio:
 
 | Item | Estado | Onde |
 | --- | --- | --- |
-| Diff grafo × manifesto (Gate A) | stub documentado; emite aviso `QAORQ-001` e **não** reprova | `gates/gate_a.py::diff_grafo_manifesto` |
 | Auditor semântico | stub; `auditar(..., permitir_stub=True)` devolve veredito vazio marcado `"revisar"` | `agentes/auditor.py` |
 | Prettier / ESLint | implementados e testados, **desligados por padrão** | `[execucao]` no `config.toml` |
 
-O diff está stub porque a implementação exige sondar o formato real do
-`graph.json`, que varia por extrator de linguagem. O auditor devolve `"revisar"`,
-nunca `"íntegro"`, exatamente para que o stub não seja confundido com auditoria
-feita. Prettier e ESLint vêm desligados porque o projeto de fixture não tem
-toolchain Node instalado; ligue-os apontando para o do projeto consumidor.
+O auditor devolve `"revisar"`, nunca `"íntegro"`, exatamente para que o stub não
+seja confundido com auditoria feita — e `--auditor` encerra com erro em vez de
+sair com código 0. Prettier e ESLint vêm desligados porque o projeto de fixture
+não tem toolchain Node instalado; ligue-os apontando para o do consumidor.
+
+**O diff grafo × manifesto saiu daqui.** Ele existe e reprova, mas só onde há
+adaptador de rota — hoje, Java/Spring. Isso não é estado de implementação, é
+**alcance**: veja [Matriz de suporte](#matriz-de-suporte). Fora do Tier A o Gate A
+responde erro de ferramenta, nunca aprovação.
+
+Vale registrar por que ele demorou: a suposição de trabalho era que o `graph.json`
+traria os endpoints. Não traz — para Java, o grafo tem arquivo, classe e método
+com linha, e **nenhuma informação de HTTP**. Verbo e rota vivem na anotação, no
+texto do fonte. O grafo entrega a lista de arquivos já filtrada pelos excludes da
+indexação; quem lê a rota é um parser por framework. É por isso que "suportar
+qualquer backend" é uma matriz de adaptadores, e não uma instrução de prompt.

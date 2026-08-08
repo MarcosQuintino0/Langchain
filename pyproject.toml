@@ -82,11 +82,46 @@ dev = [
 [project.scripts]
 orquestrador = "orquestrador.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# Empacotamento
+# -------------
+# O wheel precisa conter tudo que a execução procura. Antes ele não continha: um
+# `pip install` do wheel instalava com sucesso e falhava no primeiro comando,
+# porque `prompts/` ficava de fora e era procurado na árvore de fontes.
+#
+# `prompts/` continua morando na RAIZ do repositório, fora de `src/`, porque é
+# conteúdo editorial iterado por quem não mexe em Python (AGENTS.md). O que muda é
+# só o empacotamento: `package-dir` mapeia aquele diretório para o pacote
+# `orquestrador.prompts`, e o build grava seu conteúdo no wheel em
+# `orquestrador/prompts/`. Não há segunda cópia versionada para divergir — num
+# checkout só existe `prompts/`; num ambiente instalado só existe
+# `orquestrador/prompts/`. Quem resolve o caminho em tempo de execução é
+# `raiz.py`, por `importlib.resources`.
+#
+# `fixtures/` e `config.toml` ficam FORA do wheel de propósito: o primeiro é dado
+# de desenvolvimento do `--dry-run`, o segundo é do usuário e nasce de
+# `orquestrador init`.
+#
+# A lista de pacotes é explícita, e não `packages.find`, porque `package-dir` com
+# entrada fora da raiz não é visível para a descoberta automática — ela varre
+# `where` e nunca acharia `prompts/`. O custo é uma lista que precisa acompanhar os
+# subpacotes reais, e `tests/test_empacotamento.py` é quem cobra isso: subpacote
+# novo em `src/orquestrador/` que não apareça aqui reprova, em vez de sumir do
+# wheel em silêncio.
+[tool.setuptools]
+package-dir = { "" = "src", "orquestrador.prompts" = "prompts" }
+packages = [
+  "orquestrador",
+  "orquestrador.agentes",
+  "orquestrador.analise_estatica",
+  "orquestrador.ferramentas",
+  "orquestrador.gates",
+  "orquestrador.llm",
+  "orquestrador.observabilidade",
+  "orquestrador.prompts",
+]
 
-# `prompts/`, `fixtures/` e `config.toml` ficam FORA do pacote de propósito:
-# são conteúdo e dados do projeto, iterados por quem não mexe em código.
+[tool.setuptools.package-data]
+"orquestrador.prompts" = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

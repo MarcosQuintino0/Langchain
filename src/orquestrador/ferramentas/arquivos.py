@@ -11,6 +11,19 @@ Este módulo é o **dono da regra de confinamento**, e vale também para escrita
 executor grava os `.cy.js` por `confinar`, em vez de comparar texto por conta
 própria. Duas implementações da mesma regra divergem, e a que diverge é a que
 aceita o caminho que deveria recusar.
+
+Confinamento não é privacidade
+------------------------------
+As duas perguntas são diferentes e as duas valem. "Este caminho escapa da raiz
+autorizada?" é daqui. "Este arquivo pode ser enviado a um provedor de LLM?" é de
+`ferramentas/privacidade.py`, e se aplica **depois** — sobre caminho que o
+confinamento já aprovou. Um `.env` no meio do backend está perfeitamente dentro
+da raiz; o que o impede de ser lido é a política, não o confinamento.
+
+As três operações abaixo consultam a política porque o que elas devolvem vai
+direto para o prompt. `Confinamento` sozinho continua servindo a quem só precisa
+resolver caminho — a escrita do executor e a publicação —, e para esses a
+política é inerte: ela só é construída quando alguém a pede.
 """
 
 from __future__ import annotations
@@ -18,6 +31,8 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+
+from orquestrador.ferramentas.privacidade import PoliticaDePrivacidade
 
 # Diretórios que nunca interessam à descoberta e explodem o custo de varredura.
 DIRETORIOS_IGNORADOS = frozenset(
@@ -109,8 +124,21 @@ def relativo_a(alvo: Path, base: Path) -> str:
 class Confinamento:
     """Resolve caminhos relativos a uma raiz e recusa qualquer fuga dela."""
 
-    def __init__(self, raiz: Path | str) -> None:
+    def __init__(self, raiz: Path | str, *, politica: PoliticaDePrivacidade | None = None) -> None:
         self.raiz = Path(raiz).expanduser().resolve()
+        self._politica = politica
+
+    @property
+    def politica(self) -> PoliticaDePrivacidade:
+        """A política de privacidade desta raiz, construída na primeira consulta.
+
+        Preguiçosa porque `confinar()` cria um `Confinamento` descartável a cada
+        arquivo que o executor grava, e construir a política lê o `.llmignore` do
+        disco. Quem só resolve caminho nunca paga por isso.
+        """
+        if self._politica is None:
+            self._politica = PoliticaDePrivacidade(self.raiz)
+        return self._politica
 
     def resolver(self, caminho: str | Path) -> Path:
         bruto = Path(str(caminho).strip().strip('"').strip("'"))
@@ -156,6 +184,14 @@ def ler_arquivo(
 ) -> str:
     """Devolve um trecho numerado do arquivo, como `cat -n`."""
     alvo = confinamento.resolver(caminho)
+    # Antes de `exists()`: a resposta para um `.env` recusado não deve depender
+    # de ele existir. "não existe" e "existe mas é segredo" são a mesma frase aqui.
+    if (motivo := confinamento.politica.motivo_de_recusa(alvo, diretorio=False)) is not None:
+        return (
+            f"ERRO: {confinamento.relativo(alvo)} não é legível: a política de privacidade "
+            f"o recusa ({motivo}). Nada deste arquivo é enviado ao modelo. "
+            "Procure a informação no código da aplicação."
+        )
     if not alvo.exists():
         return f"ERRO: arquivo não existe: {confinamento.relativo(alvo)}"
     if alvo.is_dir():
@@ -174,7 +210,13 @@ def ler_arquivo(
             "Leia por trechos com offset/limit ou consulte o grafo."
         )
 
-    texto = alvo.read_text(encoding="utf-8", errors="replace")
+    # Redação sobre o arquivo inteiro, e não sobre a fatia: um bloco PEM cortado
+    # ao meio pelo `offset` começaria fora da janela e a fatia sairia com o corpo
+    # da chave. A redação preserva a contagem de linhas, então o `offset` que o
+    # modelo pediu continua apontando para a mesma linha.
+    texto, redigidos = confinamento.politica.redigir(
+        alvo.read_text(encoding="utf-8", errors="replace")
+    )
     linhas = texto.splitlines()
     inicio = max(0, int(offset))
     fim = min(len(linhas), inicio + max(1, int(limit)))
@@ -189,6 +231,11 @@ def ler_arquivo(
     rodape = ""
     if fim < len(linhas):
         rodape = f"\n... truncado; continue com offset={fim}"
+    if redigidos:
+        rodape += (
+            f"\n[política de privacidade: {redigidos} trecho(s) redigido(s) neste arquivo; "
+            "o resto do conteúdo está íntegro]"
+        )
     return f"{cabecalho}\n{corpo}{rodape}"
 
 
@@ -201,18 +248,25 @@ def listar_diretorio(confinamento: Confinamento, caminho: str, *, limite: int = 
         return f"ERRO: {confinamento.relativo(alvo)} não é um diretório."
 
     entradas: list[str] = []
+    recusadas = 0
     for item in sorted(alvo.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-        if item.is_dir():
-            if item.name in DIRETORIOS_IGNORADOS:
-                continue
-            entradas.append(f"{item.name}/")
-        else:
-            entradas.append(item.name)
+        e_diretorio = item.is_dir()
+        if e_diretorio and item.name in DIRETORIOS_IGNORADOS:
+            continue
+        # A entrada some da listagem em vez de aparecer marcada: um nome de
+        # arquivo já é informação — `chave-producao.pem` diz de quem é a chave —,
+        # e listar o que não pode ser lido só produz tentativa de leitura.
+        if confinamento.politica.motivo_de_recusa(item, diretorio=e_diretorio) is not None:
+            recusadas += 1
+            continue
+        entradas.append(f"{item.name}/" if e_diretorio else item.name)
 
     total = len(entradas)
     mostradas = entradas[:limite]
     cabecalho = f"{confinamento.relativo(alvo)} ({total} entrada(s))"
     rodape = f"\n... {total - len(mostradas)} entrada(s) omitida(s)" if total > limite else ""
+    if recusadas:
+        rodape += f"\n[política de privacidade: {recusadas} entrada(s) ocultada(s)]"
     return "\n".join([cabecalho, *mostradas]) + rodape
 
 
@@ -234,8 +288,9 @@ def buscar(
         return f"ERRO: expressão regular inválida ({erro}): {padrao!r}"
 
     achados: list[str] = []
+    redigidos = 0
     truncado = False
-    for arquivo in _percorrer(confinamento.raiz, glob):
+    for arquivo in _percorrer(confinamento, glob):
         if len(achados) >= max_resultados:
             truncado = True
             break
@@ -247,25 +302,45 @@ def buscar(
             continue
         for numero, linha in enumerate(conteudo.splitlines(), start=1):
             if regex.search(linha):
-                achados.append(f"{confinamento.relativo(arquivo)}:{numero}: {linha.strip()[:240]}")
+                # A busca casa contra a linha crua e o que sai é a linha redigida:
+                # redigir o arquivo inteiro antes de procurar custaria uma
+                # varredura completa por arquivo do backend, e o que precisa
+                # estar limpo é a **saída**, não o casamento.
+                exibida, trechos = confinamento.politica.redigir(linha)
+                redigidos += trechos
+                achados.append(
+                    f"{confinamento.relativo(arquivo)}:{numero}: {exibida.strip()[:240]}"
+                )
                 if len(achados) >= max_resultados:
                     truncado = True
                     break
 
+    rodape = ""
+    if truncado:
+        rodape += f"\n... truncado em {max_resultados} ocorrências; restrinja o padrão ou o glob"
+    if redigidos:
+        rodape += f"\n[política de privacidade: {redigidos} trecho(s) redigido(s) no resultado]"
     if not achados:
-        return f"nenhuma ocorrência de {padrao!r}" + (f" em {glob}" if glob else "")
-    rodape = (
-        f"\n... truncado em {max_resultados} ocorrências; restrinja o padrão ou o glob"
-        if truncado
-        else ""
-    )
+        return f"nenhuma ocorrência de {padrao!r}" + (f" em {glob}" if glob else "") + rodape
     return "\n".join(achados) + rodape
 
 
-def _percorrer(raiz: Path, glob: str | None):
-    """Arquivos de texto sob a raiz, pulando diretórios e arquivos proibidos."""
-    for diretorio, subdiretorios, arquivos in os.walk(raiz):
-        subdiretorios[:] = [nome for nome in subdiretorios if nome not in DIRETORIOS_IGNORADOS]
+def _percorrer(confinamento: Confinamento, glob: str | None):
+    """Arquivos de texto sob a raiz, pulando o que é proibido ou privado.
+
+    A poda de diretório acontece no `subdiretorios[:]`, antes de descer: sem ela
+    a busca leria `.ssh/` inteiro para recusar arquivo por arquivo — mesmo
+    veredito, disco lido à toa. É também o que impede a regex do modelo de virar
+    oráculo sobre o conteúdo de um diretório que a política já fechou.
+    """
+    politica = confinamento.politica
+    for diretorio, subdiretorios, arquivos in os.walk(confinamento.raiz):
+        subdiretorios[:] = [
+            nome
+            for nome in subdiretorios
+            if nome not in DIRETORIOS_IGNORADOS
+            and politica.motivo_de_recusa(Path(diretorio) / nome, diretorio=True) is None
+        ]
         base = Path(diretorio)
         for nome in arquivos:
             if nome in ARQUIVOS_PROIBIDOS:
@@ -274,5 +349,7 @@ def _percorrer(raiz: Path, glob: str | None):
             if alvo.suffix.lower() in EXTENSOES_BINARIAS:
                 continue
             if glob and not alvo.match(glob):
+                continue
+            if politica.motivo_de_recusa(alvo, diretorio=False) is not None:
                 continue
             yield alvo

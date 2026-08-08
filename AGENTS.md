@@ -123,6 +123,10 @@ Mudança de prompt é tarefa própria, com diff próprio.
 
 - **Nunca leia nem envie ao LLM** `.env`, chave, token, credencial, PEM ou qualquer
   segredo. Redija segredo em log, erro, evento e fixture.
+  Isto **tem dono e tem teste**: `ferramentas/privacidade.py` aplica denylist, o
+  `.llmignore` do consumidor e a redação de conteúdo, e as tools do mapeador
+  consultam a política pelo próprio `Confinamento`. Ferramenta nova que leia o
+  backend passa por lá; não reimplemente a regra ao lado.
 - **Não propague a chave do provedor para subprocesso** (Node, Cypress, prettier,
   eslint). O ambiente do subprocesso é montado explicitamente.
 - **Nenhuma chamada externa em teste unitário** — nem rede, nem provedor, nem Node.

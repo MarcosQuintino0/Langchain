@@ -42,15 +42,24 @@ def carregar_prompt(
 ) -> str:
     """Lê `<dir_prompts>/<nome>.md` e substitui os `{{placeholders}}` conhecidos.
 
-    O diretório vem da configuração (`[caminhos].prompts`), com padrão na raiz do
-    projeto: prompt é conteúdo editorial, não código de pacote.
+    O diretório vem da configuração (`[caminhos].prompts`). O padrão é resolvido em
+    `raiz.py`: `prompts/` da raiz do repositório num checkout, `orquestrador/prompts/`
+    do wheel num ambiente instalado. Prompt é conteúdo editorial, não código de
+    pacote — o que o wheel leva é o mesmo diretório, empacotado no build, nunca uma
+    segunda cópia versionada.
 
     Placeholder sem valor é mantido literal — o arquivo é um placeholder da Fase 1
     e apagá-lo em silêncio esconderia a lacuna.
     """
     arquivo = (dir_prompts or DIR_PROMPTS_PADRAO) / f"{nome}.md"
     if not arquivo.is_file():
-        raise PromptAusente(f"prompt do estágio não encontrado: {arquivo}")
+        raise PromptAusente(
+            f"prompt do estágio não encontrado: {arquivo}\n"
+            "Se o orquestrador foi instalado a partir do wheel, este é o diretório "
+            "empacotado e a instalação está incompleta — reinstale. Se você apontou "
+            "[caminhos].prompts para outro lugar, confira o caminho. "
+            "`orquestrador doctor` diz qual dos dois é o caso."
+        )
     texto = arquivo.read_text(encoding="utf-8")
     valores = dados or {}
 
