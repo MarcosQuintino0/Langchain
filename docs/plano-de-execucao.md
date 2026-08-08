@@ -727,6 +727,29 @@ Um adaptador de framework por vez, com projeto-fixture real, golden de grafo e f
 negativos conhecidos. Medir precisão do extrator e custo por porte de projeto. Só então
 avaliar auditor semântico, paralelismo entre recursos e throughput.
 
+## O regime de adaptador — **CONCLUÍDO**
+
+A parte de engenharia desta etapa foi feita: **o molde**, para que o segundo adaptador
+custe um dia e não uma semana. Adicionar adaptadores continua sendo produto e fica fora.
+
+`MATRIZ_DE_SUPORTE` é uma tupla, e acrescentar uma linha nela era a coisa mais fácil do
+repositório — e a afirmação mais cara que ele faz. Passou a exigir três coisas, todas com
+teste (`test_analise_estatica_extrator_de_endpoints.py`):
+
+1. **projeto-fixture real** em `fixtures/backends/<nome>/`, com `graph.json`. Não um trecho
+   numa string: o trecho prova o parser, o projeto prova a **cadeia** — grafo aponta,
+   confinamento resolve, matriz escolhe, parser roda. É na cadeia que os defeitos aparecem.
+2. **golden** dos endpoints extraídos daquele fixture. É ele que responde "a precisão caiu?".
+3. **falsos negativos declarados, não vazios.** Lista vazia afirma cobertura total de um
+   framework inteiro, e isso nunca é verdade — o que ela significa é que ninguém procurou.
+
+✅ Verificado: um `Adaptador` inventado (Python/FastAPI, sem fixture e sem falsos negativos)
+reprova nos dois testes.
+
+✅ Precisão publicada na matriz de suporte: 27 de 27 endpoints no backend de exemplo, 7 de 8
+no projeto-fixture — o oitavo é uma rota montada em constante, que vira `RotaDinamica` e sai
+como `QAORQ-001` em vez de sumir.
+
 O denominador determinístico vem preferencialmente do que a aplicação declara sobre si
 (OpenAPI, actuator, `rails routes`), com AST como segunda opção e enumeração por LLM como
 terceira — esta última **sempre** marcando o run como "inventário não verificado".

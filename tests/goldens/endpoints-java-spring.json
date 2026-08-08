@@ -1,0 +1,36 @@
+{
+  "classes": [
+    {
+      "classe": "LegadoController",
+      "arquivo": "src/main/java/exemplo/LegadoController.java",
+      "endpoints": [],
+      "nao_resolvidas": [
+        "BASE + \"/itens\""
+      ]
+    },
+    {
+      "classe": "PedidoController",
+      "arquivo": "src/main/java/exemplo/PedidoController.java",
+      "endpoints": [
+        "GET /api/pedidos",
+        "GET /api/pedidos/{id}",
+        "POST /api/pedidos",
+        "PUT /api/pedidos/{id}",
+        "DELETE /api/pedidos/{id}"
+      ],
+      "nao_resolvidas": []
+    },
+    {
+      "classe": "RelatorioController",
+      "arquivo": "src/main/java/exemplo/RelatorioController.java",
+      "endpoints": [
+        "GET /relatorios/mensal",
+        "POST /relatorios"
+      ],
+      "nao_resolvidas": []
+    }
+  ],
+  "arquivos_no_grafo": 5,
+  "arquivos_analisados": 4,
+  "arquivos_de_teste": 1
+}

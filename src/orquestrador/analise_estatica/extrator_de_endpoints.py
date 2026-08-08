@@ -114,6 +114,15 @@ class Adaptador:
     # inflaria o denominador com rota que nenhuma suíte de API alcança.
     raizes_de_teste: tuple[str, ...] = ()
 
+    # O que este adaptador **sabe que não pega**, escrito. Não é documentação
+    # opcional: é o que separa "suportamos Java/Spring" de "rodou uma vez num
+    # backend". Um adaptador que declara lista vazia está afirmando cobertura total
+    # de um framework inteiro, e essa afirmação nunca é verdadeira — o que ela
+    # significa na prática é que ninguém procurou os buracos.
+    #
+    # `test_analise_estatica_extrator_de_endpoints.py` exige que ela não seja vazia.
+    falsos_negativos: tuple[str, ...] = ()
+
 
 def _adaptar_spring(texto: str, arquivo: str) -> list[ClasseComRotas]:
     classes: list[ClasseComRotas] = []
@@ -158,6 +167,17 @@ MATRIZ_DE_SUPORTE: tuple[Adaptador, ...] = (
         marcadores=("@RestController", "@Controller"),
         ler=_adaptar_spring,
         raizes_de_teste=("src/test/", "src/integrationTest/", "src/testFixtures/"),
+        falsos_negativos=(
+            "rota montada em constante, concatenação ou `${propriedade}` — vira "
+            "RotaDinamica com a expressão original, e sai como aviso QAORQ-001 em "
+            "vez de endpoint",
+            "`@RequestMapping` sem `method` explícito e sem anotação derivada "
+            "(`@GetMapping` e irmãos): o método HTTP não é decidível pelo texto",
+            "controlador registrado programaticamente (`RouterFunction`, "
+            "`WebMvcConfigurer`) — não há anotação para o parser achar",
+            "rota herdada de superclasse **fora** do backend indexado: o grafo não "
+            "tem o arquivo, e o extrator não inventa o que não leu",
+        ),
     ),
 )
 

@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "comentario": "graph.json do projeto-fixture do adaptador Java/Spring. Minúsculo de propósito: o real tem megabytes e nunca é varrido diretamente. Cada nó aqui existe por um caso do parser — ver o README ao lado.",
+  "nodes": [
+    {
+      "id": "PedidoController",
+      "kind": "class",
+      "file": "src/main/java/exemplo/PedidoController.java",
+      "line": 6
+    },
+    {
+      "id": "RelatorioController",
+      "kind": "class",
+      "file": "src/main/java/exemplo/RelatorioController.java",
+      "line": 5
+    },
+    {
+      "id": "LegadoController",
+      "kind": "class",
+      "file": "src/main/java/exemplo/LegadoController.java",
+      "line": 5
+    },
+    {
+      "id": "ControllerDeTesteController",
+      "kind": "class",
+      "file": "src/test/java/exemplo/ControllerDeTesteController.java",
+      "line": 5
+    },
+    {
+      "id": "Pedido",
+      "kind": "class",
+      "file": "src/main/java/exemplo/Pedido.java",
+      "line": 3
+    }
+  ],
+  "edges": [
+    {
+      "from": "PedidoController",
+      "to": "Pedido",
+      "relation": "uses"
+    }
+  ]
+}

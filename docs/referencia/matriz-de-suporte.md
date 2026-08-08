@@ -30,6 +30,29 @@ gate que o consome é assunto de O que é stub. São perguntas
 diferentes e envelhecem em ritmos diferentes — juntá-las numa lista só é como as
 duas ficam desatualizadas ao mesmo tempo.
 
+### Precisão medida — Java/Spring
+
+| O quê | Número | Onde |
+| --- | --- | --- |
+| endpoints extraídos do backend de exemplo | **27 de 27** | 5 classes controladoras |
+| endpoints do projeto-fixture do adaptador | **7 de 8** | 1 fica em `nao_resolvidas` |
+| rotas que o parser declara não resolver | 4 categorias | `MATRIZ_DE_SUPORTE.falsos_negativos` |
+
+O oitavo endpoint do fixture é uma rota montada em constante (`BASE + "/itens"`). Ela
+**não some**: vira `RotaDinamica` com a expressão original e sai como aviso
+`QAORQ-001`. Incerteza registrada não é ausência — é essa distinção que impede o
+buraco de virar cobertura completa por omissão.
+
+Os dois números têm golden (`tests/goldens/endpoints-java-spring.json`), e o
+projeto-fixture existe para que "a precisão caiu?" tenha resposta sem rodar contra
+um backend real.
+
+**Todo adaptador precisa dos três**: projeto-fixture com `graph.json`, golden dos
+endpoints extraídos, e falsos negativos declarados — lista vazia reprova. Um
+adaptador que afirma cobertura total de um framework inteiro está afirmando algo que
+nunca é verdade; o que a lista vazia significa é que ninguém procurou os buracos.
+Quem cobra é `tests/test_analise_estatica_extrator_de_endpoints.py`.
+
 Os limites que valem **mesmo dentro do Tier A**, porque suporte avaliado não é
 suporte perfeito:
 
