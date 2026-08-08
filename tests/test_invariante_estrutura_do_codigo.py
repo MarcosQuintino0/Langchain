@@ -60,21 +60,16 @@ RAIZ_PERMITIDA = frozenset(
         "cli.py",
         "config.py",
         "excecoes.py",
-        "pipeline.py",
         "raiz.py",
-        "simulacao.py",
     }
 )
-
-# `pipeline.py` e `simulacao.py` viram `aplicacao/` na Etapa 6 de
-# `docs/plano-de-execucao.md`. Quando isso acontecer, remova-os de
-# `RAIZ_PERMITIDA` — a lista só encolhe — e apague esta constante junto com o
-# teste que a consome: teste que só pode passar não protege nada.
-SAEM_NA_ETAPA_6 = frozenset({"pipeline.py", "simulacao.py"})
 
 # Direção de dependência. A chave é o pacote; o valor, os pacotes que ele não pode
 # importar. Seta ao contrário não quebra teste nenhum hoje — ela só transforma
 # dois módulos independentes num par que precisa ser lido junto para sempre.
+#
+# A matriz é fechada: todo pacote é chave. Um pacote fora dela não tem regra de
+# direção nenhuma, e a ausência se lê como permissão.
 DIRECAO_PROIBIDA: dict[str, frozenset[str]] = {
     # O vocabulário comum. Não conhece **ninguém** — nem quem produz o dado, nem
     # quem decide sobre ele. `excecoes` é a única aresta permitida, e não aparece
@@ -87,25 +82,26 @@ DIRECAO_PROIBIDA: dict[str, frozenset[str]] = {
             "llm",
             "analise_estatica",
             "observabilidade",
-            "pipeline",
-            "simulacao",
+            "aplicacao",
             "cli",
             "config",
         }
     ),
     # Lê código-fonte e devolve dado. Se precisasse de gate ou de agente, não
     # seria análise: seria decisão.
-    "analise_estatica": frozenset({"agentes", "gates", "pipeline", "cli"}),
+    "analise_estatica": frozenset({"agentes", "gates", "aplicacao", "cli"}),
     # Adaptador de I/O externo. Quem decide o que fazer com a saída é o chamador.
-    "ferramentas": frozenset({"agentes", "gates", "pipeline", "cli"}),
+    "ferramentas": frozenset({"agentes", "gates", "aplicacao", "cli"}),
     # Registra o que aconteceu; nunca decide fluxo.
-    "observabilidade": frozenset({"agentes", "gates", "pipeline", "cli"}),
+    "observabilidade": frozenset({"agentes", "gates", "aplicacao", "cli"}),
     # Cliente, saída estruturada e montagem de prompt. Não conhece gate nem recurso.
-    "llm": frozenset({"agentes", "gates", "pipeline", "cli"}),
+    "llm": frozenset({"agentes", "gates", "aplicacao", "cli"}),
     # Reprova determinística. Conhece quem executa, nunca quem cria.
-    "gates": frozenset({"agentes", "pipeline", "cli"}),
+    "gates": frozenset({"agentes", "aplicacao", "cli"}),
     # Monta e invoca um criador LLM. Não decide aprovação, e não coordena estágios.
-    "agentes": frozenset({"gates", "pipeline", "cli"}),
+    "agentes": frozenset({"gates", "aplicacao", "cli"}),
+    # Coordena os estágios. Conhece todo o resto; a CLI é quem o conhece.
+    "aplicacao": frozenset({"cli"}),
 }
 
 CODIGO_QAORQ = re.compile(r"QAORQ-\d{3}")
@@ -225,6 +221,8 @@ def test_raiz_do_pacote_e_lista_fechada():
         "A raiz é lista fechada — ela não recebe arquivo novo. Escolha o diretório "
         "pelo motivo dominante de mudança, usando a tabela 'Onde colocar código "
         "novo' do AGENTS.md:\n"
+        "  dominio/          contrato e regra pura, sem I/O\n"
+        "  aplicacao/        coordena estágios e persistência\n"
         "  agentes/          monta e invoca um criador LLM\n"
         "  gates/            reprova determinística, sem LLM\n"
         "  ferramentas/      adaptador de disco, subprocesso e CLI externa\n"
@@ -244,22 +242,12 @@ def test_raiz_do_pacote_e_lista_fechada():
     )
 
 
-def test_a_raiz_ainda_carrega_o_que_sai_na_etapa_6():
-    """Lembrete executável: a lista fechada de hoje não é a de destino.
-
-    `contratos.py` vira `dominio/`; `pipeline.py` e `simulacao.py` viram
-    `aplicacao/`. Enquanto estiverem aqui, `RAIZ_PERMITIDA` os tolera — e o dia em
-    que a Etapa 6 acontecer, é este teste que avisa para encolher a lista.
-    """
-    presentes = {arquivo.name for arquivo in PACOTE.glob("*.py")}
-    pendentes = sorted(SAEM_NA_ETAPA_6 & presentes)
-    resolvidos = sorted(SAEM_NA_ETAPA_6 - presentes)
-
-    assert not resolvidos or not pendentes, (
-        f"a Etapa 6 moveu {resolvidos} mas deixou {pendentes} na raiz.\n"
-        "Termine o movimento ou ajuste SAEM_NA_ETAPA_6 e RAIZ_PERMITIDA para "
-        "refletir a decisão que foi realmente tomada."
-    )
+# `test_a_raiz_ainda_carrega_o_que_sai_na_etapa_6` foi apagado aqui, junto com a
+# constante `SAEM_NA_ETAPA_6`. Ele existia como lembrete executável de que a lista
+# fechada de então não era a de destino — `contratos.py` virou `dominio/`,
+# `pipeline.py` e `simulacao.py` viraram `aplicacao/`. Com o movimento feito, ele
+# só podia passar, e teste que só pode passar não protege nada: ocupa uma linha na
+# saída e ensina que a suíte tem itens decorativos.
 
 
 # ---------------------------------------------------------------------------

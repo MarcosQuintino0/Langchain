@@ -562,11 +562,15 @@ src/orquestrador/
   __init__.py        docstring do pacote
   __main__.py        ponto de entrada de `python -m orquestrador`
   cli.py             argumentos, montagem da execução e apresentação
-  pipeline.py        a classe Pipeline e o _ciclo (o loop de reparo)
   config.py          carga e validação da configuração
-  simulacao.py       modelo falso dirigido por fixture + sandbox do --dry-run
   excecoes.py        FalhaDeGate, FalhaDeEstagio, ErroDeFerramenta, ErroDeConfiguracao
   raiz.py            resolução da raiz do projeto — único uso de Path(__file__)
+  aplicacao/
+    __init__.py
+    pipeline.py      a ordem dos quatro blocos e o desfecho de cada recurso
+    ciclo_de_reparo.py  gera → persiste → avalia → (delta → repete)
+    persistencia.py  o que sai para o disco, e de quem é cada arquivo que sai
+    simulacao.py     modelo falso dirigido por fixture + sandbox do --dry-run
   dominio/
     __init__.py
     endpoint.py      o vocabulário HTTP que inventário e manifesto compartilham

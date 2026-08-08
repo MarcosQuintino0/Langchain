@@ -24,24 +24,24 @@ A CLI que dirige tudo isto vive em `cli.py`.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
-from orquestrador.analise_estatica.extrator_de_superficie import extrair as extrair_superficie
+from orquestrador.aplicacao.ciclo_de_reparo import CicloDeReparo
+from orquestrador.aplicacao.persistencia import PersistenciaDeArtefatos
+from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import SaidaExecutor, SaidaMapeador
 from orquestrador.dominio.manifesto import Manifesto
-from orquestrador.dominio.propriedade import Classificacao, DivergenciaDeSchema, EntradaDoDiario
+from orquestrador.dominio.propriedade import DivergenciaDeSchema, EntradaDoDiario
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
-from orquestrador.dominio.veredito import Delta, EstadoDoRecurso, EstagioDelta, ResultadoGate
+from orquestrador.dominio.veredito import Delta, EstadoDoRecurso, ResultadoGate
 from orquestrador.excecoes import (
     CategoriaDeProvedor,
     ErroDeConfiguracao,
@@ -53,15 +53,13 @@ from orquestrador.excecoes import (
     FalhaDePublicacao,
     GrafoNaoPreparado,
 )
-from orquestrador.ferramentas.arquivos import sob_a_raiz
+from orquestrador.ferramentas import processo
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
-from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS
 from orquestrador.ferramentas.publicacao import (
     NOME_DO_DIARIO,
     AreaDeStaging,
     Diario,
     criar_area,
-    remover_criados,
 )
 from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.gates import gate_a, gate_b
@@ -70,7 +68,6 @@ from orquestrador.llm.cliente import criar_modelo
 from orquestrador.observabilidade.eventos import TipoDeEvento
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria
-from orquestrador.simulacao import Roteiros
 
 # Estado da suíte em runtime, no Bloco 3. São dois estados e não um booleano
 # porque a diferença que importa é entre "os testes passaram" e "ninguém sabe":
@@ -81,17 +78,6 @@ NAO_EXECUTADO = "NAO_EXECUTADO"
 
 # Marca substituída pelo caminho do relatório desta execução no comando do Cypress.
 MARCA_RELATORIO = "{relatorio}"
-
-# Os dois gates que têm loop de reparo. O tipo fecha a porta que o `# type: ignore`
-# de `_ciclo` mantinha aberta: o estágio do delta era montado por interpolação
-# (`f"gate_{gate}"`), e um `gate="c"` produziria a string "gate_c", que nenhum
-# consumidor de `EstagioDelta` reconhece.
-NomeDeGate = Literal["a", "b"]
-_ESTAGIO_DO_GATE: dict[NomeDeGate, EstagioDelta] = {"a": "gate_a", "b": "gate_b"}
-
-# O artefato que atravessa uma volta do loop de reparo: `SaidaMapeador` no Bloco 1,
-# `SaidaExecutor` no Bloco 2.
-Artefato = TypeVar("Artefato")
 
 
 @dataclass(frozen=True)
@@ -157,45 +143,6 @@ class ResultadoDoRecurso:
         return self.estado is EstadoDoRecurso.APROVADO
 
 
-def _unir_caminhos(atuais: list[Path], novos: list[Path] | None) -> list[Path]:
-    """Concatena preservando ordem e sem repetir."""
-    unidos = list(atuais)
-    for caminho in novos or []:
-        if caminho not in unidos:
-            unidos.append(caminho)
-    return unidos
-
-
-# Guarda contra schema recursivo, no mesmo espírito do PROFUNDIDADE_MAXIMA de
-# `campos/schema.mjs`.
-_PROFUNDIDADE_DE_CAMPOS = 4
-
-
-def nomes_de_campos(esquema: Any, *, profundidade: int = _PROFUNDIDADE_DE_CAMPOS) -> set[str]:
-    """Todo nome que aparece sob algum `properties` do schema, até uma profundidade.
-
-    Varredura deliberadamente rasa e tolerante: ela serve para responder "este nome
-    não aparece em lugar nenhum do arquivo", não para decidir qual nó é a entidade.
-    Quem decide isso é `campos/schema.mjs`, e reimplementar a heurística aqui criaria
-    uma segunda fonte de verdade para o denominador da cobertura.
-    """
-    if profundidade <= 0 or not isinstance(esquema, dict):
-        return set()
-    # `Any` é a anotação certa na entrada: o argumento é um nó qualquer de um JSON
-    # Schema escrito por um LLM, e a função existe justamente para atravessá-lo sem
-    # exigir forma. O que ela devolve, porém, é `set[str]` — o `Any` para aqui.
-    no = cast(dict[str, Any], esquema)
-    nomes: set[str] = set()
-    propriedades = no.get("properties")
-    if isinstance(propriedades, dict):
-        for nome, subesquema in cast(dict[str, Any], propriedades).items():
-            nomes.add(str(nome))
-            nomes |= nomes_de_campos(subesquema, profundidade=profundidade - 1)
-    if (itens := no.get("items")) is not None:
-        nomes |= nomes_de_campos(itens, profundidade=profundidade - 1)
-    return nomes
-
-
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -231,10 +178,12 @@ class Pipeline:
         # no retorno de `rodar`, para que quem já lê a lista de resultados continue
         # lendo a lista de resultados — inclusive a parcial.
         self.interrupcao: InterrupcaoDaExecucao | None = None
-        # Divergências de schema do recurso em curso. Zerada a cada recurso: é o
-        # princípio 3 aplicado ao próprio pipeline — nada de um recurso pode
-        # decidir o desfecho do seguinte.
-        self._divergencias: list[DivergenciaDeSchema] = []
+        # As duas colaborações que este objeto coordena, e não implementa: o loop
+        # de reparo e as escritas em disco. Ver a docstring de `aplicacao/`.
+        self.persistencia = PersistenciaDeArtefatos(
+            config, registro, dir_execucao=dir_execucao, diario=self.diario
+        )
+        self.ciclo = CicloDeReparo(config, registro, self.telemetria)
 
     # -- modelos ------------------------------------------------------------
 
@@ -281,40 +230,8 @@ class Pipeline:
             detalhe=resultado.detalhe,
         )
         (self.registro.ok if resultado.ok else self.registro.aviso)(resultado.detalhe)
-        self._extrair_superficie()
+        self.superficie = self.persistencia.extrair_superficie()
         return resultado
-
-    def _extrair_superficie(self) -> None:
-        """Lê os módulos compartilhados do projeto. Determinístico, zero token.
-
-        Falha aqui é pré-condição do projeto de testes, não do recurso: ela
-        interrompe a execução antes de qualquer chamada de modelo, porque o
-        executor não tem como adivinhar nomes de export que ninguém contou a ele —
-        e o delta do Gate B ("import não resolve") não é acionável.
-        """
-        self.superficie = extrair_superficie(self.config)
-        destino = self.dir_execucao / "artefatos" / "superficie-do-projeto.json"
-        destino.parent.mkdir(parents=True, exist_ok=True)
-        destino.write_text(self.superficie.para_json(), encoding="utf-8", newline="\n")
-
-        self.registro.evento(
-            TipoDeEvento.SUPERFICIE,
-            raiz=self.superficie.raiz,
-            modulos=[
-                {
-                    "caminho": modulo.caminho,
-                    "import_do_recurso": modulo.import_do_recurso,
-                    "import_do_support": modulo.import_do_support,
-                    "exports": [exportado.nome for exportado in modulo.exports],
-                }
-                for modulo in self.superficie.modulos
-            ],
-            artefato=destino,
-        )
-        self.registro.ok(
-            f"superfície do projeto: {len(self.superficie.modulos)} módulo(s), "
-            f"{self.superficie.total_de_exports} export(s) em {self.superficie.raiz}"
-        )
 
     # -- Bloco 1 + Gate A ---------------------------------------------------
 
@@ -342,7 +259,7 @@ class Pipeline:
                 # Os schemas de entrada ficam fora do diretório do recurso: são o
                 # denominador da cobertura por campo e o Gate A os lê do disco, não
                 # da saída do modelo.
-                *self._persistir_schemas(recurso, saida, area),
+                *self.persistencia.persistir_schemas(recurso, saida, area),
             ]
             self.registro.evento(
                 TipoDeEvento.ARTEFATOS,
@@ -367,7 +284,7 @@ class Pipeline:
                 manifesto=saida.manifesto,
             )
 
-        return self._ciclo(
+        return self.ciclo.executar(
             estagio=agente_mapeador.ESTAGIO,
             gate="a",
             recurso=recurso,
@@ -381,72 +298,6 @@ class Pipeline:
                 recurso=recurso.nome,
             ),
         )
-
-    def _persistir_schemas(
-        self, recurso: Recurso, saida: SaidaMapeador, area: AreaDeStaging
-    ) -> list[Path]:
-        """Grava os schemas do mapeador sem passar por cima do que é do cliente.
-
-        No desenho da skill o schema de entrada é artefato **pré-existente** do
-        projeto consumidor — o AJV valida respostas com ele e ele quebra os testes se
-        estiver errado (`scripts/cobertura/campos/schema.mjs`). É dessa independência
-        que vem a autoridade dele como denominador: ele não foi escrito por quem vai
-        ser medido. Sobrescrever em silêncio quebraria suíte alheia e trocaria uma
-        régua independente pela régua do próprio modelo.
-
-        Daí a regra: arquivo que já era do consumidor é copiado para o staging e
-        preservado; o resto é escrito à vontade a cada tentativa, senão o loop de
-        reparo do Gate A nunca convergiria sobre o schema.
-
-        Quem responde "já era do consumidor?" é a área de staging, que fotografou o
-        destino no início do recurso. O conjunto de schemas gravados que esta classe
-        mantinha respondia à mesma pergunta com estado próprio — e estado próprio
-        para uma pergunta sobre o disco erra na primeira vez que o disco muda por
-        fora.
-        """
-        escritos: list[Path] = []
-        preservados: list[Path] = []
-
-        for arquivo in saida.schemas:
-            alvo = recurso.caminho_schemas / arquivo.caminho
-            if area.ja_era_do_consumidor(alvo):
-                preservados.append(alvo)
-                if divergencia := self._divergencia(recurso, alvo, arquivo.conteudo):
-                    self._divergencias.append(divergencia)
-                area.preservar_schema(arquivo.caminho)
-                continue
-            escritos.append(area.escrever_schema(arquivo.caminho, arquivo.conteudo))
-
-        if preservados:
-            self.registro.evento(
-                TipoDeEvento.SCHEMAS_PRESERVADOS,
-                recurso=recurso.nome,
-                arquivos=[str(caminho) for caminho in preservados],
-            )
-        return escritos
-
-    def _divergencia(
-        self, recurso: Recurso, alvo: Path, conteudo_emitido: str
-    ) -> DivergenciaDeSchema | None:
-        """O que o mapeador achou no backend e o schema preservado não declara.
-
-        Não reprova: a autoridade sobre o arquivo é do Gate A, e o arquivo é do
-        consumidor. Mas também não pode passar como aviso e o recurso terminar
-        aprovado — campo que existe no backend e não está no schema sai do
-        denominador sem deixar rastro, e a cobertura sobe porque a régua encolheu.
-        O desfecho é `REQUER_REVISAO`; ver `_rodar_recurso`.
-        """
-        try:
-            existente = nomes_de_campos(json.loads(alvo.read_text(encoding="utf-8")))
-            emitido = nomes_de_campos(json.loads(conteudo_emitido))
-        except (OSError, ValueError):
-            # Schema ilegível é caso do gate, que reprova com a mensagem certa. Aqui
-            # só desistimos da comparação.
-            return None
-        ausentes = sorted(emitido - existente)
-        if not ausentes:
-            return None
-        return DivergenciaDeSchema(recurso=recurso.nome, arquivo=alvo, campos_ausentes=ausentes)
 
     # -- Bloco 2 + Gate B ---------------------------------------------------
 
@@ -479,7 +330,7 @@ class Pipeline:
             )
             return escritos
 
-        return self._ciclo(
+        return self.ciclo.executar(
             estagio=agente_executor.ESTAGIO,
             gate="b",
             recurso=recurso,
@@ -564,14 +415,6 @@ class Pipeline:
         3. código de saída diferente de zero interrompe o recurso. Antes ele virava
            campo de evento e o recurso terminava como sucesso.
         """
-        # O import tardio é o que mantém `executar` resolvido em tempo de
-        # chamada. Ligado no topo, `rodar` viraria uma referência fixada na
-        # importação do módulo, e o `monkeypatch.setattr(processo, "executar", ...)`
-        # dos testes do Bloco 3 passaria a não ter efeito nenhum — a suíte roda o
-        # Cypress de verdade. Verificado: subir este import reprova 4 testes de
-        # tests/test_invariante_falhas_isoladas.py.
-        from orquestrador.ferramentas.processo import executar as rodar  # noqa: PLC0415
-
         configurado = list(self.config.execucao.cypress)
         if not any(MARCA_RELATORIO in argumento for argumento in configurado):
             raise ErroDeConfiguracao(
@@ -587,14 +430,14 @@ class Pipeline:
         destino.unlink(missing_ok=True)
         argumentos = [argumento.replace(MARCA_RELATORIO, str(destino)) for argumento in configurado]
 
-        saida = rodar(
+        saida = processo.executar(
             argumentos,
             cwd=self.config.caminhos.projeto_testes,
             timeout_s=self.config.execucao.timeout_s,
             # O ambiente do subprocesso é allowlist; sem estas, o `cypress.config.js`
             # do consumidor sobe sem a configuração que ele espera e a suíte falha
             # por um motivo que não tem nada a ver com o teste gerado.
-            variaveis_extras=VARIAVEIS_DO_CYPRESS,
+            variaveis_extras=processo.VARIAVEIS_DO_CYPRESS,
         )
         self.registro.evento(
             TipoDeEvento.CYPRESS,
@@ -619,156 +462,6 @@ class Pipeline:
             )
         self.registro.ok(f"Cypress executado; relatório desta execução em {destino}")
         return destino
-
-    # -- loop de reparo -----------------------------------------------------
-
-    def _ciclo(
-        self,
-        *,
-        estagio: str,
-        gate: NomeDeGate,
-        recurso: Recurso,
-        produzir: Callable[[int, Delta | None, str | None], Artefato],
-        persistir: Callable[[Artefato], list[Path]],
-        avaliar: Callable[[Artefato], ResultadoGate],
-        texto_do_artefato: Callable[[Artefato, Delta], str],
-    ) -> tuple[Artefato, ResultadoGate, int]:
-        """Gera → persiste → avalia → (delta → repete). O coração da arquitetura.
-
-        Genérico em `Artefato` porque o laço é o mesmo para o `SaidaMapeador` do
-        Bloco 1 e o `SaidaExecutor` do Bloco 2, e a única coisa que ele faz com o
-        artefato é passá-lo adiante para os quatro callbacks. Com `Any` no lugar do
-        parâmetro de tipo, ninguém conferia que os quatro falam do mesmo artefato — e
-        o tipo devolvido a `bloco1`/`bloco2` era `Any`, o que apagava a checagem de
-        tudo que eles fazem com a saída depois.
-        """
-        maximo = self.config.gate(gate).max_tentativas
-        delta: Delta | None = None
-        artefato_atual: str | None = None
-        resultado: ResultadoGate | None = None
-        persistidos: list[Path] = []
-
-        for tentativa in range(1, maximo + 1):
-            marca = len(self.telemetria.chamadas)
-            marca_tools = len(self.telemetria.tools)
-            try:
-                artefato = produzir(tentativa, delta, artefato_atual)
-            except FalhaDeEstagio as erro:
-                # O que já foi escrito em disco continua lá; quem falha precisa dizer
-                # o que deixou para trás (A3).
-                erro.arquivos = list(persistidos)
-                raise
-            finally:
-                # No `finally` de propósito: a tentativa fica registrada mesmo quando
-                # o estágio explode, e é dela que sai a medida de entrada (A2).
-                self._registrar_tentativa(
-                    estagio=estagio,
-                    recurso=recurso,
-                    tentativa=tentativa,
-                    delta=delta,
-                    desde=marca,
-                    desde_tools=marca_tools,
-                )
-            persistidos = _unir_caminhos(persistidos, persistir(artefato))
-            resultado = avaliar(artefato)
-
-            self.registro.evento(
-                TipoDeEvento.GATE,
-                gate=f"gate_{gate}",
-                estagio=estagio,
-                recurso=recurso.nome,
-                tentativa=tentativa,
-                aprovado=resultado.aprovado,
-                violacoes=[v.model_dump() for v in resultado.violacoes],
-                avisos=[v.model_dump() for v in resultado.avisos],
-            )
-            for aviso in resultado.avisos:
-                self.registro.aviso(aviso.render())
-
-            if resultado.aprovado:
-                self.registro.ok(
-                    f"gate_{gate} aprovou {recurso.nome} na tentativa {tentativa}/{maximo}"
-                )
-                return artefato, resultado, tentativa
-
-            self.registro.falha(
-                f"gate_{gate} reprovou {recurso.nome} na tentativa {tentativa}/{maximo}: "
-                f"{len(resultado.violacoes)} violação(ões) "
-                f"[{', '.join(sorted({v.codigo for v in resultado.violacoes}))}]"
-            )
-            for violacao in resultado.violacoes[:10]:
-                self.registro.info(f"    {violacao.render()}")
-
-            delta = Delta(
-                estagio=_ESTAGIO_DO_GATE[gate],
-                recurso=recurso.nome,
-                violacoes=resultado.violacoes,
-                tentativa=tentativa,
-            )
-            # O delta entra na projeção do artefato: é ele que diz quais arquivos e
-            # quais linhas precisam estar à vista. Ver `llm.montagem`.
-            artefato_atual = texto_do_artefato(artefato, delta)
-            self.registro.evento(
-                TipoDeEvento.DELTA,
-                estagio=f"gate_{gate}",
-                de=estagio,
-                recurso=recurso.nome,
-                tentativa=tentativa,
-                codigos=[v.codigo for v in resultado.violacoes],
-                bytes_do_artefato=len(artefato_atual),
-            )
-
-        violacoes = list(resultado.violacoes) if resultado else []
-        codigos = sorted({v.codigo for v in violacoes})
-        raise FalhaDeGate(
-            f"gate_{gate} reprovou o recurso {recurso.nome!r} em {maximo} tentativa(s). "
-            f"Códigos remanescentes: {', '.join(codigos) or '(nenhum)'}",
-            arquivos=persistidos,
-            violacoes=violacoes,
-        )
-
-    def _registrar_tentativa(
-        self,
-        *,
-        estagio: str,
-        recurso: Recurso,
-        tentativa: int,
-        delta: Delta | None,
-        desde: int,
-        desde_tools: int = 0,
-    ) -> None:
-        """Evento `estagio_tentativa` com o que foi efetivamente enviado ao modelo.
-
-        Os tamanhos vêm das chamadas registradas durante esta tentativa: a
-        instrução fixa (constante, linha de base) e a entrada. É o par que torna o
-        princípio 2 verificável a partir do log, sem reexecutar nada.
-
-        O resumo de tools responde a outra pergunta, do mesmo log: a exploração
-        seguiu a instrução do estágio? `primeira_tool` é o teste mais direto — a
-        instrução manda consultar o grafo antes de procurar no backend, então
-        qualquer coisa diferente de `graphify_query` aqui é desvio.
-        """
-        chamadas = self.telemetria.chamadas[desde:]
-        tools = self.telemetria.tools[desde_tools:]
-        por_nome: dict[str, int] = {}
-        for tool in tools:
-            por_nome[tool.nome] = por_nome.get(tool.nome, 0) + 1
-        self.registro.evento(
-            TipoDeEvento.ESTAGIO_TENTATIVA,
-            estagio=estagio,
-            recurso=recurso.nome,
-            tentativa=tentativa,
-            com_delta=delta is not None,
-            violacoes_no_delta=[v.codigo for v in delta.violacoes] if delta else [],
-            chamadas=len(chamadas),
-            caracteres_instrucao=max((c.caracteres_instrucao for c in chamadas), default=0),
-            caracteres_entrada=sum(c.caracteres_entrada for c in chamadas),
-            tools=len(tools),
-            tools_por_nome=por_nome,
-            caracteres_de_tools=sum(tool.caracteres for tool in tools),
-            tools_com_erro=sum(tool.erro for tool in tools),
-            primeira_tool=tools[0].nome if tools else None,
-        )
 
     # -- orquestração -------------------------------------------------------
 
@@ -818,7 +511,7 @@ class Pipeline:
 
     def _rodar_recurso(self, recurso: Recurso) -> ResultadoDoRecurso:
         resultado = ResultadoDoRecurso(recurso=recurso.nome)
-        self._divergencias = []
+        self.persistencia.iniciar_recurso()
         area = criar_area(
             recurso=recurso.nome,
             destino_recurso=recurso.caminho_testes,
@@ -839,13 +532,14 @@ class Pipeline:
 
             # Só aqui o projeto do consumidor é tocado. Antes desta linha, uma queda
             # em qualquer ponto o deixa exatamente como estava.
-            self._publicar(recurso, area, resultado)
+            resultado.diario = self.persistencia.publicar(recurso, area)
+            resultado.publicado = True
 
             execucao_de_testes = self.bloco3(recurso)
             resultado.cobertura = execucao_de_testes.contadores
             resultado.execucao_de_testes = execucao_de_testes.estado
             resultado.motivo_da_execucao_de_testes = execucao_de_testes.motivo
-            resultado.divergencias = list(self._divergencias)
+            resultado.divergencias = list(self.persistencia.divergencias)
             resultado.estado = (
                 EstadoDoRecurso.REQUER_REVISAO
                 if resultado.divergencias
@@ -858,7 +552,7 @@ class Pipeline:
             resultado.motivo = str(erro)
             resultado.arquivos_reprovados = list(erro.arquivos)
             resultado.codigos_remanescentes = erro.codigos
-            resultado.divergencias = list(self._divergencias)
+            resultado.divergencias = list(self.persistencia.divergencias)
             self.registro.falha(str(erro))
             self.registro.evento(
                 TipoDeEvento.RECURSO_FALHOU, recurso=recurso.nome, motivo=str(erro)
@@ -900,75 +594,3 @@ class Pipeline:
             execucao_de_testes=resultado.execucao_de_testes,
         )
         return resultado
-
-    def _publicar(
-        self, recurso: Recurso, area: AreaDeStaging, resultado: ResultadoDoRecurso
-    ) -> None:
-        """Leva o staging aprovado para o projeto do consumidor e registra o diário."""
-        anteriores = [
-            entrada
-            for entrada in self.diario.carregar().entradas
-            if entrada.recurso == recurso.nome
-            and entrada.classificacao is Classificacao.CRIADO
-            and sob_a_raiz(entrada.destino, recurso.caminho_testes)
-        ]
-
-        entradas = area.publicar()
-        resultado.diario = entradas
-        resultado.publicado = True
-
-        publicados = {entrada.destino for entrada in entradas}
-        obsoletos = [entrada for entrada in anteriores if entrada.destino not in publicados]
-        removidos, recusados = remover_criados(obsoletos, sob=recurso.caminho_testes)
-
-        self.diario.registrar(entradas, esquecer=set(removidos))
-        self.registro.evento(
-            TipoDeEvento.PUBLICACAO,
-            recurso=recurso.nome,
-            arquivos=[
-                {
-                    "destino": str(entrada.destino),
-                    "classificacao": entrada.classificacao.value,
-                    "hash_anterior": entrada.hash_anterior,
-                    "hash_novo": entrada.hash_novo,
-                }
-                for entrada in entradas
-            ],
-            obsoletos_removidos=[str(caminho) for caminho in removidos],
-            obsoletos_mantidos=[str(caminho) for caminho in recusados],
-        )
-        criados = sum(1 for e in entradas if e.classificacao is Classificacao.CRIADO)
-        modificados = sum(1 for e in entradas if e.classificacao is Classificacao.MODIFICADO)
-        self.registro.ok(
-            f"{recurso.nome} publicado: {criados} arquivo(s) criado(s), "
-            f"{modificados} modificado(s), {len(removidos)} obsoleto(s) removido(s)"
-        )
-        if recusados:
-            # Spec que nasceu conosco e alguém editou depois. Não é nosso para
-            # apagar, e o silêncio faria parecer que a limpeza foi completa.
-            self.registro.aviso(
-                f"{len(recusados)} arquivo(s) que criamos em execução anterior "
-                "mudaram desde então e NÃO foram removidos: "
-                + ", ".join(str(caminho) for caminho in recusados)
-            )
-        for divergencia in self._divergencias:
-            self.registro.aviso(divergencia.render())
-        if self._divergencias:
-            destino = self.dir_execucao / "artefatos" / recurso.nome / "divergencias-de-schema.json"
-            destino.parent.mkdir(parents=True, exist_ok=True)
-            destino.write_text(
-                json.dumps(
-                    [d.model_dump(mode="json") for d in self._divergencias],
-                    ensure_ascii=False,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-                newline="\n",
-            )
-            self.registro.evento(
-                TipoDeEvento.SCHEMAS_DIVERGENTES,
-                recurso=recurso.nome,
-                artefato=destino,
-                divergencias=[d.model_dump(mode="json") for d in self._divergencias],
-            )

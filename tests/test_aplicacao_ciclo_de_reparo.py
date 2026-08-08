@@ -3,6 +3,11 @@
 Gera → persiste → avalia → (delta → repete), com limite de tentativas. Os testes
 usam produtores e gates falsos: o que está sob teste é o laço, não os scripts.
 
+Desde que o laço saiu do `Pipeline`, quase todos constroem só o `CicloDeReparo` —
+sem staging, sem Cypress, sem diário. O último constrói o pipeline inteiro de
+propósito: o que ele prova é a **ligação**, que o limite vindo da CLI chega até
+aqui.
+
 A última seção guarda o número que dá corda no laço. `max_tentativas` é a única
 configuração que decide **quantas vezes** um estágio roda: em zero o loop não
 executa nenhuma tentativa e o gate reprova sem nunca ter avaliado nada, e a CLI
@@ -17,26 +22,22 @@ import pytest
 from pydantic import ValidationError
 
 from orquestrador import cli as modulo_cli
+from orquestrador.aplicacao.ciclo_de_reparo import CicloDeReparo
+from orquestrador.aplicacao.pipeline import Pipeline
 from orquestrador.config import ConfigGate
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import Delta, ResultadoGate, Violacao
 from orquestrador.excecoes import ErroDeConfiguracao, FalhaDeGate
 from orquestrador.observabilidade.registro import Registro
-from orquestrador.pipeline import Pipeline
+from orquestrador.observabilidade.telemetria import Telemetria
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def pipeline(config_falso, tmp_path: Path) -> Pipeline:
+def ciclo(config_falso, tmp_path: Path) -> CicloDeReparo:
     registro = Registro(tmp_path / "execucao.jsonl")
-    return Pipeline(
-        config_falso,
-        registro,
-        dry_run=True,
-        roteiros=None,
-        dir_execucao=tmp_path / "execucao",
-    )
+    return CicloDeReparo(config_falso, registro, Telemetria(registro))
 
 
 def recurso_de(config) -> Recurso:
@@ -53,13 +54,13 @@ def reprovado(*codigos: str) -> ResultadoGate:
     )
 
 
-def test_aprova_de_primeira_nao_monta_delta(pipeline: Pipeline):
+def test_aprova_de_primeira_nao_monta_delta(ciclo: CicloDeReparo, config_falso):
     recebidos: list[Delta | None] = []
 
-    artefato, resultado, tentativas = pipeline._ciclo(
+    artefato, resultado, tentativas = ciclo.executar(
         estagio="mapeador",
         gate="a",
-        recurso=recurso_de(pipeline.config),
+        recurso=recurso_de(config_falso),
         produzir=lambda numero, delta, atual: recebidos.append(delta) or "artefato",
         persistir=lambda _artefato: [],
         avaliar=lambda _artefato: ResultadoGate.aprovado_por(),
@@ -70,7 +71,7 @@ def test_aprova_de_primeira_nao_monta_delta(pipeline: Pipeline):
     assert recebidos == [None]
 
 
-def test_reprova_uma_vez_e_repara_com_o_delta(pipeline: Pipeline):
+def test_reprova_uma_vez_e_repara_com_o_delta(ciclo: CicloDeReparo, config_falso):
     recebidos: list[tuple[Delta | None, str | None]] = []
     vereditos = [reprovado("QAAPI-021", "QAAPI-022"), ResultadoGate.aprovado_por()]
 
@@ -78,10 +79,10 @@ def test_reprova_uma_vez_e_repara_com_o_delta(pipeline: Pipeline):
         recebidos.append((delta, atual))
         return f"artefato-{numero}"
 
-    _artefato, _resultado, tentativas = pipeline._ciclo(
+    _artefato, _resultado, tentativas = ciclo.executar(
         estagio="mapeador",
         gate="a",
-        recurso=recurso_de(pipeline.config),
+        recurso=recurso_de(config_falso),
         produzir=produzir,
         persistir=lambda _artefato: [],
         avaliar=lambda _artefato: vereditos.pop(0),
@@ -101,13 +102,15 @@ def test_reprova_uma_vez_e_repara_com_o_delta(pipeline: Pipeline):
     assert artefato_atual == "texto de artefato-1"
 
 
-def test_esgotar_as_tentativas_falha_com_os_codigos_remanescentes(pipeline: Pipeline):
+def test_esgotar_as_tentativas_falha_com_os_codigos_remanescentes(
+    ciclo: CicloDeReparo, config_falso
+):
     # gate "b" está configurado com max_tentativas = 2 no config_falso.
     with pytest.raises(FalhaDeGate) as erro:
-        pipeline._ciclo(
+        ciclo.executar(
             estagio="executor",
             gate="b",
-            recurso=recurso_de(pipeline.config),
+            recurso=recurso_de(config_falso),
             produzir=lambda numero, delta, atual: "artefato",
             persistir=lambda _artefato: [],
             avaliar=lambda _artefato: reprovado("QAAPI-025"),
@@ -117,13 +120,13 @@ def test_esgotar_as_tentativas_falha_com_os_codigos_remanescentes(pipeline: Pipe
     assert "QAAPI-025" in str(erro.value)
 
 
-def test_o_artefato_e_persistido_antes_de_ser_avaliado(pipeline: Pipeline):
+def test_o_artefato_e_persistido_antes_de_ser_avaliado(ciclo: CicloDeReparo, config_falso):
     # Princípio 1: o gate lê o disco, não o objeto em memória.
     ordem: list[str] = []
-    pipeline._ciclo(
+    ciclo.executar(
         estagio="executor",
         gate="b",
-        recurso=recurso_de(pipeline.config),
+        recurso=recurso_de(config_falso),
         produzir=lambda numero, delta, atual: ordem.append("produzir") or "a",
         persistir=lambda _artefato: ordem.append("persistir") or [],
         avaliar=lambda _artefato: ordem.append("avaliar") or ResultadoGate.aprovado_por(),
@@ -132,14 +135,14 @@ def test_o_artefato_e_persistido_antes_de_ser_avaliado(pipeline: Pipeline):
     assert ordem == ["produzir", "persistir", "avaliar"]
 
 
-def test_cada_tentativa_recebe_apenas_o_delta_mais_recente(pipeline: Pipeline):
+def test_cada_tentativa_recebe_apenas_o_delta_mais_recente(ciclo: CicloDeReparo, config_falso):
     deltas: list[Delta | None] = []
     vereditos = [reprovado("QAAPI-021"), reprovado("QAAPI-022"), ResultadoGate.aprovado_por()]
 
-    pipeline._ciclo(
+    ciclo.executar(
         estagio="mapeador",
         gate="a",
-        recurso=recurso_de(pipeline.config),
+        recurso=recurso_de(config_falso),
         produzir=lambda numero, delta, atual: deltas.append(delta) or "a",
         persistir=lambda _artefato: [],
         avaliar=lambda _artefato: vereditos.pop(0),
@@ -208,7 +211,7 @@ def test_o_limite_da_cli_chega_ao_ciclo(config_falso, tmp_path: Path):
     )
 
     with pytest.raises(FalhaDeGate, match=r"1 tentativa\(s\)"):
-        pipeline._ciclo(
+        pipeline.ciclo.executar(
             estagio="executor",
             gate="b",
             recurso=recurso_de(pipeline.config),

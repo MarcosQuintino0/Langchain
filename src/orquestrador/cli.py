@@ -33,6 +33,8 @@ from rich.markup import escape
 from rich.table import Table
 
 from orquestrador.analise_estatica import extrator_de_superficie
+from orquestrador.aplicacao.pipeline import NAO_EXECUTADO, Pipeline, ResultadoDoRecurso
+from orquestrador.aplicacao.simulacao import Roteiros, preparar_sandbox
 from orquestrador.config import Config
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import EstadoDoRecurso
@@ -52,7 +54,6 @@ from orquestrador.observabilidade.registro import (
     configurar_console,
     diretorio_de_execucao,
 )
-from orquestrador.pipeline import NAO_EXECUTADO, Pipeline, ResultadoDoRecurso
 from orquestrador.raiz import (
     ARQUIVO_ENV,
     ARVORE_DE_FONTES,
@@ -61,7 +62,6 @@ from orquestrador.raiz import (
     DIR_PROMPTS_PADRAO,
     RAIZ_PROJETO,
 )
-from orquestrador.simulacao import Roteiros, preparar_sandbox
 
 # Códigos de saída. `2` cobre tudo que é erro do operador ou indisponibilidade da
 # ferramenta — configuração inválida, invocação impossível, comando que ainda não

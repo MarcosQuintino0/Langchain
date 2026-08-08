@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 from orquestrador import cli as modulo_cli
+from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.raiz import DIR_FIXTURES, RAIZ_PROJETO
-from orquestrador.simulacao import Roteiros
 
 # A raiz do projeto vem do módulo único que a resolve (nada de Path(__file__) aqui).
 RAIZ = RAIZ_PROJETO

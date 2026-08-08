@@ -17,6 +17,12 @@ import pytest
 from rich.console import Console
 
 from orquestrador import cli as modulo_cli
+from orquestrador.aplicacao.pipeline import (
+    NAO_EXECUTADO,
+    Pipeline,
+    ResultadoDaExecucaoDeTestes,
+    ResultadoDoRecurso,
+)
 from orquestrador.dominio.propriedade import Classificacao, DivergenciaDeSchema, EntradaDoDiario
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import EstadoDoRecurso, ResultadoGate
@@ -28,12 +34,6 @@ from orquestrador.ferramentas.publicacao import (
     remover_criados,
 )
 from orquestrador.observabilidade.registro import Registro
-from orquestrador.pipeline import (
-    NAO_EXECUTADO,
-    Pipeline,
-    ResultadoDaExecucaoDeTestes,
-    ResultadoDoRecurso,
-)
 
 pytestmark = pytest.mark.unit
 
@@ -463,7 +463,7 @@ def test_spec_obsoleto_editado_pelo_dono_nao_e_removido(pipeline, recurso, monke
 def test_divergencia_de_schema_encerra_em_requer_revisao(pipeline, recurso, monkeypatch):
     def bloco1(_recurso, area):
         area.escrever("_support/cobertura.json", "{}\n")
-        pipeline._divergencias.append(
+        pipeline.persistencia.divergencias.append(
             DivergenciaDeSchema(
                 recurso="pedidos",
                 arquivo=recurso.caminho_schemas / "pedidos" / "entidade.schema.json",

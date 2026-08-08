@@ -14,14 +14,15 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
+from orquestrador.aplicacao.persistencia import nomes_de_campos
+from orquestrador.aplicacao.pipeline import Pipeline
+from orquestrador.aplicacao.simulacao import ModeloSimulado, PassoFinal
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import FalhaDeGate
 from orquestrador.ferramentas.publicacao import AreaDeStaging, criar_area
 from orquestrador.gates import gate_a
 from orquestrador.observabilidade.registro import Registro
-from orquestrador.pipeline import Pipeline, nomes_de_campos
-from orquestrador.simulacao import ModeloSimulado, PassoFinal
 
 pytestmark = pytest.mark.unit
 
@@ -251,10 +252,10 @@ def test_divergencia_com_o_schema_preservado_e_registrada(pipeline, recurso, are
     )
     monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: ResultadoGate.aprovado_por())
 
-    pipeline._divergencias = []
+    pipeline.persistencia.divergencias = []
     pipeline.bloco1(recurso, area)
 
-    assert [d.campos_ausentes for d in pipeline._divergencias] == [["total"]], (
+    assert [d.campos_ausentes for d in pipeline.persistencia.divergencias] == [["total"]], (
         "campo achado no backend e ausente do schema do cliente sai do denominador "
         "sem deixar rastro — precisa virar diff, não só aviso"
     )

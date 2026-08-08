@@ -30,6 +30,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, ConfigDict
 
+from orquestrador.aplicacao.pipeline import InterrupcaoDaExecucao
 from orquestrador.config import Config, ConfigEstagio, ModoEstruturado
 from orquestrador.excecoes import (
     CategoriaDeProvedor,
@@ -49,7 +50,6 @@ from orquestrador.llm.cliente import (
 )
 from orquestrador.llm.estruturado import GeradorEstruturado
 from orquestrador.observabilidade.telemetria import Telemetria
-from orquestrador.pipeline import InterrupcaoDaExecucao
 
 pytestmark = pytest.mark.unit
 

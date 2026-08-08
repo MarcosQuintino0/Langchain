@@ -56,13 +56,8 @@ Escolha o diretório pelo **único motivo dominante de mudança**:
 | `observabilidade/` | eventos e métricas | nunca decide fluxo |
 | `analise_estatica/` | lê código-fonte sem executar | não abre subprocesso nem fala com a rede |
 | `dominio/` | contratos e regras puras | não abre, não lê, não escreve, não lista e não resolve caminho; não roda subprocesso; não importa outro subpacote. `Path` entra só como valor |
-| ★ `aplicacao/` | coordena estágios e persistência | não parseia saída de ferramenta |
-| raiz do pacote | **lista fechada**: `cli.py`, `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py`, e — até a Etapa 6 — `pipeline.py`, `simulacao.py` | não recebe arquivo novo |
-
-★ ainda não existe — é a Etapa 6 de
-[`docs/plano-de-execucao.md`](docs/plano-de-execucao.md). Não a crie por conta
-própria numa tarefa que não seja essa. Até lá, coordenação fica em `pipeline.py`,
-na raiz.
+| `aplicacao/` | coordena estágios e persistência | não parseia saída de ferramenta, não decide aprovação |
+| raiz do pacote | **lista fechada**: `cli.py`, `config.py`, `excecoes.py`, `raiz.py`, `__init__.py`, `__main__.py` | não recebe arquivo novo |
 
 **Sobre o `Path` em `dominio/`.** A regra é sobre **acesso**, não sobre o tipo.
 `Recurso.caminho_testes` é álgebra de caminho e `EntradaDoDiario.destino` é chave

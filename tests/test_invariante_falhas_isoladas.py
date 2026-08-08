@@ -24,6 +24,14 @@ from rich.console import Console
 
 from orquestrador import cli as modulo_cli
 from orquestrador.agentes import mapeador as agente_mapeador
+from orquestrador.aplicacao.pipeline import (
+    EXECUTADO,
+    InterrupcaoDaExecucao,
+    Pipeline,
+    ResultadoDaExecucaoDeTestes,
+    ResultadoDoRecurso,
+)
+from orquestrador.aplicacao.simulacao import ModeloSimulado, PassoDeTool, PassoDoRoteiro
 from orquestrador.cli import avisar_reprovados
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import EstadoDoRecurso, ResultadoGate, Violacao
@@ -40,14 +48,6 @@ from orquestrador.ferramentas.graphify import ResultadoPreparacao
 from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS, SaidaProcesso
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria
-from orquestrador.pipeline import (
-    EXECUTADO,
-    InterrupcaoDaExecucao,
-    Pipeline,
-    ResultadoDaExecucaoDeTestes,
-    ResultadoDoRecurso,
-)
-from orquestrador.simulacao import ModeloSimulado, PassoDeTool, PassoDoRoteiro
 
 pytestmark = pytest.mark.unit
 
@@ -157,7 +157,7 @@ def test_recurso_que_falha_nao_derruba_os_seguintes(pipeline: Pipeline, monkeypa
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
-    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.persistencia, "publicar", lambda *_a, **_k: [])
     monkeypatch.setattr(pipeline, "bloco3", lambda _recurso: execucao_de_testes_falsa())
 
     resultados = pipeline.rodar(
@@ -194,7 +194,7 @@ def test_ferramenta_indisponivel_interrompe_sem_perder_o_que_terminou(
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
-    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.persistencia, "publicar", lambda *_a, **_k: [])
     monkeypatch.setattr(pipeline, "bloco3", lambda _r: execucao_de_testes_falsa())
 
     resultados = pipeline.rodar(
@@ -235,7 +235,7 @@ def test_falha_de_gate_carrega_os_arquivos_persistidos(pipeline: Pipeline, tmp_p
     escrito.write_text("{}", encoding="utf-8")
 
     with pytest.raises(FalhaDeGate) as erro:
-        pipeline._ciclo(
+        pipeline.ciclo.executar(
             estagio="executor",
             gate="b",
             recurso=recurso_de(pipeline.config),
@@ -348,7 +348,7 @@ def test_bloco0_aprovado_segue_para_os_recursos(pipeline: Pipeline, monkeypatch)
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
-    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.persistencia, "publicar", lambda *_a, **_k: [])
     monkeypatch.setattr(pipeline, "bloco3", lambda _r: execucao_de_testes_falsa())
 
     assert [r.sucesso for r in pipeline.rodar([recurso_de(pipeline.config)])] == [True]
@@ -389,7 +389,7 @@ def cypress_falso(pipeline: Pipeline, monkeypatch, *, codigo: int, escreve: bool
             )
 
     monkeypatch.setattr(processo, "executar", rodar)
-    monkeypatch.setattr("orquestrador.pipeline.Cobertura", CoberturaFalsa)
+    monkeypatch.setattr("orquestrador.aplicacao.pipeline.Cobertura", CoberturaFalsa)
     pipeline.pular_cypress = False
     pipeline.config.execucao.cypress = ["cypress", "run", "{relatorio}"]
     return SimpleNamespace(relatorios=recebidos, invocacoes=invocacoes)
@@ -470,7 +470,7 @@ def test_recurso_que_nao_rodou_cypress_nao_finge_ter_rodado(pipeline: Pipeline, 
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
-    monkeypatch.setattr(pipeline, "_publicar", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.persistencia, "publicar", lambda *_a, **_k: [])
     cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
     pipeline.pular_cypress = True
 
