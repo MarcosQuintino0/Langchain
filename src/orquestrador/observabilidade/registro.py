@@ -11,7 +11,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +49,7 @@ class Registro:
 
     def evento(self, tipo: str, **campos: Any) -> None:
         linha = {
-            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "t_s": round(time.perf_counter() - self.inicio, 3),
             "tipo": tipo,
             **{chave: dados_para_log(valor) for chave, valor in campos.items()},
@@ -83,7 +83,7 @@ class Registro:
         if not self._fluxo.closed:
             self._fluxo.close()
 
-    def __enter__(self) -> "Registro":
+    def __enter__(self) -> Registro:
         return self
 
     def __exit__(self, *_excecao: object) -> None:

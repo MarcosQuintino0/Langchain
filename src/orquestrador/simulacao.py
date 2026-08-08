@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
@@ -61,7 +62,7 @@ class ModeloSimulado(BaseChatModel):
     def _llm_type(self) -> str:
         return "simulado"
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "ModeloSimulado":  # noqa: ARG002
+    def bind_tools(self, tools: Any, **kwargs: Any) -> ModeloSimulado:  # noqa: ARG002
         # O roteiro é fixo; as tools existem para o grafo do LangGraph poder
         # executá-las quando o roteiro pedir.
         return self
@@ -95,9 +96,7 @@ class ModeloSimulado(BaseChatModel):
             )
         else:
             conteudo = _conteudo_final(passo)
-            mensagem = AIMessage(
-                content=conteudo, usage_metadata=_uso(entrada, len(conteudo))
-            )
+            mensagem = AIMessage(content=conteudo, usage_metadata=_uso(entrada, len(conteudo)))
 
         return ChatResult(generations=[ChatGeneration(message=mensagem)])
 
@@ -166,7 +165,7 @@ class Roteiros:
 # ---------------------------------------------------------------------------
 
 
-def preparar_sandbox(config: "Config", destino: Path) -> "Config":
+def preparar_sandbox(config: Config, destino: Path) -> Config:
     """Copia o projeto e o backend de fixture para uma sandbox e reaponta a config.
 
     O dry-run escreve arquivos de verdade e roda os gates de verdade sobre eles;
@@ -175,14 +174,12 @@ def preparar_sandbox(config: "Config", destino: Path) -> "Config":
     """
     projeto = destino / "projeto-testes"
     backend = destino / "backend"
-    shutil.copytree(DIR_FIXTURES /"projeto-testes", projeto, dirs_exist_ok=True)
-    shutil.copytree(DIR_FIXTURES /"backend", backend, dirs_exist_ok=True)
+    shutil.copytree(DIR_FIXTURES / "projeto-testes", projeto, dirs_exist_ok=True)
+    shutil.copytree(DIR_FIXTURES / "backend", backend, dirs_exist_ok=True)
 
     grafo = projeto / config.caminhos.graph
     grafo.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(DIR_FIXTURES /"graphify-out" / "graph.json", grafo)
+    shutil.copyfile(DIR_FIXTURES / "graphify-out" / "graph.json", grafo)
 
-    caminhos = config.caminhos.model_copy(
-        update={"projeto_testes": projeto, "backend": backend}
-    )
+    caminhos = config.caminhos.model_copy(update={"projeto_testes": projeto, "backend": backend})
     return config.model_copy(update={"caminhos": caminhos})

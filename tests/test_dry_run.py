@@ -38,9 +38,7 @@ def _skill_configurada() -> Path:
 
 SKILL = _skill_configurada()
 
-precisa_de_node = pytest.mark.skipif(
-    shutil.which("node") is None, reason="Node não está no PATH"
-)
+precisa_de_node = pytest.mark.skipif(shutil.which("node") is None, reason="Node não está no PATH")
 precisa_da_skill = pytest.mark.skipif(
     not (SKILL / "scripts" / "validar-suite-gerada.mjs").is_file(),
     reason=f"skill qa-api não encontrada em {SKILL}",
@@ -84,9 +82,7 @@ def ultima_execucao(base: Path) -> Path:
 @precisa_de_node
 @precisa_da_skill
 def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path: Path):
-    codigo = modulo_cli.main(
-        ["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]
-    )
+    codigo = modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)])
     assert codigo == 0
 
     execucao = ultima_execucao(tmp_path / "execucoes")
@@ -130,12 +126,7 @@ def test_o_reparo_nao_cresce_o_contexto(config_toml: Path, tmp_path: Path):
     # A prova prática do princípio 2: a tentativa de reparo do mapeador entra com
     # MENOS tokens que a primeira, porque recebe só o artefato e as violações —
     # não a exploração inteira que a antecedeu.
-    assert (
-        modulo_cli.main(
-            ["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]
-        )
-        == 0
-    )
+    assert modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]) == 0
     execucao = ultima_execucao(tmp_path / "execucoes")
     chamadas = [
         json.loads(linha)
@@ -151,9 +142,7 @@ def test_o_reparo_nao_cresce_o_contexto(config_toml: Path, tmp_path: Path):
 def test_artefatos_ficam_em_disco(config_toml: Path, tmp_path: Path):
     modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)])
     execucao = ultima_execucao(tmp_path / "execucoes")
-    recurso = (
-        execucao / "sandbox" / "projeto-testes" / "cypress" / "e2e" / "apis" / "pedidos"
-    )
+    recurso = execucao / "sandbox" / "projeto-testes" / "cypress" / "e2e" / "apis" / "pedidos"
 
     manifesto = json.loads((recurso / "_support" / "cobertura.json").read_text("utf-8"))
     assert manifesto["recurso"] == "pedidos"

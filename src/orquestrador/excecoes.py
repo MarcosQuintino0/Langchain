@@ -22,8 +22,9 @@ silencioso, então quem falha diz o que deixou para trás.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # evita ciclo de import em tempo de execução
     from orquestrador.contratos import Violacao
@@ -77,7 +78,7 @@ class FalhaComArtefatos(RuntimeError):
         mensagem: str,
         *,
         arquivos: Iterable[Path] | None = None,
-        violacoes: "Iterable[Violacao] | None" = None,
+        violacoes: Iterable[Violacao] | None = None,
     ) -> None:
         super().__init__(mensagem)
         self.arquivos: list[Path] = list(arquivos or ())

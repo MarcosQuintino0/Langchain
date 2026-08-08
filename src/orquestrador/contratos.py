@@ -82,9 +82,14 @@ _SLUG_DE_RECURSO = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 # para o dispositivo, com ou sem extensão e sem diferenciar caixa. O erro que sai
 # disso não menciona recurso, diretório nem orquestrador.
 DISPOSITIVOS_RESERVADOS_DO_WINDOWS: frozenset[str] = frozenset(
-    ("CON", "PRN", "AUX", "NUL")
-    + tuple(f"COM{indice}" for indice in range(1, 10))
-    + tuple(f"LPT{indice}" for indice in range(1, 10))
+    (
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{indice}" for indice in range(1, 10)),
+        *(f"LPT{indice}" for indice in range(1, 10)),
+    )
 )
 
 
@@ -185,13 +190,11 @@ class ResultadoGate(BaseModel):
         aprovado = campos.pop("aprovado")
         if "veredito" in campos:
             raise ValueError("informe `aprovado` ou `veredito`, nunca os dois")
-        campos["veredito"] = (
-            VereditoDeGate.APROVADO if aprovado else VereditoDeGate.REPROVADO
-        )
+        campos["veredito"] = VereditoDeGate.APROVADO if aprovado else VereditoDeGate.REPROVADO
         return campos
 
     @model_validator(mode="after")
-    def _veredito_coerente(self) -> "ResultadoGate":
+    def _veredito_coerente(self) -> ResultadoGate:
         if self.veredito is VereditoDeGate.APROVADO and self.violacoes:
             raise ValueError(
                 "resultado aprovado com violação é contradição: "
@@ -215,9 +218,7 @@ class ResultadoGate(BaseModel):
         return [violacao.codigo for violacao in self.violacoes]
 
     @classmethod
-    def erro_da_ferramenta(
-        cls, motivo: str, *, gate: str, saida_bruta: str = ""
-    ) -> "ResultadoGate":
+    def erro_da_ferramenta(cls, motivo: str, *, gate: str, saida_bruta: str = "") -> ResultadoGate:
         """Checagem que não pôde ser feita — indisponibilidade, não veredito."""
         return cls(
             veredito=VereditoDeGate.ERRO_DA_FERRAMENTA,
@@ -227,7 +228,7 @@ class ResultadoGate(BaseModel):
         )
 
     @classmethod
-    def combinar(cls, partes: list["ResultadoGate"], *, gate: str) -> "ResultadoGate":
+    def combinar(cls, partes: list[ResultadoGate], *, gate: str) -> ResultadoGate:
         """Une os vereditos das checagens de um mesmo gate (todas precisam passar).
 
         Aprovar por ausência de violação é o defeito que esta função já teve: uma
@@ -264,7 +265,7 @@ class ResultadoGate(BaseModel):
             gate=gate,
         )
 
-    def exigir_veredito(self) -> "ResultadoGate":
+    def exigir_veredito(self) -> ResultadoGate:
         """Devolve o resultado, ou interrompe se não houver veredito sobre o artefato.
 
         É aqui que o terceiro estado sai do vocabulário dos gates e vira interrupção.
@@ -274,9 +275,7 @@ class ResultadoGate(BaseModel):
         """
         if self.veredito is not VereditoDeGate.ERRO_DA_FERRAMENTA:
             return self
-        raise ErroDeFerramenta(
-            f"{self.gate or 'gate'} não pôde emitir veredito: {self.motivo}"
-        )
+        raise ErroDeFerramenta(f"{self.gate or 'gate'} não pôde emitir veredito: {self.motivo}")
 
 
 EstagioDelta = Literal["gate_a", "gate_b", "schema"]
@@ -367,9 +366,7 @@ class Endpoint(BaseModel):
     def _rota_completa(cls, valor: str) -> str:
         rota = str(valor).strip()
         if not rota.startswith("/"):
-            raise ValueError(
-                f"rota deve ser o caminho completo começando em '/': {valor!r}"
-            )
+            raise ValueError(f"rota deve ser o caminho completo começando em '/': {valor!r}")
         return rota
 
     @property
@@ -406,7 +403,7 @@ class Inventario(BaseModel):
     rotas_dinamicas_nao_resolvidas: list[RotaDinamica] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _sem_endpoint_duplicado(self) -> "Inventario":
+    def _sem_endpoint_duplicado(self) -> Inventario:
         vistos: set[str] = set()
         for endpoint in self.endpoints:
             if endpoint.canonico in vistos:
@@ -452,14 +449,10 @@ class EndpointManifesto(BaseModel):
         # mais barato que existe — sem tirar do gate a autoridade sobre o arquivo.
         canonico = normalizar_endpoint(valor)
         if valor != canonico:
-            raise ValueError(
-                f'endpoint fora da forma canônica "{canonico}": {valor!r}'
-            )
+            raise ValueError(f'endpoint fora da forma canônica "{canonico}": {valor!r}')
         partes = canonico.split(" ", 1)
         if len(partes) != 2 or partes[0] not in METODOS_HTTP or not partes[1].startswith("/"):
-            raise ValueError(
-                f'endpoint deve ter a forma "MÉTODO /rota/completa": {valor!r}'
-            )
+            raise ValueError(f'endpoint deve ter a forma "MÉTODO /rota/completa": {valor!r}')
         return canonico
 
     @field_validator("cats")
@@ -497,7 +490,7 @@ class Manifesto(BaseModel):
     endpoints: list[EndpointManifesto] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def _endpoints_unicos(self) -> "Manifesto":
+    def _endpoints_unicos(self) -> Manifesto:
         vistos: set[str] = set()
         for item in self.endpoints:
             if item.endpoint in vistos:
@@ -573,9 +566,7 @@ class ArquivoSchema(BaseModel):
     def _relativo_e_confinado(cls, valor: str) -> str:
         caminho = _caminho_confinado(valor, base="à raiz do diretório de schemas")
         if not caminho.endswith(SUFIXO_SCHEMA):
-            raise ValueError(
-                f'schema precisa terminar em "{SUFIXO_SCHEMA}": {valor!r}'
-            )
+            raise ValueError(f'schema precisa terminar em "{SUFIXO_SCHEMA}": {valor!r}')
         return caminho
 
 
@@ -589,7 +580,7 @@ class SaidaMapeador(BaseModel):
     schemas: list[ArquivoSchema] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _mesmo_recurso(self) -> "SaidaMapeador":
+    def _mesmo_recurso(self) -> SaidaMapeador:
         if self.inventario.recurso != self.manifesto.recurso:
             raise ValueError(
                 "inventario.recurso e manifesto.recurso precisam ser o mesmo recurso: "
@@ -598,7 +589,7 @@ class SaidaMapeador(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _schemas_cobrem_o_declarado(self) -> "SaidaMapeador":
+    def _schemas_cobrem_o_declarado(self) -> SaidaMapeador:
         # Mesma lógica de `EndpointManifesto._canonico`: o Gate A já reprova o schema
         # ausente (QAAPI-027), mas recusar aqui transforma o desvio num delta de
         # schema — o reparo mais barato que existe — sem tirar do gate a autoridade
@@ -621,7 +612,7 @@ class SaidaMapeador(BaseModel):
             esperado = caminho_de_schema(endpoint.schema_entrada, recurso)
             if esperado not in emitidos:
                 raise ValueError(
-                    f'{endpoint.endpoint} declara schemaEntrada '
+                    f"{endpoint.endpoint} declara schemaEntrada "
                     f"{endpoint.schema_entrada!r} mas o schema {esperado!r} não está "
                     'em "schemas". Emita o arquivo ou remova a declaração.'
                 )
@@ -651,7 +642,7 @@ class SaidaExecutor(BaseModel):
     arquivos: list[ArquivoGerado] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def _sem_caminho_repetido(self) -> "SaidaExecutor":
+    def _sem_caminho_repetido(self) -> SaidaExecutor:
         vistos: set[str] = set()
         for arquivo in self.arquivos:
             if arquivo.caminho in vistos:
@@ -782,10 +773,8 @@ class UsoDeTokens(BaseModel):
     def total(self) -> int:
         return self.entrada + self.saida
 
-    def __add__(self, outro: "UsoDeTokens") -> "UsoDeTokens":
-        return UsoDeTokens(
-            entrada=self.entrada + outro.entrada, saida=self.saida + outro.saida
-        )
+    def __add__(self, outro: UsoDeTokens) -> UsoDeTokens:
+        return UsoDeTokens(entrada=self.entrada + outro.entrada, saida=self.saida + outro.saida)
 
 
 class RegistroDeChamada(BaseModel):

@@ -39,9 +39,7 @@ def config_falso(tmp_path: Path) -> Config:
     )
 
 
-def saida_de_processo(
-    *, codigo: int = 0, stdout: str = "", stderr: str = ""
-) -> SaidaProcesso:
+def saida_de_processo(*, codigo: int = 0, stdout: str = "", stderr: str = "") -> SaidaProcesso:
     return SaidaProcesso(
         argv=["node", "validar-suite-gerada.mjs", "recurso", "--json"],
         codigo=codigo,

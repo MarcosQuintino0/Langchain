@@ -29,8 +29,8 @@ from orquestrador.contratos import (
     SaidaMapeador,
 )
 from orquestrador.ferramentas.arquivos import (
-    Confinamento,
     CaminhoForaDaRaiz,
+    Confinamento,
     buscar,
     confinar,
     ler_arquivo,
@@ -245,8 +245,13 @@ def criar_junction(link: Path, destino: Path) -> bool:
     """
     if os.name != "nt":
         return False
-    concluido = subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(link), str(destino)],
+    # `mklink` não é executável: é builtin do `cmd.exe`, então invocá-lo por "cmd"
+    # sem caminho absoluto (S607) e abrir o subprocesso (S603) são o desenho deste
+    # helper, não descuido. A lista de argumentos é fixa, `shell=True` não aparece,
+    # e os dois caminhos vêm do `tmp_path` do próprio teste — não há entrada de
+    # terceiro para injetar. Mesmo regime documentado em ferramentas/processo.py.
+    concluido = subprocess.run(  # noqa: S603
+        ["cmd", "/c", "mklink", "/J", str(link), str(destino)],  # noqa: S607
         capture_output=True,
         text=True,
         check=False,

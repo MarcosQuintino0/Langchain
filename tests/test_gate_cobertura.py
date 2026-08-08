@@ -15,13 +15,12 @@ from pathlib import Path
 
 import pytest
 
+from conftest import saida_de_processo
 from orquestrador.contratos import Manifesto, Recurso, VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import cobertura as gate_cobertura
 from orquestrador.gates.codigos import CODIGOS_DO_ORQUESTRADOR
 from orquestrador.javascript import extrair_tags
-
-from conftest import saida_de_processo
 
 MANIFESTO = Manifesto.model_validate(
     {
@@ -80,9 +79,7 @@ def test_sem_lacuna_aprova(config_falso, recurso, monkeypatch):
     com_contadores(monkeypatch, 0)
     escrever_spec(recurso, SPEC_COMPLETO)
 
-    resultado = gate_cobertura.executar(
-        config_falso, recurso, manifesto=MANIFESTO, gate="gate_b"
-    )
+    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado is not None
     assert resultado.aprovado is True
@@ -92,9 +89,7 @@ def test_lacuna_reprova_e_nomeia_a_categoria(config_falso, recurso, monkeypatch)
     com_contadores(monkeypatch, 1)
     escrever_spec(recurso, SPEC_COM_LACUNA)
 
-    resultado = gate_cobertura.executar(
-        config_falso, recurso, manifesto=MANIFESTO, gate="gate_b"
-    )
+    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.aprovado is False
     assert resultado.codigos == ["QAORQ-030"]
@@ -111,9 +106,7 @@ def test_contagem_divergente_descarta_o_detalhe(config_falso, recurso, monkeypat
     com_contadores(monkeypatch, 2)
     escrever_spec(recurso, SPEC_COM_LACUNA)
 
-    resultado = gate_cobertura.executar(
-        config_falso, recurso, manifesto=MANIFESTO, gate="gate_b"
-    )
+    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.aprovado is False
     assert len(resultado.violacoes) == 1
@@ -127,12 +120,10 @@ def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(config_falso, recurso,
     com_contadores(monkeypatch, 1)
     escrever_spec(
         recurso,
-        SPEC_COM_LACUNA + '\n// @endpoint POST /pedidos @cat ${cenario.cat}\n',
+        SPEC_COM_LACUNA + "\n// @endpoint POST /pedidos @cat ${cenario.cat}\n",
     )
 
-    resultado = gate_cobertura.executar(
-        config_falso, recurso, manifesto=MANIFESTO, gate="gate_b"
-    )
+    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.aprovado is False
     assert "1 categoria(s)" in resultado.violacoes[0].mensagem
@@ -146,9 +137,7 @@ def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, monkeypatch)
     com_contadores(monkeypatch, 0, json_valido=False)
     escrever_spec(recurso, SPEC_COMPLETO)
 
-    resultado = gate_cobertura.executar(
-        config_falso, recurso, manifesto=MANIFESTO, gate="gate_b"
-    )
+    resultado = gate_cobertura.executar(config_falso, recurso, manifesto=MANIFESTO, gate="gate_b")
 
     assert resultado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
     assert resultado.aprovado is False

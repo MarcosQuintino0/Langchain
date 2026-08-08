@@ -24,13 +24,13 @@ from orquestrador.contratos import (
 )
 from orquestrador.ferramentas.arquivos import confinar
 from orquestrador.llm.estruturado import GeradorEstruturado
-from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.montagem import (
     carregar_prompt,
     esquema_json,
     montar_entrada_inicial,
     montar_entrada_reparo,
 )
+from orquestrador.observabilidade.telemetria import Telemetria
 
 ESTAGIO = "executor"
 
@@ -136,11 +136,7 @@ def artefato_em_disco(recurso: Recurso, saida: SaidaExecutor, *, limite: int = 6
     partes: list[str] = []
     for arquivo in saida.arquivos:
         caminho = recurso.caminho_testes / arquivo.caminho
-        conteudo = (
-            caminho.read_text(encoding="utf-8")
-            if caminho.is_file()
-            else arquivo.conteudo
-        )
+        conteudo = caminho.read_text(encoding="utf-8") if caminho.is_file() else arquivo.conteudo
         partes.append(f"--- {arquivo.caminho} ---\n{conteudo}")
     texto = "\n\n".join(partes)
     if len(texto) > limite:

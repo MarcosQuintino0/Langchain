@@ -78,9 +78,7 @@ def extrair(config: Config) -> SuperficieDoProjeto:
             ModuloCompartilhado(
                 caminho=relativo_a(arquivo, config.caminhos.projeto_testes),
                 import_do_recurso=caminho_de_import(arquivo, dir_recurso),
-                import_do_subdominio=caminho_de_import(
-                    arquivo, dir_recurso / _SUBDOMINIO
-                ),
+                import_do_subdominio=caminho_de_import(arquivo, dir_recurso / _SUBDOMINIO),
                 import_do_support=caminho_de_import(arquivo, dir_recurso / "_support"),
                 exports=[_para_contrato(exportado) for exportado in exports],
             )

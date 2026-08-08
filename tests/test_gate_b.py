@@ -10,8 +10,8 @@ import json
 import sys
 
 import pytest
-from conftest import saida_de_processo
 
+from conftest import saida_de_processo
 from orquestrador.contratos import Recurso, VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import cobertura as gate_cobertura
@@ -25,7 +25,10 @@ def recurso_de(config) -> Recurso:
 
 
 def test_formatador_desligado_nao_produz_veredito(config_falso):
-    assert gate_b._formatador(config_falso, "prettier", "QAORQ-020", [], recurso_de(config_falso)) is None
+    assert (
+        gate_b._formatador(config_falso, "prettier", "QAORQ-020", [], recurso_de(config_falso))
+        is None
+    )
 
 
 def test_formatador_que_passa_aprova(config_falso):

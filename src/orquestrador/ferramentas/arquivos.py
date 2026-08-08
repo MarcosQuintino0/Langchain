@@ -119,9 +119,7 @@ class Confinamento:
         except (OSError, ValueError) as erro:  # nome inválido, caminho longo demais
             raise CaminhoForaDaRaiz(f"caminho inválido: {caminho!r} ({erro})") from erro
         if not self._sob_a_raiz(alvo):
-            raise CaminhoForaDaRaiz(
-                f"caminho fora da raiz autorizada ({self.raiz}): {caminho!r}"
-            )
+            raise CaminhoForaDaRaiz(f"caminho fora da raiz autorizada ({self.raiz}): {caminho!r}")
         return alvo
 
     def _sob_a_raiz(self, alvo: Path) -> bool:
@@ -160,10 +158,7 @@ def ler_arquivo(
     if not alvo.exists():
         return f"ERRO: arquivo não existe: {confinamento.relativo(alvo)}"
     if alvo.is_dir():
-        return (
-            f"ERRO: {confinamento.relativo(alvo)} é um diretório; "
-            "use listar_diretorio."
-        )
+        return f"ERRO: {confinamento.relativo(alvo)} é um diretório; use listar_diretorio."
     if alvo.name in ARQUIVOS_PROIBIDOS:
         return (
             f"ERRO: {alvo.name} não pode ser lido diretamente (dezenas de MB). "
@@ -188,9 +183,7 @@ def ler_arquivo(
             f"({len(linhas)} linhas em {confinamento.relativo(alvo)})"
         )
 
-    corpo = "\n".join(
-        f"{numero:6d}\t{linhas[numero - 1]}" for numero in range(inicio + 1, fim + 1)
-    )
+    corpo = "\n".join(f"{numero:6d}\t{linhas[numero - 1]}" for numero in range(inicio + 1, fim + 1))
     cabecalho = f"{confinamento.relativo(alvo)} (linhas {inicio + 1}-{fim} de {len(linhas)})"
     rodape = ""
     if fim < len(linhas):
@@ -253,9 +246,7 @@ def buscar(
             continue
         for numero, linha in enumerate(conteudo.splitlines(), start=1):
             if regex.search(linha):
-                achados.append(
-                    f"{confinamento.relativo(arquivo)}:{numero}: {linha.strip()[:240]}"
-                )
+                achados.append(f"{confinamento.relativo(arquivo)}:{numero}: {linha.strip()[:240]}")
                 if len(achados) >= max_resultados:
                     truncado = True
                     break
@@ -273,9 +264,7 @@ def buscar(
 def _percorrer(raiz: Path, glob: str | None):
     """Arquivos de texto sob a raiz, pulando diretórios e arquivos proibidos."""
     for diretorio, subdiretorios, arquivos in os.walk(raiz):
-        subdiretorios[:] = [
-            nome for nome in subdiretorios if nome not in DIRETORIOS_IGNORADOS
-        ]
+        subdiretorios[:] = [nome for nome in subdiretorios if nome not in DIRETORIOS_IGNORADOS]
         base = Path(diretorio)
         for nome in arquivos:
             if nome in ARQUIVOS_PROIBIDOS:

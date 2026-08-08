@@ -98,7 +98,19 @@ class ConfigCaminhos(BaseModel):
     # -- caminhos derivados -------------------------------------------------
 
     def script(self, nome: str) -> Path:
-        assert self.scripts is not None  # garantido pelo validador
+        # Checagem real, e não `assert`: o `_derivar_scripts` só preenche `scripts`
+        # quando o `skill` bruto é verdadeiro, então um `skill = ""` no config.toml
+        # atravessa a validação (vira `Path(".")`) e deixa `scripts` em None. Quem
+        # tropeça nisso primeiro é `validar_caminhos`, cuja função é justamente
+        # transformar caminho errado em mensagem acionável — e um `assert` nu ali
+        # devolvia `AssertionError('')`, sem dizer o que estava errado. Sob
+        # `python -O` seria pior: some a checagem e sobra um TypeError de `None /
+        # str`, dentro do adaptador de subprocesso, longe da causa.
+        if self.scripts is None:
+            raise ErroDeConfiguracao(
+                "[caminhos].scripts não pôde ser derivado porque [caminhos].skill está "
+                "vazio. Preencha o caminho da skill qa-api, ou aponte scripts direto."
+            )
         return self.scripts / nome
 
     @property
@@ -224,7 +236,7 @@ class Config(BaseModel):
     # -- carga --------------------------------------------------------------
 
     @classmethod
-    def carregar(cls, caminho: Path | str | None = None) -> "Config":
+    def carregar(cls, caminho: Path | str | None = None) -> Config:
         arquivo = Path(caminho) if caminho else CONFIG_PADRAO
         if not arquivo.is_file():
             raise ErroDeConfiguracao(f"arquivo de configuração não encontrado: {arquivo}")
@@ -251,14 +263,10 @@ class Config(BaseModel):
     def _exigir_estagios(self) -> None:
         faltando = [nome for nome in ("mapeador", "executor") if nome not in self.estagios]
         if faltando:
-            raise ErroDeConfiguracao(
-                f"[estagios] sem entrada para: {', '.join(faltando)}"
-            )
+            raise ErroDeConfiguracao(f"[estagios] sem entrada para: {', '.join(faltando)}")
         faltando_gates = [nome for nome in ("a", "b") if nome not in self.gates]
         if faltando_gates:
-            raise ErroDeConfiguracao(
-                f"[gates] sem entrada para: {', '.join(faltando_gates)}"
-            )
+            raise ErroDeConfiguracao(f"[gates] sem entrada para: {', '.join(faltando_gates)}")
 
     def estagio(self, nome: str) -> ConfigEstagio:
         try:
@@ -274,7 +282,7 @@ class Config(BaseModel):
 
     # -- overrides ----------------------------------------------------------
 
-    def com_max_tentativas(self, maximo: int) -> "Config":
+    def com_max_tentativas(self, maximo: int) -> Config:
         """Cópia com o `max_tentativas` de todos os gates sobrescrito.
 
         Cópia revalidada, não mutação: `--max-tentativas` chega de fora e precisa
@@ -284,9 +292,7 @@ class Config(BaseModel):
         """
         try:
             gates = {
-                nome: ConfigGate.model_validate(
-                    {**gate.model_dump(), "max_tentativas": maximo}
-                )
+                nome: ConfigGate.model_validate({**gate.model_dump(), "max_tentativas": maximo})
                 for nome, gate in self.gates.items()
             }
         except ValidationError as erro:
@@ -306,9 +312,7 @@ class Config(BaseModel):
             if not self.caminhos.script(nome).is_file():
                 problemas.append(f"script ausente: {self.caminhos.script(nome)}")
         if not self.caminhos.projeto_testes.is_dir():
-            problemas.append(
-                f"projeto de testes não encontrado: {self.caminhos.projeto_testes}"
-            )
+            problemas.append(f"projeto de testes não encontrado: {self.caminhos.projeto_testes}")
         if exigir_backend and not self.caminhos.backend.is_dir():
             problemas.append(f"backend não encontrado: {self.caminhos.backend}")
         if problemas:

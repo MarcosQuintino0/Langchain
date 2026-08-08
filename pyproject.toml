@@ -142,6 +142,22 @@ select = [
   "PLC0415", # import fora do topo do arquivo
 ]
 
+# RUF001/002/003 marcam caractere "confundível" com ASCII. O valor real da regra é
+# pegar homoglifo e caractere invisível — NBSP, largura zero, cirílico disfarçado de
+# latino —, e isso continua ligado. O que se libera aqui são dois símbolos
+# matemáticos usados como matemática, não como letra:
+#
+#   × (U+00D7) — produto cartesiano na prosa: "endpoint × categoria",
+#     "diff grafo × manifesto", "x64 × arm64". Trocar por `x` viraria "endpoint x
+#     categoria", que lê como variável, não como cruzamento.
+#   ∪ (U+222A) — união de conjuntos em contratos.py: "`cats` ∪ `naoAplica`".
+#     O `U` maiúsculo que o Ruff sugere não é o operador.
+#
+# Um inventário de todos os não-ASCII do repositório (acentuação portuguesa, —, …,
+# →, ✓) não achou nenhum caractere invisível ou acidental: a tipografia é toda
+# deliberada. Por isso a liberação é nominal, e não `RUF001` desligada por inteiro.
+allowed-confusables = ["×", "∪"]
+
 # Regras deliberadamente FORA do `select`, com o porquê. Sem isto, a próxima
 # pessoa (ou o próximo agente) "conserta" a configuração ligando-as de novo.
 #
@@ -168,7 +184,23 @@ select = [
 # S101 é `assert`, que é justamente como o pytest afirma. Só ele: o resto do
 # flake8-bandit continua valendo em tests/ — teste também abre subprocesso e
 # monta caminho, e é ali que mora metade do risco deste projeto.
-"tests/**" = ["S101"]
+#
+# ARG001/ARG002/ARG005 (argumento, método e lambda não usados) porque em pytest
+# "não usar o valor" é o caso normal, não descuido:
+#
+#   * fixture pedida pelo efeito colateral — `ambiente_sujo` suja o ambiente,
+#     `recurso` cria o diretório, `monkeypatch` já aplicou o patch no setup. O
+#     valor devolvido não interessa; a requisição é que faz o trabalho. Remover o
+#     parâmetro não "limpa" nada: desliga a fixture e quebra o teste.
+#   * duplo de teste que precisa espelhar a assinatura real — `CoberturaFalsa
+#     .executar(self, _dir, *, report=None, out=None)` só é substituível porque
+#     aceita `out=`, que a produção passa em pipeline.py e gates/gate_b.py.
+#     Renomear para `_out` faria o duplo parar de casar com a chamada real.
+#   * lambda de aridade fixa passada como callback (`lambda numero, delta, atual:
+#     ...`), onde o teste só se importa com um dos três.
+#
+# Isto vale só em tests/**: em src/ as três regras continuam ligadas.
+"tests/**" = ["S101", "ARG001", "ARG002", "ARG005"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"

@@ -20,9 +20,10 @@ A CLI que dirige tudo isto vive em `cli.py`.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
@@ -45,6 +46,7 @@ from orquestrador.excecoes import (
     GrafoNaoPreparado,
 )
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
+from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS
 from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.ferramentas.superficie import extrair as extrair_superficie
 from orquestrador.gates import gate_a, gate_b
@@ -53,7 +55,6 @@ from orquestrador.llm.cliente import criar_modelo
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.simulacao import Roteiros
-
 
 # Estado da suíte em runtime, no Bloco 3. São dois estados e não um booleano
 # porque a diferença que importa é entre "os testes passaram" e "ninguém sabe":
@@ -180,7 +181,13 @@ class Pipeline:
     def modelo(self, estagio: str, recurso: str, tentativa: int) -> Any:
         """Modelo do estágio: fixture no dry-run, OpenRouter na execução real."""
         if self.dry_run:
-            assert self.roteiros is not None
+            # `assert` de propósito, diferente do caso de config.py: isto é
+            # invariante da nossa própria montagem (a CLI sempre passa `roteiros`
+            # junto de `dry_run=True`), não entrada de quem opera. Sob `python -O`
+            # a garantia some, mas o que sobra é um AttributeError em `None.modelo`
+            # na linha seguinte — barulhento e imediato. Nenhum gate passa a
+            # aprovar por causa disso, que é o risco que motivaria uma exceção real.
+            assert self.roteiros is not None  # noqa: S101
             return self.roteiros.modelo(recurso, estagio, tentativa)
         if estagio not in self._modelos_reais:
             self._modelos_reais[estagio] = criar_modelo(self.config, estagio)
@@ -484,8 +491,13 @@ class Pipeline:
         3. código de saída diferente de zero interrompe o recurso. Antes ele virava
            campo de evento e o recurso terminava como sucesso.
         """
-        from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS
-        from orquestrador.ferramentas.processo import executar as rodar
+        # O import tardio é o que mantém `executar` resolvido em tempo de
+        # chamada. Ligado no topo, `rodar` viraria uma referência fixada na
+        # importação do módulo, e o `monkeypatch.setattr(processo, "executar", ...)`
+        # dos testes do Bloco 3 passaria a não ter efeito nenhum — a suíte roda o
+        # Cypress de verdade. Verificado: subir este import reprova 4 testes de
+        # tests/test_falhas_isoladas.py.
+        from orquestrador.ferramentas.processo import executar as rodar  # noqa: PLC0415
 
         configurado = list(self.config.execucao.cypress)
         if not any(MARCA_RELATORIO in argumento for argumento in configurado):
@@ -500,9 +512,7 @@ class Pipeline:
         destino = self.dir_execucao / "cypress" / recurso.nome / "report.json"
         destino.parent.mkdir(parents=True, exist_ok=True)
         destino.unlink(missing_ok=True)
-        argumentos = [
-            argumento.replace(MARCA_RELATORIO, str(destino)) for argumento in configurado
-        ]
+        argumentos = [argumento.replace(MARCA_RELATORIO, str(destino)) for argumento in configurado]
 
         saida = rodar(
             argumentos,
@@ -706,8 +716,7 @@ class Pipeline:
                     motivo=str(erro), recurso=recurso.nome, recursos_nao_executados=restantes
                 )
                 self.registro.falha(
-                    f"execução interrompida em {recurso.nome}: ferramenta indisponível. "
-                    f"{erro}"
+                    f"execução interrompida em {recurso.nome}: ferramenta indisponível. {erro}"
                 )
                 self.registro.evento(
                     "execucao_interrompida",
@@ -760,5 +769,3 @@ class Pipeline:
             execucao_de_testes=resultado.execucao_de_testes,
         )
         return resultado
-
-

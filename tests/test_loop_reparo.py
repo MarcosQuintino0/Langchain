@@ -18,10 +18,10 @@ from pydantic import ValidationError
 
 from orquestrador import cli as modulo_cli
 from orquestrador.config import ConfigGate
-from orquestrador.contratos import Delta, ResultadoGate, Violacao
+from orquestrador.contratos import Delta, Recurso, ResultadoGate, Violacao
 from orquestrador.excecoes import ErroDeConfiguracao, FalhaDeGate
-from orquestrador.pipeline import Pipeline
 from orquestrador.observabilidade.registro import Registro
+from orquestrador.pipeline import Pipeline
 
 
 @pytest.fixture
@@ -37,8 +37,6 @@ def pipeline(config_falso, tmp_path: Path) -> Pipeline:
 
 
 def recurso_de(config) -> object:
-    from orquestrador.contratos import Recurso
-
     return Recurso(nome="pedidos", caminho_testes=config.caminhos.recurso("pedidos"))
 
 
@@ -122,9 +120,7 @@ def test_o_artefato_e_persistido_antes_de_ser_avaliado(pipeline: Pipeline):
         recurso=recurso_de(pipeline.config),
         produzir=lambda numero, delta, atual: ordem.append("produzir") or "a",
         persistir=lambda _artefato: ordem.append("persistir"),
-        avaliar=lambda _artefato: (
-            ordem.append("avaliar") or ResultadoGate(aprovado=True)
-        ),
+        avaliar=lambda _artefato: ordem.append("avaliar") or ResultadoGate(aprovado=True),
         texto_do_artefato=str,
     )
     assert ordem == ["produzir", "persistir", "avaliar"]
@@ -193,9 +189,9 @@ def test_a_cli_recusa_max_tentativas_que_nao_e_inteiro_positivo(texto: str):
 
 
 def test_o_limite_da_cli_chega_ao_ciclo(config_falso, tmp_path: Path):
-    config = config_falso.com_max_tentativas(modulo_cli.parse_args(
-        ["--max-tentativas", "1"]
-    ).max_tentativas)
+    config = config_falso.com_max_tentativas(
+        modulo_cli.parse_args(["--max-tentativas", "1"]).max_tentativas
+    )
     pipeline = Pipeline(
         config,
         Registro(tmp_path / "execucao.jsonl"),

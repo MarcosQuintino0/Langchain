@@ -256,9 +256,7 @@ def comentario_acima(linhas: list[str], indice: int) -> str | None:
 # `@endpoint MÉTODO /rota  @cat CAT-07` — a marcação que a skill exige em cada `it`.
 # A rota vai até dois espaços ou o fim da linha, porque `@cat` costuma vir alinhado
 # depois dela.
-_TAG = re.compile(
-    r"@endpoint\s+(?P<endpoint>[A-Z]+\s+\S+?)\s{1,}@cat\s+(?P<cat>CAT-\d{2}|\S+)"
-)
+_TAG = re.compile(r"@endpoint\s+(?P<endpoint>[A-Z]+\s+\S+?)\s{1,}@cat\s+(?P<cat>CAT-\d{2}|\S+)")
 
 
 @dataclass(frozen=True)

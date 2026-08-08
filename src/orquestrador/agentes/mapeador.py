@@ -15,7 +15,8 @@ import functools
 import inspect
 import itertools
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, StructuredTool
@@ -25,26 +26,26 @@ from pydantic import BaseModel, Field, ValidationError
 from orquestrador.config import Config
 from orquestrador.contratos import (
     Delta,
+    Recurso,
     RegistroDeChamada,
     RegistroDeTool,
-    Recurso,
     SaidaMapeador,
     UsoDeTokens,
     Violacao,
 )
+from orquestrador.excecoes import ErroDeFerramenta, FalhaDeEstagio
 from orquestrador.ferramentas import arquivos as fa
 from orquestrador.ferramentas.graphify import Graphify
-from orquestrador.excecoes import ErroDeFerramenta, FalhaDeEstagio
 from orquestrador.llm.estruturado import violacoes_de_validacao
 from orquestrador.llm.mensagens import texto_da_mensagem, uso_das_mensagens
-from orquestrador.observabilidade.telemetria import Telemetria
-from orquestrador.textos import extrair_json
 from orquestrador.montagem import (
     carregar_prompt,
     esquema_json,
     montar_entrada_inicial,
     montar_entrada_reparo,
 )
+from orquestrador.observabilidade.telemetria import Telemetria
+from orquestrador.textos import extrair_json
 
 ESTAGIO = "mapeador"
 
@@ -241,7 +242,7 @@ def criar_ferramentas(
                 "frase ('No affected nodes found'). Confira no cabeçalho da resposta o "
                 "nome que o Graphify resolveu: quando ele difere do pedido, os "
                 "dependentes são de outra classe. Rode SEM `relacao` primeiro e leia os "
-                "rótulos da saída antes de filtrar; `relacao=\"inherits\"` (em Java) "
+                'rótulos da saída antes de filtrar; `relacao="inherits"` (em Java) '
                 "lista quem herda de um controller abstrato."
             ),
         ),
@@ -290,7 +291,10 @@ def _criar_agente(modelo: Any, ferramentas: list[BaseTool], instrucao: str) -> A
     caminho; quando sumir, o ImportError abaixo diz exatamente para onde migrar.
     """
     try:
-        from langgraph.prebuilt import create_react_agent
+        # Import tardio de propósito: é ele que transforma o
+        # sumiço do prebuilt na v2.0 do LangGraph na mensagem de migração abaixo,
+        # em vez de um ImportError na carga do módulo, longe da explicação.
+        from langgraph.prebuilt import create_react_agent  # noqa: PLC0415
     except ImportError as erro:  # pragma: no cover - ambiente incompleto
         raise FalhaDeEstagio(
             "não foi possível importar langgraph.prebuilt.create_react_agent. "

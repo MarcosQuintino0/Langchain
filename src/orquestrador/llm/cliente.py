@@ -16,7 +16,10 @@ from orquestrador.excecoes import ErroDeConfiguracao
 
 def criar_modelo(config: Config, estagio: str) -> BaseChatModel:
     """Instancia o modelo do estágio apontando para o OpenRouter."""
-    from langchain_openai import ChatOpenAI  # import tardio: dry-run não precisa
+    # Import tardio: o dry-run nunca chega aqui, e `langchain_openai` puxa o SDK da
+    # OpenAI inteiro. No topo, todo `--dry-run` (e toda coleta de teste unitário)
+    # pagaria esse custo de carga para instanciar um modelo que não vai ser usado.
+    from langchain_openai import ChatOpenAI  # noqa: PLC0415
 
     parametros = config.estagio(estagio)
     if parametros.modelo.strip().startswith("<"):

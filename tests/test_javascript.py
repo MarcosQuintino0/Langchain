@@ -171,9 +171,7 @@ def test_comentario_de_bloco_entre_assinatura_e_corpo():
 
 def test_comentario_acima_acompanha_o_export():
     fonte = "// Fonte única das rotas.\n// Segunda linha.\nexport const R = 1;\n"
-    assert extrair_exports(fonte)[0].comentario == (
-        "// Fonte única das rotas.\n// Segunda linha."
-    )
+    assert extrair_exports(fonte)[0].comentario == ("// Fonte única das rotas.\n// Segunda linha.")
 
 
 def test_jsdoc_acima_acompanha_o_export():

@@ -242,9 +242,7 @@ def test_schema_desta_execucao_e_reescrito_no_reparo(pipeline, recurso, monkeypa
 
     def modelo(_estagio: str, _recurso: str, tentativa: int) -> ModeloSimulado:
         esquema = corrigido if tentativa > 1 else SCHEMA
-        return ModeloSimulado(
-            passos=[{"tipo": "final", "artefato": artefato_com_schema(esquema)}]
-        )
+        return ModeloSimulado(passos=[{"tipo": "final", "artefato": artefato_com_schema(esquema)}])
 
     vereditos = iter(
         [

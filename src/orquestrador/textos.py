@@ -47,7 +47,5 @@ def _sem_cerca(texto: str) -> str:
 
 def _exigir_objeto(dados: Any) -> dict[str, Any]:
     if not isinstance(dados, dict):
-        raise ValueError(
-            f"esperava um objeto JSON no topo, veio {type(dados).__name__}"
-        )
+        raise ValueError(f"esperava um objeto JSON no topo, veio {type(dados).__name__}")
     return dados

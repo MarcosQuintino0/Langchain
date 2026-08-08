@@ -35,24 +35,18 @@ class ModeloEspiao(ModeloSimulado):
 
     capturas: list = Field(default_factory=list)
 
-    def _generate(self, messages, *args: Any, **kwargs: Any):  # noqa: ANN001
+    def _generate(self, messages, *args: Any, **kwargs: Any):
         self.capturas.append(list(messages))
         return super()._generate(messages, *args, **kwargs)
 
     @property
     def instrucao(self) -> str:
-        return "\n".join(
-            str(m.content)
-            for m in self.capturas[0]
-            if isinstance(m, SystemMessage)
-        )
+        return "\n".join(str(m.content) for m in self.capturas[0] if isinstance(m, SystemMessage))
 
     @property
     def entrada(self) -> str:
         return "\n".join(
-            str(m.content)
-            for m in self.capturas[0]
-            if not isinstance(m, SystemMessage)
+            str(m.content) for m in self.capturas[0] if not isinstance(m, SystemMessage)
         )
 
 

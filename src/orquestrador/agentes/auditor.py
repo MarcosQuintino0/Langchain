@@ -25,10 +25,15 @@ class AuditorNaoImplementado(NotImplementedError):
     """Chamada real ao auditor antes da Fase 2."""
 
 
+# Os três primeiros parâmetros não são usados porque o corpo é stub, e não porque
+# sobraram: a assinatura acima é a interface definitiva descrita na docstring do
+# módulo, e é contra ela que `descrever()` e os chamadores da Fase 2 já escrevem.
+# Apagá-los para calar a regra faria a implementação da Fase 2 mudar a assinatura
+# pública — exatamente o que fixá-la agora evita.
 def auditar(
-    caminho_backend: Path,
-    caminho_manifesto: Path,
-    amostra_specs: list[Path],
+    caminho_backend: Path,  # noqa: ARG001
+    caminho_manifesto: Path,  # noqa: ARG001
+    amostra_specs: list[Path],  # noqa: ARG001
     *,
     permitir_stub: bool = False,
 ) -> ResultadoAuditoria:

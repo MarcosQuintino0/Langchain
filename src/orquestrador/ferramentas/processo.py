@@ -22,7 +22,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 from orquestrador.excecoes import ErroDeFerramenta, ExecutavelAusente
 
 __all__ = [
@@ -189,7 +188,7 @@ def executar(
 
     inicio = time.perf_counter()
     try:
-        concluido = subprocess.run(  # noqa: S603 - lista de argumentos, sem shell
+        concluido = subprocess.run(  # noqa: S603  # lista de argumentos, sem shell
             comando,
             cwd=str(cwd) if cwd else None,
             env=montar_ambiente(variaveis_extras),
@@ -204,9 +203,7 @@ def executar(
     except FileNotFoundError as erro:
         raise ExecutavelAusente(f"não foi possível executar {comando[0]}: {erro}") from erro
     except subprocess.TimeoutExpired as erro:
-        raise ErroDeFerramenta(
-            f"tempo esgotado ({timeout_s}s) em: {' '.join(argv)}"
-        ) from erro
+        raise ErroDeFerramenta(f"tempo esgotado ({timeout_s}s) em: {' '.join(argv)}") from erro
 
     return SaidaProcesso(
         argv=argv,

@@ -46,11 +46,7 @@ def test_extrai_os_modulos_e_exports_da_fixture(config_com_projeto):
         "cypress/support/api/client.js",
         "cypress/support/api/rotas.js",
     ]
-    nomes = {
-        exportado.nome
-        for modulo in superficie.modulos
-        for exportado in modulo.exports
-    }
+    nomes = {exportado.nome for modulo in superficie.modulos for exportado in modulo.exports}
     assert nomes == {"statusExato", "semVazamentoInterno", "apiRequest", "RotasApi"}
 
 
@@ -243,13 +239,9 @@ def test_string_com_chave_nao_confunde_o_recorte():
 
 def test_instrucao_do_executor_recebe_a_superficie(config_com_projeto):
     superficie = mod.extrair(config_com_projeto)
-    recurso = Recurso(
-        nome="pedidos", caminho_testes=config_com_projeto.caminhos.recurso("pedidos")
-    )
+    recurso = Recurso(nome="pedidos", caminho_testes=config_com_projeto.caminhos.recurso("pedidos"))
 
-    instrucao = agente_executor.instrucao_do_estagio(
-        config_com_projeto, recurso, superficie
-    )
+    instrucao = agente_executor.instrucao_do_estagio(config_com_projeto, recurso, superficie)
 
     assert "{{superficie_do_projeto}}" not in instrucao
     assert "export function apiRequest(opcoes)" in instrucao
@@ -261,9 +253,7 @@ def test_a_superficie_nao_varia_entre_tentativas(config_com_projeto):
     # Ela entra pela instrução FIXA justamente por ser constante na execução: é o
     # que mantém a instrução idêntica entre tentativas e o cache de prompt viável.
     superficie = mod.extrair(config_com_projeto)
-    recurso = Recurso(
-        nome="pedidos", caminho_testes=config_com_projeto.caminhos.recurso("pedidos")
-    )
+    recurso = Recurso(nome="pedidos", caminho_testes=config_com_projeto.caminhos.recurso("pedidos"))
     primeira = agente_executor.instrucao_do_estagio(config_com_projeto, recurso, superficie)
     segunda = agente_executor.instrucao_do_estagio(config_com_projeto, recurso, superficie)
     assert primeira == segunda

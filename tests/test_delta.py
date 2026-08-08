@@ -9,6 +9,8 @@ custo linear.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from pydantic import ValidationError
 
@@ -27,9 +29,7 @@ def test_delta_carrega_exatamente_as_violacoes_do_gate():
         violacoes=[violacao("QAAPI-021"), violacao("QAAPI-022")],
         avisos=[violacao("QAAPI-036")],
     )
-    delta = Delta(
-        estagio="gate_a", recurso="pedidos", violacoes=resultado.violacoes, tentativa=1
-    )
+    delta = Delta(estagio="gate_a", recurso="pedidos", violacoes=resultado.violacoes, tentativa=1)
     assert [v.codigo for v in delta.violacoes] == ["QAAPI-021", "QAAPI-022"]
     # Aviso não reprova, então não entra no delta.
     assert "QAAPI-036" not in delta.render()
@@ -127,7 +127,7 @@ def test_erro_da_ferramenta_domina_a_uniao_e_nao_vira_delta():
     assert combinado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
     assert combinado.aprovado is False
     assert combinado.violacoes == []
-    with pytest.raises(ErroDeFerramenta, match="qa-cobertura.mjs mudo"):
+    with pytest.raises(ErroDeFerramenta, match=re.escape("qa-cobertura.mjs mudo")):
         combinado.exigir_veredito()
 
 

@@ -122,9 +122,7 @@ class Telemetria:
         É aqui que a entrada de cada tentativa fica lado a lado: se a coluna de
         caracteres cresce com o número da tentativa, o corte do princípio 2 vazou.
         """
-        return self._agregar(
-            lambda chamada: (chamada.recurso, chamada.estagio, chamada.tentativa)
-        )
+        return self._agregar(lambda chamada: (chamada.recurso, chamada.estagio, chamada.tentativa))
 
     # -- apresentação -------------------------------------------------------
 
@@ -165,9 +163,7 @@ class Telemetria:
         tabela.add_column("chamadas", justify="right")
         tabela.add_column("total", justify="right")
         for (recurso, estagio), agregado in sorted(self.por_recurso().items()):
-            tabela.add_row(
-                recurso, estagio, str(agregado.chamadas), f"{agregado.uso.total:,}"
-            )
+            tabela.add_row(recurso, estagio, str(agregado.chamadas), f"{agregado.uso.total:,}")
         return tabela
 
     def tabela_entrada_por_tentativa(self) -> Table:
@@ -177,9 +173,7 @@ class Telemetria:
         instrução fixa. Se ela cresce da tentativa 1 para a 2, o reparo está
         levando histórico junto — que é exatamente o que o princípio 2 proíbe.
         """
-        tabela = Table(
-            title="Entrada enviada por tentativa (caracteres)", title_justify="left"
-        )
+        tabela = Table(title="Entrada enviada por tentativa (caracteres)", title_justify="left")
         tabela.add_column("recurso")
         tabela.add_column("estágio")
         tabela.add_column("tentativa", justify="right")
@@ -252,13 +246,11 @@ class Telemetria:
             "tools": len(self.tools),
             "caracteres_de_tools": self.caracteres_de_tools(),
             "por_tool": {
-                nome: agregado.para_log()
-                for nome, agregado in self.tools_por_nome().items()
+                nome: agregado.para_log() for nome, agregado in self.tools_por_nome().items()
             },
             "total": self.total().model_dump(),
             "por_estagio": {
-                estagio: agregado.para_log()
-                for estagio, agregado in self.por_estagio().items()
+                estagio: agregado.para_log() for estagio, agregado in self.por_estagio().items()
             },
             "por_tentativa": {
                 f"{recurso}/{estagio}/t{tentativa}": agregado.para_log()

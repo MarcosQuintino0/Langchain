@@ -30,7 +30,7 @@ def manifesto_minimo(**extra) -> dict:
             {
                 "endpoint": "GET /pedidos",
                 "cats": ["CAT-01"],
-                "naoAplica": {cat: "justificativa suficientemente longa" for cat in CATS[1:]},
+                "naoAplica": dict.fromkeys(CATS[1:], "justificativa suficientemente longa"),
             }
         ],
         **extra,
@@ -126,9 +126,7 @@ def test_saida_do_mapeador_exige_o_mesmo_recurso_nos_dois_artefatos():
         SaidaMapeador(
             inventario=Inventario(
                 recurso="pedidos",
-                endpoints=[
-                    {"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"}
-                ],
+                endpoints=[{"metodo": "GET", "rota": "/pedidos", "handler": "a", "arquivo": "x"}],
             ),
             manifesto=Manifesto.model_validate(manifesto_minimo(recurso="outro")),
         )
@@ -142,9 +140,7 @@ def saida_do_mapeador(schema_entrada: str | None, schemas: list[dict]) -> SaidaM
     return SaidaMapeador(
         inventario=Inventario(
             recurso="pedidos",
-            endpoints=[
-                {"metodo": "POST", "rota": "/pedidos", "handler": "criar", "arquivo": "x"}
-            ],
+            endpoints=[{"metodo": "POST", "rota": "/pedidos", "handler": "criar", "arquivo": "x"}],
         ),
         manifesto=Manifesto.model_validate({"recurso": "pedidos", "endpoints": [endpoint]}),
         schemas=schemas,
@@ -282,6 +278,4 @@ def test_nome_de_recurso_tambem_vale_para_o_que_o_modelo_emite():
             endpoints=[{"metodo": "GET", "rota": "/x", "handler": "a", "arquivo": "x"}],
         )
     with pytest.raises(ValidationError):
-        SaidaExecutor(
-            recurso="nul", arquivos=[ArquivoGerado(caminho="crud.cy.js", conteudo="x")]
-        )
+        SaidaExecutor(recurso="nul", arquivos=[ArquivoGerado(caminho="crud.cy.js", conteudo="x")])

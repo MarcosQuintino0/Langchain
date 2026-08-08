@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from orquestrador.agentes.mapeador import criar_ferramentas
+from orquestrador.ferramentas import graphify
 from orquestrador.observabilidade.telemetria import Telemetria
 
 
@@ -60,9 +61,7 @@ def test_argumentos_omitidos_aparecem_com_o_padrao(config_falso, backend):
     # Sem os defaults, "leu o arquivo inteiro ou só um trecho?" ficaria sem resposta.
     telemetria = Telemetria()
 
-    tools(config_falso, telemetria)["ler_arquivo"].invoke(
-        {"caminho": "src/PedidoController.java"}
-    )
+    tools(config_falso, telemetria)["ler_arquivo"].invoke({"caminho": "src/PedidoController.java"})
 
     assert telemetria.tools[0].argumentos == {
         "caminho": "src/PedidoController.java",
@@ -153,15 +152,13 @@ def grafo(config_falso) -> Path:
 
 def capturar_argv(monkeypatch) -> list[list[str]]:
     """Intercepta a montagem do comando, sem chamar o Graphify de verdade."""
-    from orquestrador.ferramentas import graphify as modulo
-
     chamadas: list[list[str]] = []
 
     def falso(argumentos, **_k):
         chamadas.append(argumentos)
         return type("Saida", (), {"codigo": 0, "stdout": "ok", "stderr": "", "texto": "ok"})()
 
-    monkeypatch.setattr(modulo, "executar", falso)
+    monkeypatch.setattr(graphify, "executar", falso)
     return chamadas
 
 

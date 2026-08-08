@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import saida_de_processo
 
+from conftest import saida_de_processo
 from orquestrador.contratos import VereditoDeGate
 from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates.parser import (
@@ -60,9 +60,7 @@ REPROVADO = json.dumps(
 
 
 def test_aprovacao_vem_pelo_stdout():
-    resultado = resultado_do_validador(
-        saida_de_processo(codigo=0, stdout=APROVADO), gate="gate_a"
-    )
+    resultado = resultado_do_validador(saida_de_processo(codigo=0, stdout=APROVADO), gate="gate_a")
     assert resultado.aprovado is True
     assert resultado.violacoes == []
     assert [aviso.codigo for aviso in resultado.avisos] == ["QAAPI-035"]

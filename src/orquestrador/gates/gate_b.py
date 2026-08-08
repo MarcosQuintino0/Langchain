@@ -39,9 +39,7 @@ def executar(
         _validador(config, recurso),
         # A terceira checagem responde por "planejei e não entreguei", que o
         # validador da skill não cobre. Ver gates/cobertura.py.
-        gate_cobertura.executar(
-            config, recurso, manifesto=manifesto, gate=NOME, out=out_cobertura
-        ),
+        gate_cobertura.executar(config, recurso, manifesto=manifesto, gate=NOME, out=out_cobertura),
     ]
     combinado = ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
     # Checagem que não rodou não vira delta: `exigir_veredito` interrompe o recurso
@@ -102,9 +100,7 @@ def _formatador(
                 ),
             )
         ]
-    return ResultadoGate(
-        aprovado=False, violacoes=violacoes, saida_bruta=saida.texto, gate=NOME
-    )
+    return ResultadoGate(aprovado=False, violacoes=violacoes, saida_bruta=saida.texto, gate=NOME)
 
 
 def _relativo_ao_projeto(alvo: Path, projeto: Path) -> str:

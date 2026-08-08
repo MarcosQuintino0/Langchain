@@ -13,6 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.markup import escape
 
@@ -179,8 +180,6 @@ def main(argv: list[str] | None = None) -> int:
         return ERRO_DE_USO
 
     if not args.dry_run:
-        from dotenv import load_dotenv
-
         load_dotenv(ARQUIVO_ENV)
 
     if args.max_tentativas is not None:
@@ -284,17 +283,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             if interrupcao.recursos_nao_executados:
                 console.print(
-                    "     não chegaram a rodar: "
-                    + ", ".join(interrupcao.recursos_nao_executados)
+                    "     não chegaram a rodar: " + ", ".join(interrupcao.recursos_nao_executados)
                 )
         registro.evento(
             "execucao_concluida",
-            sucesso=interrupcao is None
-            and all(resultado.sucesso for resultado in resultados),
+            sucesso=interrupcao is None and all(resultado.sucesso for resultado in resultados),
             interrompida=interrupcao is not None,
-            recursos_nao_executados=(
-                interrupcao.recursos_nao_executados if interrupcao else []
-            ),
+            recursos_nao_executados=(interrupcao.recursos_nao_executados if interrupcao else []),
             resultados=[
                 {
                     "recurso": resultado.recurso,

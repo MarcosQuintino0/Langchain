@@ -17,11 +17,14 @@ que não entregavam.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from rich.console import Console
 
+from orquestrador import cli as modulo_cli
 from orquestrador.agentes import mapeador as agente_mapeador
+from orquestrador.cli import avisar_reprovados
 from orquestrador.contratos import Recurso, ResultadoGate, Violacao
 from orquestrador.excecoes import (
     ErroDeConfiguracao,
@@ -31,10 +34,11 @@ from orquestrador.excecoes import (
     FalhaDeGate,
     GrafoNaoPreparado,
 )
+from orquestrador.ferramentas import processo
 from orquestrador.ferramentas.graphify import ResultadoPreparacao
+from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS, SaidaProcesso
+from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria
-from orquestrador import cli as modulo_cli
-from orquestrador.cli import avisar_reprovados
 from orquestrador.pipeline import (
     EXECUTADO,
     InterrupcaoDaExecucao,
@@ -42,7 +46,6 @@ from orquestrador.pipeline import (
     ResultadoDaExecucaoDeTestes,
     ResultadoDoRecurso,
 )
-from orquestrador.observabilidade.registro import Registro
 from orquestrador.simulacao import ModeloSimulado
 
 # Roteiro patológico: o modelo só sabe pedir tool, nunca conclui. É o que um
@@ -72,9 +75,7 @@ def pipeline(config_falso, tmp_path: Path) -> Pipeline:
 
 def preparacao(*, ok: bool = True) -> ResultadoPreparacao:
     """Veredito do Bloco 0 sem tocar no Graphify."""
-    return ResultadoPreparacao(
-        ok=ok, regenerou=False, graph=Path("graph.json"), detalhe="fixture"
-    )
+    return ResultadoPreparacao(ok=ok, regenerou=False, graph=Path("graph.json"), detalhe="fixture")
 
 
 def execucao_de_testes_falsa() -> ResultadoDaExecucaoDeTestes:
@@ -316,9 +317,7 @@ def test_o_aviso_sozinho_nao_apaga_nada(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_bloco0_reprovado_interrompe_antes_de_qualquer_modelo(
-    pipeline: Pipeline, monkeypatch
-):
+def test_bloco0_reprovado_interrompe_antes_de_qualquer_modelo(pipeline: Pipeline, monkeypatch):
     # O grafo inválido não produz erro adiante: produz um mapeador explorando um
     # mapa errado. Por isso o teste não checa a mensagem — checa que nenhum modelo
     # chegou a ser pedido.
@@ -326,9 +325,7 @@ def test_bloco0_reprovado_interrompe_antes_de_qualquer_modelo(
     monkeypatch.setattr(
         pipeline, "modelo", lambda *_a, **_k: pytest.fail("nenhum modelo pode ser criado")
     )
-    monkeypatch.setattr(
-        pipeline, "bloco1", lambda _r: pytest.fail("o Bloco 1 não pode começar")
-    )
+    monkeypatch.setattr(pipeline, "bloco1", lambda _r: pytest.fail("o Bloco 1 não pode começar"))
 
     with pytest.raises(GrafoNaoPreparado) as erro:
         pipeline.rodar([recurso_de(pipeline.config)])
@@ -362,16 +359,10 @@ def cypress_falso(pipeline: Pipeline, monkeypatch, *, codigo: int, escreve: bool
     que se lê se o Bloco 3 mandou adiante um relatório desta execução, de outra ou
     nenhum — e `invocacoes`, os argumentos nomeados de cada subprocesso.
     """
-    from types import SimpleNamespace
-
-    from orquestrador.ferramentas import processo
-
     recebidos: list[Path | None] = []
     invocacoes: list[dict] = []
 
     def rodar(argv, **kwargs):
-        from orquestrador.ferramentas.processo import SaidaProcesso
-
         invocacoes.append(kwargs)
         if escreve:
             # O relatório só aparece porque ESTE processo o escreveu.
@@ -385,8 +376,6 @@ def cypress_falso(pipeline: Pipeline, monkeypatch, *, codigo: int, escreve: bool
             pass
 
         def executar(self, _dir, *, report=None, out=None):
-            from orquestrador.ferramentas.processo import SaidaProcesso
-
             recebidos.append(report)
             return SaidaProcesso(
                 argv=["node"], codigo=0, stdout='{"lacunas": 0}', stderr="", duracao_s=0.0
@@ -399,9 +388,7 @@ def cypress_falso(pipeline: Pipeline, monkeypatch, *, codigo: int, escreve: bool
     return SimpleNamespace(relatorios=recebidos, invocacoes=invocacoes)
 
 
-def test_cypress_com_codigo_diferente_de_zero_reprova_o_recurso(
-    pipeline: Pipeline, monkeypatch
-):
+def test_cypress_com_codigo_diferente_de_zero_reprova_o_recurso(pipeline: Pipeline, monkeypatch):
     espiao = cypress_falso(pipeline, monkeypatch, codigo=1, escreve=True)
 
     with pytest.raises(FalhaDaExecucaoDeTestes) as erro:
@@ -427,17 +414,13 @@ def test_relatorio_de_outra_execucao_nao_e_aceito(pipeline: Pipeline, monkeypatc
     assert not velho.exists(), "o caminho é apagado antes de rodar, não depois de aceito"
 
 
-def test_cypress_bem_sucedido_entrega_o_relatorio_desta_execucao(
-    pipeline: Pipeline, monkeypatch
-):
+def test_cypress_bem_sucedido_entrega_o_relatorio_desta_execucao(pipeline: Pipeline, monkeypatch):
     espiao = cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
 
     resultado = pipeline.bloco3(recurso_de(pipeline.config))
 
     assert resultado.estado == "EXECUTADO"
-    assert espiao.relatorios == [
-        pipeline.dir_execucao / "cypress" / "pedidos" / "report.json"
-    ]
+    assert espiao.relatorios == [pipeline.dir_execucao / "cypress" / "pedidos" / "report.json"]
     assert resultado.contadores == {"lacunas": 0}
 
 
@@ -445,8 +428,6 @@ def test_o_cypress_recebe_as_variaveis_do_runner(pipeline: Pipeline, monkeypatch
     # O ambiente do subprocesso é allowlist, e CYPRESS_*/CI ficam fora da base para
     # não vazarem aos gates. Se o Bloco 3 esquecer de pedi-las, o cypress.config.js
     # do consumidor sobe sem configuração e a suíte falha longe da causa.
-    from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS
-
     espiao = cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
 
     pipeline.bloco3(recurso_de(pipeline.config))
@@ -454,9 +435,7 @@ def test_o_cypress_recebe_as_variaveis_do_runner(pipeline: Pipeline, monkeypatch
     assert [i.get("variaveis_extras") for i in espiao.invocacoes] == [VARIAVEIS_DO_CYPRESS]
 
 
-def test_comando_sem_a_marca_do_relatorio_e_erro_de_configuracao(
-    pipeline: Pipeline, monkeypatch
-):
+def test_comando_sem_a_marca_do_relatorio_e_erro_de_configuracao(pipeline: Pipeline, monkeypatch):
     cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
     pipeline.config.execucao.cypress = ["cypress", "run"]
 
@@ -476,9 +455,7 @@ def test_sem_cypress_o_resultado_diz_que_nao_executou(pipeline: Pipeline, monkey
     assert espiao.relatorios == [None]
 
 
-def test_recurso_que_nao_rodou_cypress_nao_finge_ter_rodado(
-    pipeline: Pipeline, monkeypatch
-):
+def test_recurso_que_nao_rodou_cypress_nao_finge_ter_rodado(pipeline: Pipeline, monkeypatch):
     # O estado precisa sobreviver até o resumo do recurso, que é onde alguém lê.
     monkeypatch.setattr(
         pipeline, "bloco1", lambda _r: (_saida_qualquer(), ResultadoGate(aprovado=True), 1)
