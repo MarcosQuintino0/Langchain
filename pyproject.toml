@@ -138,8 +138,12 @@ addopts = "-q --strict-markers"
 filterwarnings = [
   # langgraph.prebuilt.create_react_agent segue disponível até a v2.0 do LangGraph.
   # O sucessor é langchain.agents.create_agent (pacote `langchain`, não instalado
-  # aqui). Ver a nota em orquestrador/agentes/mapeador.py::_criar_agente.
-  "ignore::DeprecationWarning:orquestrador.agentes.mapeador",
+  # aqui). Ver a nota em orquestrador/agentes/grafo_react.py::criar_agente.
+  #
+  # O alvo é `grafo_react` e não `mapeador` porque todo o acoplamento com o
+  # LangGraph mora naquele arquivo: silenciar o mapeador inteiro apagaria também
+  # qualquer DeprecationWarning novo que aparecesse ali por outro motivo.
+  "ignore::DeprecationWarning:orquestrador.agentes.grafo_react",
 ]
 # O marker responde **"do que este teste precisa além do venv?"**, e não "quantos
 # syscalls ele faz". A pergunta importa porque é a ausência de uma dependência de

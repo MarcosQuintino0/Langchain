@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from orquestrador.agentes.mapeador import criar_ferramentas
+from orquestrador.agentes.ferramentas_do_mapeador import criar_ferramentas
 from orquestrador.ferramentas import graphify
 from orquestrador.observabilidade.telemetria import Telemetria
 
@@ -31,7 +31,11 @@ def backend(config_falso) -> Path:
 
 def tools(config_falso, telemetria: Telemetria | None, tentativa: int = 1) -> dict:
     criadas = criar_ferramentas(
-        config_falso, telemetria=telemetria, recurso="pedidos", tentativa=tentativa
+        config_falso,
+        estagio="mapeador",
+        telemetria=telemetria,
+        recurso="pedidos",
+        tentativa=tentativa,
     )
     return {ferramenta.name: ferramenta for ferramenta in criadas}
 

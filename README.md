@@ -583,9 +583,11 @@ src/orquestrador/
     tabelas.py       as tabelas Rich do resumo final
   agentes/
     __init__.py
-    mapeador.py      agente ReAct + registro das tools
-    executor.py      chamada estruturada, sem tools
-    auditor.py       STUB, interface definida
+    mapeador.py                 a unidade de trabalho do Bloco 1
+    ferramentas_do_mapeador.py  as cinco tools e a medição de cada chamada
+    grafo_react.py              todo o acoplamento com o LangGraph
+    executor.py                 chamada estruturada, sem tools
+    auditor.py                  STUB, interface definida
   analise_estatica/
     __init__.py
     exports_javascript.py    parser puro dos `export` de um módulo JS
