@@ -23,7 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orquestrador.config import Config
-from orquestrador.ferramentas.processo import ErroDeFerramenta, SaidaProcesso, executar, executar_node
+from orquestrador.excecoes import ErroDeFerramenta
+from orquestrador.ferramentas.processo import SaidaProcesso, executar, executar_node
 
 
 @dataclass(frozen=True)

@@ -14,7 +14,8 @@ from pathlib import Path
 
 from orquestrador.config import Config
 from orquestrador.contratos import Manifesto, Recurso, ResultadoGate, Violacao
-from orquestrador.ferramentas.processo import ExecutavelAusente, executar as rodar_processo
+from orquestrador.excecoes import ExecutavelAusente
+from orquestrador.ferramentas.processo import executar as rodar_processo
 from orquestrador.ferramentas.scripts_qa import Validador
 from orquestrador.gates import cobertura as gate_cobertura
 from orquestrador.gates.parser import resultado_do_validador, violacoes_do_eslint
@@ -42,7 +43,10 @@ def executar(
             config, recurso, manifesto=manifesto, gate=NOME, out=out_cobertura
         ),
     ]
-    return ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
+    combinado = ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
+    # Checagem que não rodou não vira delta: `exigir_veredito` interrompe o recurso
+    # em vez de devolver ao executor uma lista que ele não tem como satisfazer.
+    return combinado.exigir_veredito()
 
 
 def _validador(config: Config, recurso: Recurso) -> ResultadoGate:
@@ -69,10 +73,20 @@ def _formatador(
             timeout_s=config.execucao.timeout_s,
         )
     except ExecutavelAusente as erro:
-        problema = Violacao(codigo="QAORQ-022", mensagem=f"{nome} indisponível: {erro}")
         if config.execucao.exigir_formatadores:
-            return ResultadoGate(aprovado=False, violacoes=[problema], gate=NOME)
-        return ResultadoGate(aprovado=True, avisos=[problema], gate=NOME)
+            # Exigido e ausente é falha de ambiente, não do artefato: o executor não
+            # instala o `node_modules` do projeto, e um QAORQ-022 no delta gastaria
+            # tentativa pedindo a ele que consertasse o PATH de quem o roda.
+            return ResultadoGate.erro_da_ferramenta(
+                f"{nome} está configurado em [execucao] e exigido em "
+                f"exigir_formatadores, mas não foi encontrado: {erro}",
+                gate=NOME,
+            )
+        return ResultadoGate(
+            aprovado=True,
+            avisos=[Violacao(codigo="QAORQ-022", mensagem=f"{nome} indisponível: {erro}")],
+            gate=NOME,
+        )
 
     if saida.codigo == 0:
         return ResultadoGate(aprovado=True, saida_bruta=saida.texto, gate=NOME)

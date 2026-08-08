@@ -36,7 +36,14 @@ from orquestrador.contratos import (
     SaidaMapeador,
     SuperficieDoProjeto,
 )
-from orquestrador.excecoes import FalhaDeEstagio, FalhaDeGate
+from orquestrador.excecoes import (
+    ErroDeConfiguracao,
+    ErroDeFerramenta,
+    FalhaDaExecucaoDeTestes,
+    FalhaDeEstagio,
+    FalhaDeGate,
+    GrafoNaoPreparado,
+)
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
 from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.ferramentas.superficie import extrair as extrair_superficie
@@ -48,6 +55,36 @@ from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.simulacao import Roteiros
 
 
+# Estado da suíte em runtime, no Bloco 3. São dois estados e não um booleano
+# porque a diferença que importa é entre "os testes passaram" e "ninguém sabe":
+# sem relatório desta execução não há evidência de runtime nenhuma, e o resultado
+# precisa dizer isso em vez de deixar a cobertura estática passar por prova.
+EXECUTADO = "EXECUTADO"
+NAO_EXECUTADO = "NAO_EXECUTADO"
+
+# Marca substituída pelo caminho do relatório desta execução no comando do Cypress.
+MARCA_RELATORIO = "{relatorio}"
+
+
+@dataclass(frozen=True)
+class ResultadoDaExecucaoDeTestes:
+    """O que o Bloco 3 apurou: os contadores e de onde eles vieram."""
+
+    estado: str
+    contadores: dict[str, Any] = field(default_factory=dict)
+    relatorio: Path | None = None
+    motivo: str = ""
+
+
+@dataclass(frozen=True)
+class InterrupcaoDaExecucao:
+    """A execução parou no meio porque uma ferramenta não pôde rodar."""
+
+    motivo: str
+    recurso: str
+    recursos_nao_executados: list[str] = field(default_factory=list)
+
+
 @dataclass
 class ResultadoDoRecurso:
     recurso: str
@@ -57,6 +94,10 @@ class ResultadoDoRecurso:
     gate_a: ResultadoGate | None = None
     gate_b: ResultadoGate | None = None
     cobertura: dict[str, Any] = field(default_factory=dict)
+    # Nunca começa como "executado": o padrão de um campo é o que vale quando o
+    # recurso falha antes do Bloco 3, e o padrão errado aqui é um falso positivo.
+    execucao_de_testes: str = NAO_EXECUTADO
+    motivo_da_execucao_de_testes: str = "o Bloco 3 não chegou a rodar para este recurso"
     motivo: str = ""
     # A3: o que ficou em disco em estado reprovado. Não é apagado por padrão.
     arquivos_reprovados: list[Path] = field(default_factory=list)
@@ -129,6 +170,10 @@ class Pipeline:
         # Preenchida no Bloco 0: é do projeto, não do recurso, então é extraída uma
         # vez e viaja pela instrução fixa do executor.
         self.superficie: SuperficieDoProjeto | None = None
+        # Preenchida quando o laço de recursos para no meio. Fica no pipeline, e não
+        # no retorno de `rodar`, para que quem já lê a lista de resultados continue
+        # lendo a lista de resultados — inclusive a parcial.
+        self.interrupcao: InterrupcaoDaExecucao | None = None
 
     # -- modelos ------------------------------------------------------------
 
@@ -378,25 +423,29 @@ class Pipeline:
 
     # -- Bloco 3 ------------------------------------------------------------
 
-    def bloco3(self, recurso: Recurso) -> dict[str, Any]:
+    def bloco3(self, recurso: Recurso) -> ResultadoDaExecucaoDeTestes:
         self.registro.titulo(f"Bloco 3 — execução e relatório · {recurso.nome}")
-        report: Path | None = None
 
         if self.config.execucao.cypress and not self.pular_cypress:
-            from orquestrador.ferramentas.processo import executar as rodar
-
-            saida = rodar(
-                self.config.execucao.cypress,
-                cwd=self.config.caminhos.projeto_testes,
-                timeout_s=self.config.execucao.timeout_s,
+            report = self._rodar_cypress(recurso)
+            estado, motivo = EXECUTADO, ""
+        else:
+            report = None
+            estado = NAO_EXECUTADO
+            motivo = (
+                "sem --rodar-cypress"
+                if self.config.execucao.cypress
+                else "[execucao].cypress não configurado"
             )
             self.registro.evento(
-                "cypress", recurso=recurso.nome, codigo=saida.codigo, saida=saida.texto[:4000]
+                "cypress", recurso=recurso.nome, estado=NAO_EXECUTADO, motivo=motivo
             )
-            candidato = self.config.caminhos.projeto_testes / "report.json"
-            report = candidato if candidato.is_file() else None
-        else:
-            self.registro.info("execução do Cypress pulada (--pular-cypress ou não configurada)")
+            # Aviso, não info: sem relatório o que sai adiante é cobertura de
+            # forma — as tags que os specs declaram — e não prova de runtime.
+            self.registro.aviso(
+                f"Cypress NÃO EXECUTADO ({motivo}): a cobertura abaixo é estática, "
+                "nenhum teste foi rodado."
+            )
 
         saida = Cobertura(self.config).executar(
             recurso.caminho_testes,
@@ -405,15 +454,88 @@ class Pipeline:
         )
         contadores = resumo_da_cobertura(saida)
         self.registro.evento(
-            "cobertura", recurso=recurso.nome, contadores=contadores, saida=saida.texto[:2000]
+            "cobertura",
+            recurso=recurso.nome,
+            contadores=contadores,
+            execucao_de_testes=estado,
+            saida=saida.texto[:2000],
         )
         if contadores:
-            self.registro.ok(f"relatório de cobertura: {contadores}")
+            self.registro.ok(f"relatório de cobertura ({estado}): {contadores}")
         else:
             self.registro.aviso(
                 f"qa-cobertura.mjs não produziu contadores: {saida.texto[:400] or '(sem saída)'}"
             )
-        return contadores
+        return ResultadoDaExecucaoDeTestes(
+            estado=estado, contadores=contadores, relatorio=report, motivo=motivo
+        )
+
+    def _rodar_cypress(self, recurso: Recurso) -> Path:
+        """Roda a suíte e devolve o relatório **desta** execução.
+
+        Três coisas que faltavam e que, juntas, faziam o Bloco 3 aprovar sem prova:
+
+        1. o relatório mora no diretório da execução, um por recurso — antes era um
+           `report.json` fixo na raiz do projeto de testes, então o de ontem servia
+           para hoje;
+        2. o caminho é apagado antes de rodar (é **nosso** diretório: apagar aqui não
+           toca em arquivo do consumidor) e exigido depois, então sobra só relatório
+           que esta execução produziu;
+        3. código de saída diferente de zero interrompe o recurso. Antes ele virava
+           campo de evento e o recurso terminava como sucesso.
+        """
+        from orquestrador.ferramentas.processo import VARIAVEIS_DO_CYPRESS
+        from orquestrador.ferramentas.processo import executar as rodar
+
+        configurado = list(self.config.execucao.cypress)
+        if not any(MARCA_RELATORIO in argumento for argumento in configurado):
+            raise ErroDeConfiguracao(
+                f"[execucao].cypress precisa conter {MARCA_RELATORIO} no argumento que "
+                "diz ao repórter onde escrever o JSON — é assim que o orquestrador sabe "
+                "que o relatório é desta execução, e não de uma anterior. Exemplo:\n"
+                '  cypress = ["npx", "--no-install", "cypress", "run", "--reporter", '
+                '"json", "--reporter-options", "output=' + MARCA_RELATORIO + '"]'
+            )
+
+        destino = self.dir_execucao / "cypress" / recurso.nome / "report.json"
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.unlink(missing_ok=True)
+        argumentos = [
+            argumento.replace(MARCA_RELATORIO, str(destino)) for argumento in configurado
+        ]
+
+        saida = rodar(
+            argumentos,
+            cwd=self.config.caminhos.projeto_testes,
+            timeout_s=self.config.execucao.timeout_s,
+            # O ambiente do subprocesso é allowlist; sem estas, o `cypress.config.js`
+            # do consumidor sobe sem a configuração que ele espera e a suíte falha
+            # por um motivo que não tem nada a ver com o teste gerado.
+            variaveis_extras=VARIAVEIS_DO_CYPRESS,
+        )
+        self.registro.evento(
+            "cypress",
+            recurso=recurso.nome,
+            codigo=saida.codigo,
+            relatorio=destino,
+            relatorio_existe=destino.is_file(),
+            saida=saida.texto[:4000],
+        )
+
+        if saida.codigo != 0:
+            raise FalhaDaExecucaoDeTestes(
+                f"o Cypress reprovou o recurso {recurso.nome!r} (código {saida.codigo}). "
+                f"comando: {saida.comando}\n{saida.texto[:2000]}"
+            )
+        if not destino.is_file() or not destino.stat().st_size:
+            raise FalhaDaExecucaoDeTestes(
+                f"o Cypress saiu com código 0 mas não deixou relatório em {destino}. "
+                f"Confira o repórter em [execucao].cypress: sem o JSON desta execução não "
+                "há prova de runtime, e aceitar o relatório de outra execução é justamente "
+                "o que este caminho existe para impedir."
+            )
+        self.registro.ok(f"Cypress executado; relatório desta execução em {destino}")
+        return destino
 
     # -- loop de reparo -----------------------------------------------------
 
@@ -558,10 +680,42 @@ class Pipeline:
     # -- orquestração -------------------------------------------------------
 
     def rodar(self, recursos: list[Recurso]) -> list[ResultadoDoRecurso]:
-        self.bloco0()
+        preparacao = self.bloco0()
+        if not preparacao.ok:
+            # Falha fechada, e antes da primeira chamada de modelo: o mapeador
+            # consultando um grafo inválido não produz erro — produz exploração cara
+            # sobre um mapa errado, e nenhum gate reprova por esse motivo.
+            raise GrafoNaoPreparado(
+                f"Bloco 0 não deixou um graph.json utilizável em {preparacao.graph}: "
+                f"{preparacao.detalhe}\n"
+                "Rode o qa-reindex sobre o backend configurado antes de tentar de novo. "
+                "Nenhum modelo foi chamado."
+            )
         resultados: list[ResultadoDoRecurso] = []
-        for recurso in recursos:
-            resultados.append(self._rodar_recurso(recurso))
+        for indice, recurso in enumerate(recursos):
+            try:
+                resultados.append(self._rodar_recurso(recurso))
+            except (ErroDeFerramenta, ErroDeConfiguracao) as erro:
+                # Ferramenta indisponível não é falha do recurso, e por isso não é
+                # isolada como se fosse: o script que não rodou aqui não vai rodar no
+                # próximo, e insistir só queima token repetindo a mesma falha. Mas
+                # também não pode subir cru — a exceção atravessando `rodar` levaria
+                # junto o resultado dos recursos que já tinham terminado.
+                restantes = [seguinte.nome for seguinte in recursos[indice + 1 :]]
+                self.interrupcao = InterrupcaoDaExecucao(
+                    motivo=str(erro), recurso=recurso.nome, recursos_nao_executados=restantes
+                )
+                self.registro.falha(
+                    f"execução interrompida em {recurso.nome}: ferramenta indisponível. "
+                    f"{erro}"
+                )
+                self.registro.evento(
+                    "execucao_interrompida",
+                    recurso=recurso.nome,
+                    motivo=str(erro),
+                    recursos_nao_executados=restantes,
+                )
+                break
         return resultados
 
     def _rodar_recurso(self, recurso: Recurso) -> ResultadoDoRecurso:
@@ -577,7 +731,10 @@ class Pipeline:
             resultado.gate_b = gate_b_ok
             resultado.tentativas_executor = tentativas_b
 
-            resultado.cobertura = self.bloco3(recurso)
+            execucao_de_testes = self.bloco3(recurso)
+            resultado.cobertura = execucao_de_testes.contadores
+            resultado.execucao_de_testes = execucao_de_testes.estado
+            resultado.motivo_da_execucao_de_testes = execucao_de_testes.motivo
             resultado.sucesso = True
         except (FalhaDeGate, FalhaDeEstagio) as erro:
             resultado.motivo = str(erro)
@@ -600,6 +757,7 @@ class Pipeline:
             sucesso=resultado.sucesso,
             tentativas_mapeador=resultado.tentativas_mapeador,
             tentativas_executor=resultado.tentativas_executor,
+            execucao_de_testes=resultado.execucao_de_testes,
         )
         return resultado
 

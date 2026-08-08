@@ -6,6 +6,14 @@ nome de modelo é fixado no código.
 
 Caminhos relativos no TOML são resolvidos **contra o diretório do próprio arquivo
 de configuração**, para que a config seja movível junto com o projeto.
+
+Os limites numéricos são **tipos**, não convenção: `PositiveInt` e
+`NonNegativeFloat` com teto declarado. Um `max_tentativas = 0` desliga o loop de
+reparo em silêncio e um `-1` faz o pipeline pular o estágio inteiro sem erro
+nenhum — o tipo é o que impede a configuração de voltar a ficar inválida por um
+caminho que ninguém testou. Pelo mesmo motivo os modelos têm
+`validate_assignment=True`: mutação depois da carga é tão capaz de invalidar a
+configuração quanto o próprio arquivo.
 """
 
 from __future__ import annotations
@@ -13,23 +21,45 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeFloat,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
+    ValidationError,
+    model_validator,
+)
 
+from orquestrador.excecoes import ErroDeConfiguracao
 from orquestrador.raiz import CONFIG_PADRAO, DIR_PROMPTS_PADRAO
 
 ModoEstruturado = Literal["json_schema", "json_object", "tools", "prompt"]
 
+# Tetos. Não existe número "certo" aqui; existe a fronteira acima da qual o valor
+# quase certamente é engano de digitação e sai caro — cada tentativa é uma volta
+# inteira de LLM, e cada passo do ReAct reenvia o histórico da exploração.
+Tentativas = Annotated[PositiveInt, Field(le=20)]
+PassosDoAgente = Annotated[PositiveInt, Field(le=500)]
+# 2.0 é o teto que os provedores aceitam; acima disso a chamada é recusada lá.
+Temperatura = Annotated[NonNegativeFloat, Field(le=2.0)]
+Segundos = Annotated[PositiveInt, Field(le=3600)]
+SegundosFracionados = Annotated[PositiveFloat, Field(le=3600.0)]
 
-class ErroDeConfiguracao(RuntimeError):
-    """Configuração ausente, incoerente ou apontando para caminho inexistente."""
+# `extra="forbid"` pega chave com erro de digitação; `validate_assignment=True`
+# estende a garantia a quem escreve no modelo depois da carga.
+MODELO_DE_CONFIG = ConfigDict(extra="forbid", validate_assignment=True)
 
 
 class ConfigCaminhos(BaseModel):
     """Onde estão a skill, o backend e o projeto de testes."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = MODELO_DE_CONFIG
 
     skill: Path
     scripts: Path | None = None
@@ -52,11 +82,18 @@ class ConfigCaminhos(BaseModel):
     # caminho é configurável para a Fase 2 poder iterá-los onde quiser.
     prompts: Path = DIR_PROMPTS_PADRAO
 
-    @model_validator(mode="after")
-    def _derivar_scripts(self) -> "ConfigCaminhos":
-        if self.scripts is None:
-            self.scripts = self.skill / "scripts"
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _derivar_scripts(cls, bruto: Any) -> Any:
+        """`scripts` omitido vira `<skill>/scripts`.
+
+        Feito **antes** da construção, e não num validador `after`: com
+        `validate_assignment=True`, escrever num campo dentro do validador `after`
+        dispara outra rodada de validação do modelo inteiro.
+        """
+        if isinstance(bruto, dict) and not bruto.get("scripts") and bruto.get("skill"):
+            return {**bruto, "scripts": Path(str(bruto["skill"])) / "scripts"}
+        return bruto
 
     # -- caminhos derivados -------------------------------------------------
 
@@ -87,15 +124,19 @@ class ConfigCaminhos(BaseModel):
 class ConfigOpenRouter(BaseModel):
     """Acesso ao modelo. A chave vem sempre do ambiente, nunca do arquivo."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = MODELO_DE_CONFIG
 
-    base_url: str = "https://openrouter.ai/api/v1"
+    # Tipo de URL, não string: `base_url` termina concatenada com o caminho da API
+    # dentro do cliente, e um valor sem esquema vira um 404 que se parece com
+    # indisponibilidade do provedor. Quem consome converte com `str()`.
+    base_url: AnyHttpUrl = AnyHttpUrl("https://openrouter.ai/api/v1")
     api_key_env: str = "OPENROUTER_API_KEY"
     # OpenRouter usa estes cabeçalhos para atribuição; opcionais.
     referer: str | None = None
     titulo: str | None = None
-    timeout_s: float = 180.0
-    max_retries: int = 2
+    timeout_s: SegundosFracionados = 180.0
+    # Zero é legítimo: significa "não tente de novo".
+    max_retries: Annotated[NonNegativeInt, Field(le=10)] = 2
 
     def chave(self) -> str:
         chave = os.environ.get(self.api_key_env, "").strip()
@@ -119,62 +160,59 @@ class ConfigOpenRouter(BaseModel):
 class ConfigEstagio(BaseModel):
     """Modelo e parâmetros de um estágio de LLM."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = MODELO_DE_CONFIG
 
     modelo: str
-    temperatura: float = 0.0
-    max_tokens: int | None = None
+    temperatura: Temperatura = 0.0
+    max_tokens: PositiveInt | None = None
     # Como pedir saída estruturada. "prompt" é o mais portátil entre modelos do
     # OpenRouter; os outros usam o mecanismo nativo quando o modelo suporta.
     # Em qualquer modo a validação final é feita por Pydantic aqui no orquestrador.
     modo_estruturado: ModoEstruturado = "prompt"
     # Mini-loop de reparo do delta "schema" (saída que não valida).
-    max_tentativas_schema: int = 3
+    max_tentativas_schema: Tentativas = 3
     # Teto de passos do loop ReAct (só o mapeador usa).
-    limite_passos: int = 40
+    limite_passos: PassosDoAgente = 40
 
 
 class ConfigGate(BaseModel):
     """Flags do validador e limite de tentativas de reparo de um gate."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = MODELO_DE_CONFIG
 
     flags: list[str] = Field(default_factory=list)
-    max_tentativas: int = 3
+    max_tentativas: Tentativas = 3
     # Reprovar quando o gabarito declarar categoria que nenhum `it` cobre. Ligado por
     # padrão: é a checagem que responde por "planejei e não entreguei", que é o
     # defeito de origem do projeto. Só o Gate B a consome.
     exigir_cobertura: bool = True
 
-    @model_validator(mode="after")
-    def _tentativas_positivas(self) -> "ConfigGate":
-        if self.max_tentativas < 1:
-            raise ValueError("max_tentativas deve ser >= 1")
-        return self
-
 
 class ConfigExecucao(BaseModel):
     """Executáveis externos e limites de processo."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = MODELO_DE_CONFIG
 
     node: str = "node"
     graphify: str = "graphify"
-    timeout_s: int = 600
+    timeout_s: Segundos = 600
     # Comandos opcionais do Gate B. Lista vazia = etapa desligada.
     prettier: list[str] = Field(default_factory=list)
     eslint: list[str] = Field(default_factory=list)
-    # Ferramenta configurada mas ausente do PATH: aviso (False) ou reprovação (True).
+    # Ferramenta configurada mas ausente do PATH: aviso QAORQ-022 (False) ou
+    # interrupção por erro de ferramenta (True). Não reprova em nenhum dos dois: PATH
+    # de quem roda o pipeline não é algo que o executor conserte reescrevendo teste.
     exigir_formatadores: bool = False
     # Bloco 3.
     cypress: list[str] = Field(default_factory=list)
-    # Orçamento das tools de leitura do mapeador.
-    max_bytes_arquivo: int = 2_000_000
-    max_resultados_busca: int = 40
+    # Orçamento das tools de leitura do mapeador. Teto alto de propósito: o que
+    # protege o custo é a soma, não cada leitura — mas zero desligaria as tools.
+    max_bytes_arquivo: Annotated[PositiveInt, Field(le=50_000_000)] = 2_000_000
+    max_resultados_busca: Annotated[PositiveInt, Field(le=1_000)] = 40
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = MODELO_DE_CONFIG
 
     caminhos: ConfigCaminhos
     openrouter: ConfigOpenRouter = Field(default_factory=ConfigOpenRouter)
@@ -195,7 +233,18 @@ class Config(BaseModel):
         base = arquivo.resolve().parent
         bruto = _resolver_caminhos(bruto, base)
         bruto["origem"] = arquivo.resolve()
-        config = cls.model_validate(bruto)
+        try:
+            config = cls.model_validate(bruto)
+        except ValidationError as erro:
+            # A CLI trata `ErroDeConfiguracao` como código 2 e mensagem legível; um
+            # ValidationError cru sobe como traceback e parece defeito do programa.
+            raise ErroDeConfiguracao(
+                f"{arquivo}:\n"
+                + "\n".join(
+                    f"  - {'.'.join(str(parte) for parte in item['loc'])}: {item['msg']}"
+                    for item in erro.errors()
+                )
+            ) from erro
         config._exigir_estagios()
         return config
 
@@ -222,6 +271,29 @@ class Config(BaseModel):
             return self.gates[nome]
         except KeyError as erro:
             raise ErroDeConfiguracao(f"gate não configurado: {nome}") from erro
+
+    # -- overrides ----------------------------------------------------------
+
+    def com_max_tentativas(self, maximo: int) -> "Config":
+        """Cópia com o `max_tentativas` de todos os gates sobrescrito.
+
+        Cópia revalidada, não mutação: `--max-tentativas` chega de fora e precisa
+        atravessar o mesmo tipo que o arquivo atravessou. A CLI escrevia direto no
+        modelo já construído, então um valor fora da faixa entrava sem passar por
+        validação nenhuma.
+        """
+        try:
+            gates = {
+                nome: ConfigGate.model_validate(
+                    {**gate.model_dump(), "max_tentativas": maximo}
+                )
+                for nome, gate in self.gates.items()
+            }
+        except ValidationError as erro:
+            raise ErroDeConfiguracao(
+                f"--max-tentativas {maximo!r} é inválido: {erro.errors()[0]['msg']}"
+            ) from erro
+        return self.model_copy(update={"gates": gates})
 
     # -- validação de ambiente ---------------------------------------------
 

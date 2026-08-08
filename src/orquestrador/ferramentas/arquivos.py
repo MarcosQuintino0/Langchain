@@ -6,6 +6,11 @@ canoniza (resolvendo `..`, symlink e junction) e confere que o resultado continu
 sob a raiz autorizada. No Windows a comparação ignora a caixa, porque o sistema de
 arquivos ignora — comparar sensível a maiúsculas deixaria passar `C:\\BACKEND\\...`
 como se fosse outra raiz.
+
+Este módulo é o **dono da regra de confinamento**, e vale também para escrita: o
+executor grava os `.cy.js` por `confinar`, em vez de comparar texto por conta
+própria. Duas implementações da mesma regra divergem, e a que diverge é a que
+aceita o caminho que deveria recusar.
 """
 
 from __future__ import annotations
@@ -62,6 +67,30 @@ class CaminhoForaDaRaiz(PermissionError):
     """O caminho pedido escapa da raiz autorizada."""
 
 
+def sob_a_raiz(alvo: Path | str, raiz: Path | str) -> bool:
+    """`alvo` está dentro de `raiz` depois de canonizar os dois?
+
+    Esta é a **única** implementação da regra no projeto; quem precisar confinar
+    caminho chama daqui. Comparar texto (`str(alvo).startswith(str(raiz))`) parece
+    equivalente e não é: `.../pedidos-antigos` começa com `.../pedidos` e passaria
+    como se estivesse dentro dele. `is_relative_to` compara **componente a
+    componente**, então o irmão de prefixo comum é recusado.
+
+    `resolve()` nos dois lados antes da comparação, porque a fuga interessante não é
+    o `..` literal (o contrato já o recusa): é o symlink ou a junction do Windows
+    dentro da raiz apontando para fora dela.
+
+    Caixa: `Path` no Windows compara ignorando maiúsculas — que é o que o sistema de
+    arquivos faz — e no POSIX compara sensível, que também é o que o sistema de
+    arquivos faz. Nada a normalizar à mão aqui.
+    """
+    try:
+        canonico = Path(alvo).resolve(strict=False)
+        return canonico.is_relative_to(Path(raiz).resolve(strict=False))
+    except (OSError, ValueError):  # nome inválido, caminho longo demais
+        return False
+
+
 def relativo_a(alvo: Path, base: Path) -> str:
     """`alvo` visto a partir de `base`, em POSIX; o caminho inteiro se não couber.
 
@@ -96,13 +125,21 @@ class Confinamento:
         return alvo
 
     def _sob_a_raiz(self, alvo: Path) -> bool:
-        raiz = os.path.normcase(str(self.raiz))
-        candidato = os.path.normcase(str(alvo))
-        return candidato == raiz or candidato.startswith(raiz + os.sep)
+        return sob_a_raiz(alvo, self.raiz)
 
     def relativo(self, alvo: Path) -> str:
         """Caminho para exibição, sempre relativo à raiz confinada."""
         return relativo_a(alvo, self.raiz)
+
+
+def confinar(raiz: Path | str, caminho: str | Path) -> Path:
+    """Resolve `caminho` sob `raiz` e recusa qualquer coisa que escape dela.
+
+    Atalho para quem confina um punhado de caminhos e não guarda a raiz — o
+    executor, ao gravar os arquivos que o modelo emitiu. Quem faz muitas resoluções
+    contra a mesma raiz constrói um `Confinamento`, que a canoniza uma vez só.
+    """
+    return Confinamento(raiz).resolver(caminho)
 
 
 # ---------------------------------------------------------------------------

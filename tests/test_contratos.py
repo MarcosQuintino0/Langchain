@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -14,6 +15,7 @@ from orquestrador.contratos import (
     EndpointManifesto,
     Inventario,
     Manifesto,
+    Recurso,
     SaidaExecutor,
     SaidaMapeador,
     caminho_de_schema,
@@ -221,3 +223,65 @@ def test_saida_do_executor_nao_repete_caminho():
 
 def test_normalizar_endpoint_colapsa_espacos():
     assert normalizar_endpoint("  POST   /pedidos/:id  ") == "POST /pedidos/:id"
+
+
+# ---------------------------------------------------------------------------
+# Nome de recurso
+# ---------------------------------------------------------------------------
+#
+# O nome vem cru da CLI (ou da saída de um LLM) e vira diretório por concatenação.
+# Sem tipo, `--recurso ..\..\node_modules` é um caminho válido.
+
+
+@pytest.mark.parametrize("nome", ["pedidos", "nota-fiscal", "v2.pedidos", "nf_e", "a", "com"])
+def test_nome_de_recurso_aceita_slug(nome: str):
+    assert Recurso(nome=nome, caminho_testes=Path("x")).nome == nome
+
+
+@pytest.mark.parametrize(
+    "nome",
+    [
+        "..",
+        ".",
+        "../fora",
+        "..\\fora",
+        "pedidos/sub",
+        "pedidos\\sub",
+        "C:/pedidos",
+        "Pedidos",
+        "nota fiscal",
+        "-pedidos",
+        ".oculto",
+        "pedidos.",
+        "pedidos ",
+        "",
+        "pedidos\x00",
+    ],
+)
+def test_nome_de_recurso_recusa_o_que_vira_caminho(nome: str):
+    with pytest.raises(ValidationError):
+        Recurso(nome=nome, caminho_testes=Path("x"))
+
+
+@pytest.mark.parametrize("nome", ["con", "nul", "com1", "lpt9", "aux.json", "prn.schema.json"])
+def test_nome_de_recurso_recusa_dispositivo_reservado_do_windows(nome: str):
+    # Abrir "NUL" não cria arquivo: o Win32 desvia para o dispositivo, e o erro que
+    # sai disso não fala de recurso nem de diretório.
+    with pytest.raises(ValidationError, match="reservado"):
+        Recurso(nome=nome, caminho_testes=Path("x"))
+
+
+def test_nome_de_recurso_tambem_vale_para_o_que_o_modelo_emite():
+    # `manifesto.recurso` volta ao disco como diretório de schema, e quem o preenche
+    # é um LLM — a mesma superfície, um estágio depois.
+    with pytest.raises(ValidationError):
+        Manifesto.model_validate(manifesto_minimo(recurso="../fora"))
+    with pytest.raises(ValidationError):
+        Inventario(
+            recurso="..",
+            endpoints=[{"metodo": "GET", "rota": "/x", "handler": "a", "arquivo": "x"}],
+        )
+    with pytest.raises(ValidationError):
+        SaidaExecutor(
+            recurso="nul", arquivos=[ArquivoGerado(caminho="crud.cy.js", conteudo="x")]
+        )

@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import json
 import re
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -34,6 +36,8 @@ from pydantic import (
     model_validator,
 )
 
+from orquestrador.excecoes import ErroDeFerramenta
+
 # ---------------------------------------------------------------------------
 # Categorias
 # ---------------------------------------------------------------------------
@@ -41,13 +45,8 @@ from pydantic import (
 # As 12 categorias do catálogo. O *significado* de cada uma vive em
 # references/catalogo-de-testes.md e é conteúdo de prompt (Fase 2); aqui só os ids.
 CATS: tuple[str, ...] = tuple(f"CAT-{indice:02d}" for indice in range(1, 13))
-CATS_SET = frozenset(CATS)
 
 Cat = Annotated[str, StringConstraints(pattern=r"^CAT-(0[1-9]|1[0-2])$")]
-
-# Estados aceitos numa exceção de campo ("<estado>: <motivo>"), conforme
-# scripts/cobertura/campos/regras.mjs.
-ESTADOS_DE_EXCECAO: tuple[str, ...] = ("naoAplica", "pendente", "bloqueada")
 
 METODOS_HTTP: tuple[str, ...] = (
     "GET",
@@ -66,6 +65,53 @@ METODOS_DE_ESCRITA = frozenset({"POST", "PUT", "PATCH"})
 def normalizar_endpoint(valor: str) -> str:
     """Forma canônica de um endpoint, igual a `normalizarEndpoint` de comum.mjs."""
     return re.sub(r"\s+", " ", str(valor).strip())
+
+
+# ---------------------------------------------------------------------------
+# Nome de recurso
+# ---------------------------------------------------------------------------
+
+# O nome do recurso não é rótulo: ele vira diretório por concatenação
+# (`cypress/e2e/apis/<nome>`, `<raiz_schemas>/<nome>/x.schema.json`), então tudo o
+# que um caminho aceita, ele aceitaria — inclusive `..`, `C:`, separador e nome de
+# dispositivo. Restringir aqui é a única defesa que vale, porque cada consumidor
+# concatena por conta própria.
+_SLUG_DE_RECURSO = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+# Abrir `CON`, `NUL` ou `COM1` no Windows não abre arquivo nenhum: o Win32 desvia
+# para o dispositivo, com ou sem extensão e sem diferenciar caixa. O erro que sai
+# disso não menciona recurso, diretório nem orquestrador.
+DISPOSITIVOS_RESERVADOS_DO_WINDOWS: frozenset[str] = frozenset(
+    ("CON", "PRN", "AUX", "NUL")
+    + tuple(f"COM{indice}" for indice in range(1, 10))
+    + tuple(f"LPT{indice}" for indice in range(1, 10))
+)
+
+
+def validar_nome_de_recurso(valor: str) -> str:
+    """Aceita só o slug que pode virar diretório sem surpresa em nenhum sistema."""
+    nome = str(valor)
+    if not _SLUG_DE_RECURSO.match(nome):
+        raise ValueError(
+            f"nome de recurso inválido: {valor!r}. Use minúsculas, dígitos, ponto, "
+            'hífen ou sublinhado, começando por letra ou dígito (ex.: "pedidos", '
+            '"nota-fiscal", "v2.pedidos").'
+        )
+    if nome.endswith("."):
+        # O Windows descarta o ponto final ao abrir o caminho, então `pedidos.` e
+        # `pedidos` seriam o mesmo diretório com dois nomes — e os artefatos de um
+        # recurso apareceriam no do outro.
+        raise ValueError(f"nome de recurso não pode terminar em ponto: {valor!r}")
+    if nome.split(".", 1)[0].upper() in DISPOSITIVOS_RESERVADOS_DO_WINDOWS:
+        raise ValueError(
+            f"{valor!r} é dispositivo reservado do Windows: "
+            f"{', '.join(sorted(DISPOSITIVOS_RESERVADOS_DO_WINDOWS))} não viram "
+            "diretório, com ou sem extensão."
+        )
+    return nome
+
+
+NomeDeRecurso = Annotated[str, AfterValidator(validar_nome_de_recurso)]
 
 
 # ---------------------------------------------------------------------------
@@ -97,36 +143,139 @@ class Violacao(BaseModel):
         return f"[{self.codigo}]{local} - {self.mensagem}"
 
 
+class VereditoDeGate(StrEnum):
+    """Os três desfechos de uma checagem determinística.
+
+    O que um booleano não expressa é o terceiro: quando a ferramenta não rodou, não
+    existe veredito sobre o artefato. Chamar isso de aprovação declara sucesso sem
+    evidência; chamar de reprovação manda o modelo consertar um script que não
+    executou — tentativa gasta sem chance nenhuma de convergir.
+    """
+
+    APROVADO = "aprovado"
+    REPROVADO = "reprovado"
+    ERRO_DA_FERRAMENTA = "erro_da_ferramenta"
+
+
 class ResultadoGate(BaseModel):
     """Veredito de um gate determinístico sobre um artefato."""
 
-    aprovado: bool
+    veredito: VereditoDeGate = VereditoDeGate.APROVADO
     violacoes: list[Violacao] = Field(default_factory=list)
     avisos: list[Violacao] = Field(default_factory=list)
+    # Preenchido só no `ERRO_DA_FERRAMENTA`: é a mensagem que quem opera precisa ler
+    # para consertar o ambiente. Não é violação, e por isso mora fora de `violacoes`
+    # — o que está em `violacoes` vira delta e volta para o modelo.
+    motivo: str = ""
     saida_bruta: str = ""
     gate: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _aprovado_vira_veredito(cls, dados: Any) -> Any:
+        """Traduz `aprovado=` para os dois vereditos binários.
+
+        `veredito` é a fonte de verdade — só ele comporta os três estados —, mas a
+        maioria das checagens é binária mesmo, e escrever `aprovado=False` continua
+        sendo a forma mais curta e mais clara de dizer "reprovei".
+        """
+        if not isinstance(dados, dict) or "aprovado" not in dados:
+            return dados
+        campos = dict(dados)
+        aprovado = campos.pop("aprovado")
+        if "veredito" in campos:
+            raise ValueError("informe `aprovado` ou `veredito`, nunca os dois")
+        campos["veredito"] = (
+            VereditoDeGate.APROVADO if aprovado else VereditoDeGate.REPROVADO
+        )
+        return campos
+
+    @model_validator(mode="after")
+    def _veredito_coerente(self) -> "ResultadoGate":
+        if self.veredito is VereditoDeGate.APROVADO and self.violacoes:
+            raise ValueError(
+                "resultado aprovado com violação é contradição: "
+                f"{', '.join(v.codigo for v in self.violacoes)}"
+            )
+        if self.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA and not self.motivo.strip():
+            raise ValueError(
+                "erro de ferramenta exige `motivo`: é a única coisa que quem opera "
+                "recebe, e o loop de reparo não pode ajudar"
+            )
+        if self.veredito is not VereditoDeGate.ERRO_DA_FERRAMENTA and self.motivo:
+            raise ValueError("`motivo` só descreve falha de ferramenta")
+        return self
+
+    @property
+    def aprovado(self) -> bool:
+        return self.veredito is VereditoDeGate.APROVADO
 
     @property
     def codigos(self) -> list[str]:
         return [violacao.codigo for violacao in self.violacoes]
 
     @classmethod
+    def erro_da_ferramenta(
+        cls, motivo: str, *, gate: str, saida_bruta: str = ""
+    ) -> "ResultadoGate":
+        """Checagem que não pôde ser feita — indisponibilidade, não veredito."""
+        return cls(
+            veredito=VereditoDeGate.ERRO_DA_FERRAMENTA,
+            motivo=motivo,
+            saida_bruta=saida_bruta,
+            gate=gate,
+        )
+
+    @classmethod
     def combinar(cls, partes: list["ResultadoGate"], *, gate: str) -> "ResultadoGate":
-        """Une os vereditos das checagens de um mesmo gate (todas precisam passar)."""
+        """Une os vereditos das checagens de um mesmo gate (todas precisam passar).
+
+        Aprovar por ausência de violação é o defeito que esta função já teve: uma
+        checagem que reprova sem conseguir descrever o motivo desaparecia na união.
+        Agora aprovar exige as duas coisas — nenhum filho reprovado **e** nenhuma
+        violação. E erro de ferramenta domina o resto: checagem que não rodou não é
+        compensada por outra que rodou.
+        """
         violacoes: list[Violacao] = []
         avisos: list[Violacao] = []
         bruta: list[str] = []
+        motivos: list[str] = []
         for parte in partes:
             violacoes.extend(parte.violacoes)
             avisos.extend(parte.avisos)
             if parte.saida_bruta:
                 bruta.append(parte.saida_bruta)
+            if parte.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA:
+                motivos.append(parte.motivo)
+
+        if motivos:
+            veredito = VereditoDeGate.ERRO_DA_FERRAMENTA
+        elif violacoes or not all(parte.aprovado for parte in partes):
+            veredito = VereditoDeGate.REPROVADO
+        else:
+            veredito = VereditoDeGate.APROVADO
+
         return cls(
-            aprovado=not violacoes,
+            veredito=veredito,
             violacoes=violacoes,
             avisos=avisos,
+            motivo="\n".join(motivos),
             saida_bruta="\n".join(bruta),
             gate=gate,
+        )
+
+    def exigir_veredito(self) -> "ResultadoGate":
+        """Devolve o resultado, ou interrompe se não houver veredito sobre o artefato.
+
+        É aqui que o terceiro estado sai do vocabulário dos gates e vira interrupção.
+        O loop de reparo (`Pipeline._ciclo`) só sabe aprovar ou montar delta, e delta
+        de ferramenta quebrada é tentativa queimada: o modelo não tem como consertar
+        um script que não rodou. Falhar alto deixa a mensagem na mão de quem pode.
+        """
+        if self.veredito is not VereditoDeGate.ERRO_DA_FERRAMENTA:
+            return self
+        raise ErroDeFerramenta(
+            f"{self.gate or 'gate'} não pôde emitir veredito: {self.motivo}"
         )
 
 
@@ -162,7 +311,7 @@ class Delta(BaseModel):
 class Recurso(BaseModel):
     """Unidade de trabalho do pipeline: um recurso por vez, sem histórico entre eles."""
 
-    nome: str
+    nome: NomeDeRecurso
     caminho_testes: Path
     # Raiz do diretório de schemas do projeto de testes, vinda da configuração
     # (`[caminhos].dir_schemas`) como `caminho_testes`. Não é descoberta aqui: quem
@@ -252,7 +401,7 @@ class Inventario(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    recurso: str
+    recurso: NomeDeRecurso
     endpoints: list[Endpoint] = Field(min_length=1)
     rotas_dinamicas_nao_resolvidas: list[RotaDinamica] = Field(default_factory=list)
 
@@ -338,7 +487,9 @@ class Manifesto(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    recurso: str = Field(min_length=1)
+    # O manifesto é formato da skill, mas este campo em particular volta para o disco
+    # como diretório (`caminho_de_schema`), e quem o preenche é um LLM.
+    recurso: NomeDeRecurso
     profundidade: Literal["completa", "contrato"] | None = None
     handler_compartilhado: str | None = Field(default=None, alias="handlerCompartilhado")
     handler_coberto_por: str | None = Field(default=None, alias="handlerCobertoPor")
@@ -496,7 +647,7 @@ class SaidaExecutor(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    recurso: str
+    recurso: NomeDeRecurso
     arquivos: list[ArquivoGerado] = Field(min_length=1)
 
     @model_validator(mode="after")

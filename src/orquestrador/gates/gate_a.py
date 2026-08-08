@@ -45,7 +45,9 @@ def executar(
         manifesto=manifesto,
         recurso=recurso,
     )
-    return ResultadoGate.combinar([manifesto_ok, diff], gate=NOME)
+    # `exigir_veredito` interrompe quando o validador não se comportou como o
+    # contrato dele diz: sem veredito confiável não há o que mandar ao mapeador.
+    return ResultadoGate.combinar([manifesto_ok, diff], gate=NOME).exigir_veredito()
 
 
 def diff_grafo_manifesto(

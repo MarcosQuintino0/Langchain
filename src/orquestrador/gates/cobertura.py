@@ -27,6 +27,13 @@ dos specs — e é **conferido contra o contador antes de ser usado**. Se as dua
 contas não baterem, a lista é descartada e o delta sai só com o número. Palpite
 com cara de precisão é pior que número honesto: um endpoint×categoria errado na
 lista faz o executor gastar tentativa consertando o que não estava quebrado.
+
+E quando o contador não vem
+---------------------------
+Não há veredito. Não é aprovação — seria declarar cobertura sem tê-la medido, que
+é o falso sucesso que este gate existe para fechar — nem reprovação, porque o
+executor não tem como consertar um script que não rodou. O resultado é
+`ERRO_DA_FERRAMENTA`, e quem o recebe interrompe o recurso.
 """
 
 from __future__ import annotations
@@ -56,7 +63,8 @@ def executar(
 ) -> ResultadoGate | None:
     """Reprova quando o gabarito declarou categoria que nenhum `it` cobre.
 
-    Devolve `None` quando a checagem está desligada em `[gates.b].exigir_cobertura`.
+    Devolve `None` quando a checagem está desligada em `[gates.b].exigir_cobertura` —
+    desligada é decisão de quem configura, e não tem veredito nenhum a somar.
     """
     if not config.gate("b").exigir_cobertura:
         return None
@@ -65,20 +73,16 @@ def executar(
     contadores = resumo_da_cobertura(saida)
     if not contadores:
         # O script sai 0 mesmo sem conseguir gerar o relatório, então JSON ausente é
-        # o único sinal. Não reprovar aqui é deliberado: sem contador não há
-        # veredito, e inventar um seria pior que anunciar a lacuna do instrumento.
-        return ResultadoGate(
-            aprovado=True,
-            avisos=[
-                Violacao(
-                    codigo=CODIGO,
-                    mensagem=(
-                        "qa-cobertura.mjs não produziu contadores; a checagem de "
-                        f"lacuna não pôde rodar: {saida.texto[:400] or '(sem saída)'}"
-                    ),
-                )
-            ],
+        # o único sinal. Sem contador não há veredito: aprovar seria declarar
+        # cobertura sem tê-la medido, e reprovar mandaria o executor reescrever
+        # specs por causa de um script que não rodou.
+        return ResultadoGate.erro_da_ferramenta(
+            "qa-cobertura.mjs não produziu contadores, então a lacuna de cobertura "
+            "ficou sem medida. Rode o script à mão sobre "
+            f"{recurso.caminho_testes} para ver o erro, ou desligue a checagem em "
+            f"[gates.b].exigir_cobertura.\n{saida.texto[:400] or '(sem saída)'}",
             gate=gate,
+            saida_bruta=saida.texto,
         )
 
     lacunas = int(contadores.get("lacunas", 0))

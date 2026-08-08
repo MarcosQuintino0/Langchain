@@ -34,8 +34,7 @@ from orquestrador.contratos import (
 )
 from orquestrador.ferramentas import arquivos as fa
 from orquestrador.ferramentas.graphify import Graphify
-from orquestrador.ferramentas.processo import ErroDeFerramenta
-from orquestrador.excecoes import FalhaDeEstagio
+from orquestrador.excecoes import ErroDeFerramenta, FalhaDeEstagio
 from orquestrador.llm.estruturado import violacoes_de_validacao
 from orquestrador.llm.mensagens import texto_da_mensagem, uso_das_mensagens
 from orquestrador.observabilidade.telemetria import Telemetria
@@ -295,7 +294,7 @@ def _criar_agente(modelo: Any, ferramentas: list[BaseTool], instrucao: str) -> A
     except ImportError as erro:  # pragma: no cover - ambiente incompleto
         raise FalhaDeEstagio(
             "não foi possível importar langgraph.prebuilt.create_react_agent. "
-            "Rode `pip install -r requirements.txt`; se o LangGraph já for 2.x, "
+            'Rode `pip install -e ".[dev]"`; se o LangGraph já for 2.x, '
             "migre para `from langchain.agents import create_agent` (pacote langchain)."
         ) from erro
 

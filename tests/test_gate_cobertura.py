@@ -15,8 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from orquestrador.contratos import Manifesto, Recurso
+from orquestrador.contratos import Manifesto, Recurso, VereditoDeGate
+from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import cobertura as gate_cobertura
+from orquestrador.gates.codigos import CODIGOS_DO_ORQUESTRADOR
 from orquestrador.javascript import extrair_tags
 
 from conftest import saida_de_processo
@@ -136,9 +138,11 @@ def test_tag_dinamica_impede_o_detalhe_mas_nao_o_veredito(config_falso, recurso,
     assert "1 categoria(s)" in resultado.violacoes[0].mensagem
 
 
-def test_sem_contadores_avisa_em_vez_de_reprovar(config_falso, recurso, monkeypatch):
-    # O script sai 0 mesmo sem gerar relatório. Sem contador não há veredito, e
-    # inventar um seria pior do que anunciar que o instrumento falhou.
+def test_sem_contadores_e_erro_da_ferramenta(config_falso, recurso, monkeypatch):
+    # O script sai 0 mesmo sem gerar relatório, então JSON ausente é o único sinal.
+    # Aprovar aqui era declarar cobertura sem tê-la medido — é o falso sucesso que
+    # este gate existe para fechar. Reprovar seria pior ainda: o executor gastaria
+    # tentativa reescrevendo specs por causa de um script que não rodou.
     com_contadores(monkeypatch, 0, json_valido=False)
     escrever_spec(recurso, SPEC_COMPLETO)
 
@@ -146,8 +150,22 @@ def test_sem_contadores_avisa_em_vez_de_reprovar(config_falso, recurso, monkeypa
         config_falso, recurso, manifesto=MANIFESTO, gate="gate_b"
     )
 
-    assert resultado.aprovado is True
-    assert resultado.avisos[0].codigo == "QAORQ-030"
+    assert resultado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
+    assert resultado.aprovado is False
+    # Nada aqui pode virar delta: violação é o que volta ao modelo.
+    assert resultado.violacoes == []
+    assert "qa-cobertura.mjs" in resultado.motivo
+    # E a mensagem precisa dizer o que fazer — quem lê é quem opera, não o modelo.
+    assert "exigir_cobertura" in resultado.motivo
+
+    with pytest.raises(ErroDeFerramenta):
+        resultado.exigir_veredito()
+
+
+def test_qaorq_030_esta_no_catalogo():
+    # O código era emitido sem estar catalogado, e catálogo incompleto é a forma
+    # mais barata de um código virar folclore.
+    assert gate_cobertura.CODIGO in CODIGOS_DO_ORQUESTRADOR
 
 
 def test_desligado_na_configuracao_nao_roda(config_falso, recurso, monkeypatch):

@@ -30,7 +30,7 @@ from orquestrador.excecoes import ProjetoNaoPreparado
 from orquestrador.ferramentas.arquivos import relativo_a
 from orquestrador.javascript import ExportJs, extrair_exports
 
-__all__ = ["EXTENSOES", "caminho_de_import", "extrair", "extrair_exports"]
+__all__ = ["EXTENSOES", "caminho_de_import", "extrair"]
 
 EXTENSOES = (".js", ".mjs", ".cjs")
 

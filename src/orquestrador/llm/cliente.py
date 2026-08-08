@@ -10,7 +10,8 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
-from orquestrador.config import Config, ErroDeConfiguracao
+from orquestrador.config import Config
+from orquestrador.excecoes import ErroDeConfiguracao
 
 
 def criar_modelo(config: Config, estagio: str) -> BaseChatModel:
@@ -32,7 +33,7 @@ def criar_modelo(config: Config, estagio: str) -> BaseChatModel:
         extras["default_headers"] = cabecalhos
     return ChatOpenAI(
         model=parametros.modelo,
-        base_url=config.openrouter.base_url,
+        base_url=str(config.openrouter.base_url),
         api_key=config.openrouter.chave(),
         temperature=parametros.temperatura,
         timeout=config.openrouter.timeout_s,

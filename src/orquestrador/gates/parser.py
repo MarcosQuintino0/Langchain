@@ -10,17 +10,19 @@ import json
 from typing import Any
 
 from orquestrador.contratos import ResultadoGate, Violacao
-from orquestrador.excecoes import ErroDeInvocacao
 from orquestrador.ferramentas.processo import SaidaProcesso
 from orquestrador.textos import extrair_json
 
 __all__ = [
-    "ErroDeInvocacao",
-    "extrair_json",
     "resultado_do_validador",
     "resumo_da_cobertura",
     "violacoes_do_eslint",
 ]
+
+# O contrato documentado do `validar-suite-gerada.mjs`: exit 0 com `valid: true`,
+# exit 1 com `valid: false`. Qualquer outro par é quebra de contrato — não dá para
+# escolher em quem acreditar, e escolher errado é aprovar suíte reprovada.
+_CODIGO_ESPERADO: dict[bool, int] = {True: 0, False: 1}
 
 
 def resultado_do_validador(saida: SaidaProcesso, *, gate: str) -> ResultadoGate:
@@ -28,11 +30,17 @@ def resultado_do_validador(saida: SaidaProcesso, *, gate: str) -> ResultadoGate:
 
     O script escreve no **stdout quando aprova** e no **stderr quando reprova**;
     ler só um dos dois faz reprovação parecer saída vazia.
+
+    Nenhuma falha daqui vira violação: quando o script não se comporta como o
+    contrato dele diz, o resultado é `ERRO_DA_FERRAMENTA`, e quem o recebe
+    interrompe o recurso em vez de mandar o modelo consertar o que ele não escreveu.
     """
     if saida.codigo == 2:
-        raise ErroDeInvocacao(
+        return ResultadoGate.erro_da_ferramenta(
             "validar-suite-gerada.mjs recusou a invocação (exit 2): "
-            f"{saida.texto[:1000]}\ncomando: {saida.comando}"
+            f"{saida.texto[:1000]}\ncomando: {saida.comando}",
+            gate=gate,
+            saida_bruta=saida.texto,
         )
 
     # Tenta os dois fluxos: aprovação sai pelo stdout, reprovação pelo stderr, e
@@ -48,15 +56,38 @@ def resultado_do_validador(saida: SaidaProcesso, *, gate: str) -> ResultadoGate:
         except (ValueError, json.JSONDecodeError) as erro:
             ultimo_erro = erro
     if dados is None:
-        raise ErroDeInvocacao(
+        return ResultadoGate.erro_da_ferramenta(
             f"saída não-JSON de validar-suite-gerada.mjs ({ultimo_erro or 'saída vazia'}). "
-            f"código={saida.codigo} comando={saida.comando}\n{saida.texto[:1000]}"
-        ) from ultimo_erro
+            f"código={saida.codigo} comando={saida.comando}\n{saida.texto[:1000]}",
+            gate=gate,
+            saida_bruta=saida.texto,
+        )
 
     valido = bool(dados.get("valid"))
+    if saida.codigo != _CODIGO_ESPERADO[valido]:
+        return ResultadoGate.erro_da_ferramenta(
+            f'validar-suite-gerada.mjs devolveu "valid": {str(valido).lower()} com '
+            f"exit {saida.codigo}; o contrato é exit {_CODIGO_ESPERADO[valido]}. "
+            "Confira a versão da skill em [caminhos].skill.\n"
+            f"comando: {saida.comando}\n{saida.texto[:1000]}",
+            gate=gate,
+            saida_bruta=saida.texto,
+        )
+
+    violacoes = [Violacao.model_validate(item) for item in dados.get("errors") or []]
+    if valido and violacoes:
+        return ResultadoGate.erro_da_ferramenta(
+            f'validar-suite-gerada.mjs devolveu "valid": true e listou '
+            f"{len(violacoes)} erro(s) ({', '.join(v.codigo for v in violacoes)}). "
+            "Confira a versão da skill em [caminhos].skill.\n"
+            f"comando: {saida.comando}",
+            gate=gate,
+            saida_bruta=saida.texto,
+        )
+
     return ResultadoGate(
         aprovado=valido,
-        violacoes=[Violacao.model_validate(item) for item in dados.get("errors") or []],
+        violacoes=violacoes,
         avisos=[Violacao.model_validate(item) for item in dados.get("warnings") or []],
         saida_bruta=saida.texto,
         gate=gate,

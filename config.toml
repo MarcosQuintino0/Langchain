@@ -103,11 +103,27 @@ timeout_s = 600
 # O diretório do recurso é acrescentado como último argumento.
 prettier = []
 eslint = []
-# true faz ferramenta configurada e ausente do PATH reprovar; false gera aviso.
+# Ferramenta configurada aqui e ausente do PATH:
+#   true  interrompe a execução com erro de ferramenta;
+#   false segue com o aviso QAORQ-022.
+# Nem um nem outro reprova o artefato — instalar o toolchain do projeto não é
+# trabalho que o executor consiga fazer reescrevendo teste.
 exigir_formatadores = false
 
 # Bloco 3. Só roda com --rodar-cypress.
-#   cypress = ["npx", "--no-install", "cypress", "run"]
+#
+# O comando PRECISA conter a marca {relatorio} no argumento que diz ao repórter
+# onde escrever o JSON. O orquestrador a substitui pelo caminho do relatório desta
+# execução (dentro de `saida`), garante que ele não existe antes de rodar e exige
+# que exista depois. Sem isso não há como distinguir o relatório de agora do que
+# uma execução anterior deixou no projeto — e relatório velho aprovando suíte nova
+# é o falso sucesso mais silencioso que existe.
+#
+# Código de saída diferente de zero reprova o recurso; quando o Cypress não roda,
+# o resumo diz NAO_EXECUTADO em vez de deixar a cobertura estática passar por prova.
+#
+#   cypress = ["npx", "--no-install", "cypress", "run",
+#              "--reporter", "json", "--reporter-options", "output={relatorio}"]
 cypress = []
 
 max_bytes_arquivo = 2000000

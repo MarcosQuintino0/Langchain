@@ -9,7 +9,11 @@ custo linear.
 
 from __future__ import annotations
 
-from orquestrador.contratos import Delta, ResultadoGate, Violacao
+import pytest
+from pydantic import ValidationError
+
+from orquestrador.contratos import Delta, ResultadoGate, VereditoDeGate, Violacao
+from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.montagem import montar_entrada_reparo
 
 
@@ -93,3 +97,51 @@ def test_combinar_aprova_quando_todas_aprovam():
     )
     assert combinado.aprovado is True
     assert combinado.gate == "gate_b"
+
+
+def test_combinar_reprova_com_filho_reprovado_e_sem_violacao():
+    # Aprovar por ausência de violação era o defeito: bastava uma checagem reprovar
+    # sem conseguir descrever o motivo para o gate inteiro passar.
+    combinado = ResultadoGate.combinar(
+        [ResultadoGate(aprovado=True), ResultadoGate(aprovado=False)], gate="gate_a"
+    )
+    assert combinado.veredito is VereditoDeGate.REPROVADO
+    assert combinado.violacoes == []
+
+
+def test_aprovado_com_violacao_e_contradicao_recusada_no_modelo():
+    with pytest.raises(ValidationError, match="contradição"):
+        ResultadoGate(aprovado=True, violacoes=[violacao("QAAPI-002")])
+
+
+def test_erro_da_ferramenta_domina_a_uniao_e_nao_vira_delta():
+    # Uma checagem que não rodou não é compensada por outra que rodou: sem ela, o
+    # gate não sabe se o artefato presta.
+    combinado = ResultadoGate.combinar(
+        [
+            ResultadoGate(aprovado=True),
+            ResultadoGate.erro_da_ferramenta("qa-cobertura.mjs mudo", gate="gate_b"),
+        ],
+        gate="gate_b",
+    )
+    assert combinado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
+    assert combinado.aprovado is False
+    assert combinado.violacoes == []
+    with pytest.raises(ErroDeFerramenta, match="qa-cobertura.mjs mudo"):
+        combinado.exigir_veredito()
+
+
+def test_erro_da_ferramenta_exige_motivo_acionavel():
+    # Sem motivo, a interrupção chega a quem opera como "falhou" e nada mais.
+    with pytest.raises(ValidationError, match="motivo"):
+        ResultadoGate(veredito=VereditoDeGate.ERRO_DA_FERRAMENTA, gate="gate_b")
+
+
+def test_veredito_com_veredito_e_aprovado_juntos_e_recusado():
+    with pytest.raises(ValidationError, match="nunca os dois"):
+        ResultadoGate(aprovado=True, veredito=VereditoDeGate.REPROVADO)
+
+
+def test_gate_que_reprova_devolve_veredito_sem_interromper():
+    reprovado = ResultadoGate(aprovado=False, violacoes=[violacao("QAAPI-025")])
+    assert reprovado.exigir_veredito() is reprovado

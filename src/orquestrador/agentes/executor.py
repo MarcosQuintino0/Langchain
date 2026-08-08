@@ -22,6 +22,7 @@ from orquestrador.contratos import (
     SaidaExecutor,
     SuperficieDoProjeto,
 )
+from orquestrador.ferramentas.arquivos import confinar
 from orquestrador.llm.estruturado import GeradorEstruturado
 from orquestrador.observabilidade.telemetria import Telemetria
 from orquestrador.montagem import (
@@ -108,14 +109,18 @@ def executar(
 
 
 def escrever(recurso: Recurso, saida: SaidaExecutor) -> list[Path]:
-    """Materializa os arquivos no diretório do recurso — o handoff é o disco."""
+    """Materializa os arquivos no diretório do recurso — o handoff é o disco.
+
+    Cinto e suspensório: o contrato de `ArquivoGerado` já recusa `..` e caminho
+    absoluto; `confinar` recusa o que sobra — junction ou symlink dentro do recurso
+    apontando para fora dele. Quem decide isso é `ferramentas.arquivos`, dono da
+    regra: a comparação textual que vivia aqui aceitava o diretório irmão de prefixo
+    comum (`.../pedidos-antigos` passava por `.../pedidos`).
+    """
     escritos: list[Path] = []
-    raiz = recurso.caminho_testes.resolve()
+    raiz = recurso.caminho_testes
     for arquivo in saida.arquivos:
-        destino = (raiz / arquivo.caminho).resolve()
-        # Cinto e suspensório: o contrato já recusa ".." e caminho absoluto.
-        if not str(destino).startswith(str(raiz)):
-            raise ValueError(f"arquivo fora do recurso: {arquivo.caminho}")
+        destino = confinar(raiz, arquivo.caminho)
         destino.parent.mkdir(parents=True, exist_ok=True)
         destino.write_text(arquivo.conteudo, encoding="utf-8", newline="\n")
         escritos.append(destino)

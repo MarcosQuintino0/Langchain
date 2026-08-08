@@ -2,6 +2,11 @@
 
 Gera → persiste → avalia → (delta → repete), com limite de tentativas. Os testes
 usam produtores e gates falsos: o que está sob teste é o laço, não os scripts.
+
+A última seção guarda o número que dá corda no laço. `max_tentativas` é a única
+configuração que decide **quantas vezes** um estágio roda: em zero o loop não
+executa nenhuma tentativa e o gate reprova sem nunca ter avaliado nada, e a CLI
+tinha um caminho que aceitava esse zero em silêncio.
 """
 
 from __future__ import annotations
@@ -9,9 +14,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from orquestrador import cli as modulo_cli
+from orquestrador.config import ConfigGate
 from orquestrador.contratos import Delta, ResultadoGate, Violacao
-from orquestrador.excecoes import FalhaDeGate
+from orquestrador.excecoes import ErroDeConfiguracao, FalhaDeGate
 from orquestrador.pipeline import Pipeline
 from orquestrador.observabilidade.registro import Registro
 
@@ -139,3 +147,70 @@ def test_cada_tentativa_recebe_apenas_o_delta_mais_recente(pipeline: Pipeline):
     assert [d.violacoes[0].codigo for d in deltas[1:]] == ["QAAPI-021", "QAAPI-022"]
     # A terceira tentativa NÃO acumula as violações da primeira.
     assert len(deltas[2].violacoes) == 1
+
+
+# ---------------------------------------------------------------------------
+# O limite que dá corda no laço
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("invalido", [0, -1, 21])
+def test_max_tentativas_fora_da_faixa_nao_constroi_o_gate(invalido: int):
+    with pytest.raises(ValidationError):
+        ConfigGate(max_tentativas=invalido)
+
+
+def test_o_limite_nao_pode_ser_invalidado_depois_da_carga():
+    # `validate_assignment`: o modelo já construído continua sendo validado. Era por
+    # aqui que a CLI entrava, escrevendo direto no gate.
+    gate = ConfigGate()
+    with pytest.raises(ValidationError):
+        gate.max_tentativas = 0
+    assert gate.max_tentativas == 3
+
+
+def test_com_max_tentativas_revalida_e_nao_muta_o_original(config_falso):
+    novo = config_falso.com_max_tentativas(5)
+
+    assert [gate.max_tentativas for gate in novo.gates.values()] == [5, 5]
+    # A cópia é cópia: o original segue com o que veio do arquivo (3 e 2).
+    assert [gate.max_tentativas for gate in config_falso.gates.values()] == [3, 2]
+    # E o resto da configuração atravessa intacto.
+    assert novo.gates["a"].flags == ["--so-manifesto"]
+    assert novo.caminhos == config_falso.caminhos
+
+    with pytest.raises(ErroDeConfiguracao):
+        config_falso.com_max_tentativas(0)
+
+
+@pytest.mark.parametrize("texto", ["0", "-1", "3.5", "tres"])
+def test_a_cli_recusa_max_tentativas_que_nao_e_inteiro_positivo(texto: str):
+    # `--max-tentativas 0` era aceito pelo parser e depois descartado por um `if` de
+    # truthiness: o pipeline rodava com o limite do arquivo, diferente do pedido.
+    with pytest.raises(SystemExit) as saida:
+        modulo_cli.parse_args(["--max-tentativas", texto])
+    assert saida.value.code != 0
+
+
+def test_o_limite_da_cli_chega_ao_ciclo(config_falso, tmp_path: Path):
+    config = config_falso.com_max_tentativas(modulo_cli.parse_args(
+        ["--max-tentativas", "1"]
+    ).max_tentativas)
+    pipeline = Pipeline(
+        config,
+        Registro(tmp_path / "execucao.jsonl"),
+        dry_run=True,
+        roteiros=None,
+        dir_execucao=tmp_path / "execucao",
+    )
+
+    with pytest.raises(FalhaDeGate, match=r"1 tentativa\(s\)"):
+        pipeline._ciclo(
+            estagio="executor",
+            gate="b",
+            recurso=recurso_de(pipeline.config),
+            produzir=lambda numero, delta, atual: "artefato",
+            persistir=lambda _artefato: None,
+            avaliar=lambda _artefato: reprovado("QAAPI-025"),
+            texto_do_artefato=str,
+        )
