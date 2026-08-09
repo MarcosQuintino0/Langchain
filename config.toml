@@ -148,3 +148,8 @@ cypress = []
 
 max_bytes_arquivo = 2000000
 max_resultados_busca = 40
+
+# Teto desta bateria de teste. 8 milhões de tokens por execução: folga de ~6x sobre
+# a faixa estimada para o backend inteiro, e um freio contra laço em fuga.
+[orcamento.por_execucao]
+tokens = 8000000
