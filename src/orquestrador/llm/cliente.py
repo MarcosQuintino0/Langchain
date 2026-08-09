@@ -104,7 +104,14 @@ def criar_modelo(config: Config, estagio: str) -> BaseChatModel:
     # configuração de conta: o OpenRouter escolhe o provedor por requisição, então
     # uma política que mora em outro lugar não é política — é preferência. O que
     # ela pede está em `ConfigOpenRouter.roteamento`.
-    extras["extra_body"] = {"provider": config.openrouter.roteamento()}
+    corpo: dict[str, Any] = {"provider": config.openrouter.roteamento()}
+    if parametros.max_tokens_de_raciocinio is not None:
+        # Num modelo de raciocínio, o pensamento gasta o orçamento de saída. Sem
+        # teto, um pedido grande faz o modelo pensar até o limite e devolver a
+        # resposta cortada — que chega aqui como `QAORQ-011`, não como erro de
+        # provedor. Ver `[estagios.*].max_tokens_de_raciocinio`.
+        corpo["reasoning"] = {"max_tokens": parametros.max_tokens_de_raciocinio}
+    extras["extra_body"] = corpo
     return ChatOpenAI(
         model=parametros.modelo,
         base_url=str(config.openrouter.base_url),

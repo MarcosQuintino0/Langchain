@@ -254,6 +254,22 @@ class ConfigEstagio(BaseModel):
     # Teto de passos do loop ReAct (só o mapeador usa).
     limite_passos: PassosDoAgente = 40
 
+    # Teto de tokens de **raciocínio** por chamada. `None` deixa o padrão do
+    # provedor, que é sem teto.
+    #
+    # Isto não é ajuste fino: num modelo de raciocínio, o pensamento consome o
+    # MESMO orçamento de saída que a resposta. Medido nesta configuração — reparo
+    # com 30 mil caracteres de entrada, DeepSeek V4 Flash: 63.172 tokens de
+    # raciocínio de um teto de 65.536, e a resposta foi cortada no meio. O sintoma
+    # não é "erro do provedor": é `QAORQ-011`, saída que não é JSON, porque o que
+    # chega é o rascunho do pensamento truncado.
+    #
+    # Zero não é um valor útil aqui, e a faixa recusa: com o raciocínio desligado o
+    # mesmo modelo devolveu `{"arquivos": []}` — estrutura válida e vazia, que só não
+    # passou porque o contrato exige ao menos um arquivo. Limitar resolve; desligar
+    # troca um defeito por outro.
+    max_tokens_de_raciocinio: Annotated[PositiveInt, Field(le=100_000)] | None = None
+
 
 class ConfigGate(BaseModel):
     """Flags do validador e limite de tentativas de reparo de um gate."""
