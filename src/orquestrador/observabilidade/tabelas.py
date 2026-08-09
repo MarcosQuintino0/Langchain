@@ -18,7 +18,24 @@ from typing import TYPE_CHECKING
 from rich.table import Table
 
 if TYPE_CHECKING:
+    from orquestrador.observabilidade.medidas import UsoDeTokens
     from orquestrador.observabilidade.telemetria import Telemetria
+
+
+def cache_da_entrada(uso: UsoDeTokens) -> str:
+    """Quanto da entrada veio do cache, em token e em porcentagem.
+
+    Fica ao lado de "entrada" e não numa coluna de custo porque a pergunta que ele
+    responde é sobre reaproveitamento, não sobre preço: um estágio que reenvia o
+    mesmo prefixo dezenas de vezes deveria mostrar taxa alta, e mostra a real.
+
+    Cache gravado só aparece quando existe. Ele é ruído na maioria das linhas e
+    diagnóstico numa: escrever muito e ler pouco é pagar a mais por nada.
+    """
+    if not uso.entrada:
+        return "—"
+    texto = f"{uso.cache_lido:,} ({uso.taxa_de_cache:.0%})"
+    return f"{texto} +{uso.cache_escrito:,}w" if uso.cache_escrito else texto
 
 
 def tabela_por_estagio(telemetria: Telemetria) -> Table:
@@ -29,6 +46,7 @@ def tabela_por_estagio(telemetria: Telemetria) -> Table:
     tabela.add_column("estágio")
     tabela.add_column("chamadas", justify="right")
     tabela.add_column("entrada", justify="right")
+    tabela.add_column("do cache", justify="right")
     tabela.add_column("saída", justify="right")
     tabela.add_column("total", justify="right")
     tabela.add_column("tempo (s)", justify="right")
@@ -37,6 +55,7 @@ def tabela_por_estagio(telemetria: Telemetria) -> Table:
             estagio,
             str(agregado.chamadas),
             f"{agregado.uso.entrada:,}",
+            cache_da_entrada(agregado.uso),
             f"{agregado.uso.saida:,}",
             f"{agregado.uso.total:,}",
             f"{agregado.duracao_s:.1f}",
@@ -47,6 +66,7 @@ def tabela_por_estagio(telemetria: Telemetria) -> Table:
         "[bold]TOTAL",
         f"[bold]{len(telemetria.chamadas)}",
         f"[bold]{total.entrada:,}",
+        f"[bold]{cache_da_entrada(total)}",
         f"[bold]{total.saida:,}",
         f"[bold]{total.total:,}",
         f"[bold]{sum(c.duracao_s for c in telemetria.chamadas):.1f}",

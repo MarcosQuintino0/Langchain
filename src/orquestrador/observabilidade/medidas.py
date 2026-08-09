@@ -18,15 +18,39 @@ from pydantic import BaseModel, Field
 
 
 class UsoDeTokens(BaseModel):
+    """Tokens de uma chamada, e quanto deles o cache do provedor cobriu.
+
+    `cache_lido` e `cache_escrito` são **subconjuntos de `entrada`**, não parcelas
+    a somar: um prefixo reaproveitado continua contando como entrada, só que
+    cobrado a uma fração. Somá-los ao total contaria duas vezes.
+
+    Os dois, e não só o primeiro, porque a conta só fecha com os dois. Gravar
+    cache costuma custar **mais** que uma entrada normal; um agente que escreve
+    cache toda volta e nunca o lê paga a mais para não economizar nada. Sem
+    `cache_escrito` esse caso se parece com sucesso.
+    """
+
     entrada: int = 0
     saida: int = 0
+    cache_lido: int = 0
+    cache_escrito: int = 0
 
     @property
     def total(self) -> int:
         return self.entrada + self.saida
 
+    @property
+    def taxa_de_cache(self) -> float:
+        """Fração da entrada que veio do cache, de 0 a 1. Zero sem entrada."""
+        return self.cache_lido / self.entrada if self.entrada else 0.0
+
     def __add__(self, outro: UsoDeTokens) -> UsoDeTokens:
-        return UsoDeTokens(entrada=self.entrada + outro.entrada, saida=self.saida + outro.saida)
+        return UsoDeTokens(
+            entrada=self.entrada + outro.entrada,
+            saida=self.saida + outro.saida,
+            cache_lido=self.cache_lido + outro.cache_lido,
+            cache_escrito=self.cache_escrito + outro.cache_escrito,
+        )
 
 
 class RegistroDeChamada(BaseModel):

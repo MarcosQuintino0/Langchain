@@ -14,6 +14,38 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
 from orquestrador.observabilidade.medidas import UsoDeTokens
 
+# Os três nomes que os provedores dão ao mesmo número: quanto da entrada veio do
+# cache. `cached_tokens` é a rota compatível com OpenAI (é o que o OpenRouter devolve
+# em `prompt_tokens_details`); `cache_read_input_tokens` é a Anthropic nativa;
+# `cache_read` aparece em rotas que abreviam. Aceitar os três aqui, na fronteira, é o
+# que evita espalhar `if provedor ==` pelo resto do projeto.
+_LIDO = ("cached_tokens", "cache_read_input_tokens", "cache_read")
+_ESCRITO = ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation")
+
+
+def _contar(mapa: dict[str, Any], nomes: tuple[str, ...]) -> int:
+    """Primeiro nome presente e não nulo, ou zero. Nunca soma dois apelidos."""
+    for nome in nomes:
+        valor = mapa.get(nome)
+        if isinstance(valor, int | float):
+            return int(valor)
+    return 0
+
+
+def _detalhes(mapa: dict[str, Any], *chaves: str) -> dict[str, Any]:
+    """Junta os submapas de detalhe com o próprio mapa, sem deixar o pai vencer.
+
+    O contador de cache aparece ora solto no uso, ora dentro de
+    `prompt_tokens_details` — e o `usage_metadata` do LangChain o normaliza para
+    `input_token_details`. Achatar os três num só evita três caminhos de leitura.
+    """
+    achatado = dict(mapa)
+    for chave in chaves:
+        sub = mapa.get(chave)
+        if isinstance(sub, dict):
+            achatado.update(cast(dict[str, Any], sub))
+    return achatado
+
 
 def uso_da_mensagem(mensagem: BaseMessage) -> UsoDeTokens:
     """Lê `usage_metadata` (ou o `token_usage` do provedor) de uma resposta."""
@@ -21,9 +53,12 @@ def uso_da_mensagem(mensagem: BaseMessage) -> UsoDeTokens:
     # em vez de sondar o atributo com `getattr`, é o que dá ao verificador os nomes
     # dos contadores. Sondar apagava o tipo da mensagem inteira.
     if isinstance(mensagem, AIMessage) and mensagem.usage_metadata:
+        detalhado = _detalhes(cast(dict[str, Any], mensagem.usage_metadata), "input_token_details")
         return UsoDeTokens(
             entrada=mensagem.usage_metadata.get("input_tokens") or 0,
             saida=mensagem.usage_metadata.get("output_tokens") or 0,
+            cache_lido=_contar(detalhado, _LIDO),
+            cache_escrito=_contar(detalhado, _ESCRITO),
         )
     # `response_metadata` é o corpo cru do provedor: sem forma declarada, e cada rota
     # do OpenRouter nomeia os contadores à sua maneira. Aqui `Any` é honesto — o que
@@ -35,9 +70,12 @@ def uso_da_mensagem(mensagem: BaseMessage) -> UsoDeTokens:
     )
     if isinstance(uso, dict) and uso:
         contadores = cast(dict[str, Any], uso)
+        detalhado = _detalhes(contadores, "prompt_tokens_details", "input_token_details")
         return UsoDeTokens(
-            entrada=int(contadores.get("prompt_tokens") or 0),
-            saida=int(contadores.get("completion_tokens") or 0),
+            entrada=int(contadores.get("prompt_tokens") or contadores.get("input_tokens") or 0),
+            saida=int(contadores.get("completion_tokens") or contadores.get("output_tokens") or 0),
+            cache_lido=_contar(detalhado, _LIDO),
+            cache_escrito=_contar(detalhado, _ESCRITO),
         )
     return UsoDeTokens()
 
