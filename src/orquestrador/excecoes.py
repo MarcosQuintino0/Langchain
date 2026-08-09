@@ -284,3 +284,24 @@ class OrcamentoEsgotado(ErroDeFerramenta):
     a resposta de quem opera também é — não é arrumar o ambiente nem esperar, é
     decidir se o trabalho valia mais do que o teto autorizava.
     """
+
+
+class RespostaTruncada(FalhaDeEstagio):
+    """A resposta do modelo foi cortada por limite de tokens, não por erro dele.
+
+    É **falha operacional**, e a distinção é a mesma que separa `ERRO_DA_FERRAMENTA`
+    de `REPROVADO` num gate: mandar o modelo "corrigir" uma resposta que o provedor
+    cortou no meio é pedir o impossível, e queima as tentativas de reparo sem
+    chance nenhuma de convergir.
+
+    Onde ela nasce: num modelo de raciocínio, o pensamento e a resposta dividem o
+    mesmo orçamento de saída. Medido nesta configuração — 63.172 tokens de
+    raciocínio de um teto de 65.536, e a resposta cortada antes do fim. O sintoma
+    que chegava aqui era `QAORQ-011` ("não é JSON"), que aponta para o lugar
+    errado: o JSON estava sendo escrito quando o orçamento acabou.
+
+    Herda de `FalhaDeEstagio`, e não de `ErroDeFerramenta`, porque o recurso
+    seguinte pode perfeitamente caber no orçamento — o que estourou foi o tamanho
+    **desta** tarefa. Isolar o recurso é o comportamento certo; interromper a
+    execução inteira, não.
+    """

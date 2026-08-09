@@ -42,13 +42,14 @@ from orquestrador.llm.cliente import (
     chamar_com_retentativas,
     descrever_volta,
 )
-from orquestrador.llm.estruturado import violacoes_de_validacao
+from orquestrador.llm.estruturado import exigir_resposta_inteira, violacoes_de_validacao
 from orquestrador.llm.mensagens import texto_da_mensagem, uso_das_mensagens
 from orquestrador.llm.montagem import (
     carregar_prompt,
     esquema_json,
     montar_entrada_inicial,
     montar_entrada_reparo,
+    montar_entrada_reparo_de_schema,
 )
 from orquestrador.observabilidade.medidas import RegistroDeChamada, UsoDeTokens
 from orquestrador.observabilidade.registro import RegistradorDeEventos
@@ -115,6 +116,9 @@ def executar(
     else:
         entrada = entrada_inicial(config, recurso)
 
+    # Guardada antes do laço: é a tarefa, e o reparo de schema tem de mandá-la de
+    # volta. Sem isso a volta seguinte recebia só o fragmento malformado.
+    entrada_da_tentativa = entrada
     ultimo_texto = ""
     ultimas_violacoes: list[Violacao] = []
 
@@ -192,6 +196,9 @@ def executar(
 
         # Depois de registrar a telemetria: os tokens desta volta foram gastos de
         # verdade e precisam aparecer no relatório, mesmo que ela termine em falha.
+        exigir_resposta_inteira(
+            mensagens[-1] if mensagens else None, estagio=ESTAGIO, recurso=recurso.nome
+        )
         if acabaram_os_passos(mensagens):
             # O caminho que realmente acontece no LangGraph 1.x (ver SENTINELA_SEM_PASSOS):
             # em vez de levantar, o agente encerra com uma mensagem de desculpa. Sem
@@ -213,8 +220,9 @@ def executar(
                 tentativa=passo,
                 codigos=[violacao.codigo for violacao in ultimas_violacoes],
             )
-        entrada = montar_entrada_reparo(
-            ultimo_texto or "(vazio)",
+        entrada = montar_entrada_reparo_de_schema(
+            entrada_da_tentativa,
+            ultimo_texto,
             Delta(
                 estagio="schema",
                 recurso=recurso.nome,

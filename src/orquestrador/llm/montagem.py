@@ -267,3 +267,47 @@ def _resolver_arquivo(caminho: str | None, disponiveis: list[str]) -> str | None
         return alvo
     candidatos = [nome for nome in disponiveis if alvo.endswith(f"/{nome}")]
     return candidatos[0] if len(candidatos) == 1 else None
+
+
+# O texto malformado entra como **evidência da forma do erro**, não como carga. Um
+# truncamento pode ter dezenas de milhares de caracteres, e reenviá-los inteiros
+# gastaria a janela justamente na tentativa que precisa de espaço para responder.
+LIMITE_DO_MALFORMADO = 2_000
+
+
+def montar_entrada_reparo_de_schema(
+    entrada_original: str,
+    texto_malformado: str,
+    delta: Delta,
+    *,
+    limite: int = LIMITE_DO_MALFORMADO,
+) -> str:
+    """A entrada de um reparo de **schema**: a tarefa original volta junto.
+
+    Diferente do reparo de gate, e a diferença é a razão desta função existir.
+
+    No reparo de gate existe um `artefato_atual` de verdade: o gate mediu o que
+    está **no disco**, e é isso que o modelo revisa. Numa violação de schema nada
+    foi para o disco — a saída não validou, então não foi persistida. Não há
+    artefato atual.
+
+    Mandar o texto malformado no lugar dele apaga a tarefa. Foi o que acontecia:
+    a entrada caía de 30.000 para 266 caracteres entre uma volta e outra, e o
+    modelo ficava com um fragmento do próprio erro e a instrução de produzir JSON,
+    sem saber mais o que era para construir. As tentativas eram gastas num pedido
+    impossível de atender.
+
+    Isto **não** afrouxa o princípio 2. Nada de histórico entra: a tarefa original
+    é a mesma de sempre e o malformado é só o da última volta, truncado. A entrada
+    não cresce com o número de tentativas, que é o que o princípio protege.
+    """
+    recorte = texto_malformado.strip()
+    if len(recorte) > limite:
+        recorte = f"{recorte[:limite]}\n… (cortado; {len(texto_malformado):,} caracteres no total)"
+    return montar_entrada_inicial(
+        {
+            "Tarefa (inalterada)": entrada_original.strip(),
+            "O que você respondeu, e que não validou": f"```\n{recorte or '(vazio)'}\n```",
+            "O que está errado nela": delta.render(),
+        }
+    )

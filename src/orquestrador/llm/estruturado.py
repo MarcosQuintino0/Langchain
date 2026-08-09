@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -27,7 +27,7 @@ from pydantic import BaseModel, ValidationError
 
 from orquestrador.config import ConfigEstagio
 from orquestrador.dominio.veredito import Delta, Violacao
-from orquestrador.excecoes import FalhaDeEstagio
+from orquestrador.excecoes import FalhaDeEstagio, RespostaTruncada
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.cliente import (
     PoliticaDeRetentativa,
@@ -36,7 +36,7 @@ from orquestrador.llm.cliente import (
     descrever_volta,
 )
 from orquestrador.llm.mensagens import medir_mensagens, texto_da_mensagem, uso_da_mensagem
-from orquestrador.llm.montagem import montar_entrada_reparo
+from orquestrador.llm.montagem import montar_entrada_reparo_de_schema
 from orquestrador.observabilidade.medidas import RegistroDeChamada, UsoDeTokens
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
@@ -63,6 +63,69 @@ def violacoes_de_validacao(erro: ValidationError) -> list[Violacao]:
             )
         )
     return violacoes
+
+
+# `finish_reason == "length"` é o sinal padrão da API compatível com OpenAI; a
+# Anthropic usa `stop_reason == "max_tokens"`. Os dois dizem a mesma coisa, e é
+# por isso que a checagem é por conjunto e não por provedor.
+_MOTIVOS_DE_TRUNCAMENTO = frozenset({"length", "max_tokens", "MAX_TOKENS"})
+
+
+def exigir_resposta_inteira(resposta: BaseMessage | None, *, estagio: str, recurso: str) -> None:
+    """Levanta `RespostaTruncada` quando o provedor cortou a resposta pelo teto.
+
+    Chamada antes de tentar parsear: uma resposta cortada não é JSON inválido, é
+    JSON pela metade, e tratá-la como violação manda o modelo consertar o que ele
+    não causou.
+    """
+    if resposta is None:
+        return
+
+    # `response_metadata` é `dict[str, Any]` por construção: o conteúdo é do
+    # provedor, e cada um põe o que quer. Ler por uma função que devolve o tipo
+    # esperado mantém o `Any` contido aqui, em vez de espalhá-lo pela mensagem.
+    meta = cast(dict[str, Any], getattr(resposta, "response_metadata", None) or {})
+
+    def texto(mapa: dict[str, Any], chave: str) -> str | None:
+        valor = mapa.get(chave)
+        return valor if isinstance(valor, str) else None
+
+    def inteiro(mapa: dict[str, Any], chave: str) -> int | None:
+        valor = mapa.get(chave)
+        return valor if isinstance(valor, int) else None
+
+    def submapa(mapa: dict[str, Any], chave: str) -> dict[str, Any]:
+        valor = mapa.get(chave)
+        return cast(dict[str, Any], valor) if isinstance(valor, dict) else {}
+
+    motivo = texto(meta, "finish_reason") or texto(meta, "stop_reason")
+    if motivo not in _MOTIVOS_DE_TRUNCAMENTO:
+        return
+
+    uso = submapa(meta, "token_usage") or cast(
+        dict[str, Any], getattr(resposta, "usage_metadata", None) or {}
+    )
+    raciocinio = inteiro(submapa(uso, "completion_tokens_details"), "reasoning_tokens")
+    gasto = inteiro(uso, "completion_tokens") or inteiro(uso, "output_tokens")
+
+    numeros = ""
+    if gasto:
+        numeros = f" Gastou {gasto:,} tokens de saída".replace(",", ".")
+        if raciocinio:
+            numeros += f", dos quais {raciocinio:,} em raciocínio".replace(",", ".")
+        numeros += "."
+
+    raise RespostaTruncada(
+        f"o provedor cortou a resposta do estágio {estagio} no recurso {recurso!r} "
+        f"por limite de tokens ({motivo}).{numeros}\n"
+        "Isto não é erro do modelo e não adianta pedir para ele corrigir: a resposta "
+        "estava sendo escrita quando o orçamento acabou. Num modelo de raciocínio, o "
+        "pensamento consome o MESMO orçamento de saída que a resposta.\n"
+        "O que resolve, em ordem: reduzir o tamanho do que se pede numa tentativa; "
+        "usar um modelo com teto de saída maior; ou, se o provedor suportar, limitar "
+        "o raciocínio em [estagios.*].max_tokens_de_raciocinio — que é mitigação, "
+        "não correção."
+    )
 
 
 class GeradorEstruturado:
@@ -108,6 +171,7 @@ class GeradorEstruturado:
                 HumanMessage(content=entrada_atual),
             ]
             resposta, objeto, erro = self._invocar(tipo, mensagens, recurso, tentativa, passo)
+            exigir_resposta_inteira(resposta, estagio=self.estagio, recurso=recurso)
             ultimo_texto = texto_da_mensagem(resposta) or ultimo_texto
 
             if objeto is not None:
@@ -131,8 +195,10 @@ class GeradorEstruturado:
                 violacoes=ultimas_violacoes,
                 tentativa=passo,
             )
-            # Princípio 2, também aqui: só o artefato atual e as violações.
-            entrada_atual = montar_entrada_reparo(ultimo_texto or "(vazio)", delta)
+            # A tarefa original volta junto. Sem ela, a volta seguinte recebia só
+            # o fragmento malformado e perdia o que era para construir — e as
+            # tentativas eram gastas num pedido impossível de atender.
+            entrada_atual = montar_entrada_reparo_de_schema(entrada, ultimo_texto, delta)
 
         detalhes = "; ".join(violacao.render() for violacao in ultimas_violacoes)
         raise FalhaDeEstagio(
