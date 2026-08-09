@@ -34,6 +34,11 @@ class UsoDeTokens(BaseModel):
     saida: int = 0
     cache_lido: int = 0
     cache_escrito: int = 0
+    # Subconjunto de `saida`, como o cache é da entrada: num modelo de raciocínio o
+    # pensamento e a resposta dividem o MESMO orçamento, e sem este contador uma
+    # espiral de raciocínio (65 mil tokens pensando, zero respondendo) aparece no
+    # relatório como "resposta grande" — o diagnóstico errado com o número certo.
+    raciocinio: int = 0
 
     @property
     def total(self) -> int:
@@ -50,6 +55,7 @@ class UsoDeTokens(BaseModel):
             saida=self.saida + outro.saida,
             cache_lido=self.cache_lido + outro.cache_lido,
             cache_escrito=self.cache_escrito + outro.cache_escrito,
+            raciocinio=self.raciocinio + outro.raciocinio,
         )
 
 

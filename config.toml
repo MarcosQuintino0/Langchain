@@ -60,6 +60,19 @@ api_key_env = "OPENROUTER_API_KEY"
 # titulo  = "orquestrador qa-api"
 timeout_s = 180.0
 max_retries = 2
+# O cache de prefixo mora no provedor FINAL, e o OpenRouter escolhe provedor por
+# requisição: sem fixar, cada volta do ReAct pode cair num provedor que nunca viu
+# o prefixo. Medido em 2026-08: 0% de cache hit sem pin, 86–93% com pin — num loop
+# de agente, onde toda volta reenvia o histórico, essa diferença é quase o custo do
+# estágio. Lista vazia volta ao roteamento livre: mais resiliente a
+# indisponibilidade, muito mais caro.
+#
+# Together serve o modelo em fp8 e tem a série de medidas mais longa aqui; Novita e
+# AtlasCloud mediram equivalente (74% de cache real na mesma carga) e são as
+# alternativas. Baidu e SiliconFlow anunciam preço de cache e não entregam;
+# DeepInfra serve a variante quantizada fp4. Ao trocar de provedor ou de modelo,
+# confira a coluna "do cache" do relatório: ela é que diz se o pin ainda paga.
+provedores_permitidos = ["together"]
 
 # ---------------------------------------------------------------------------
 # Modelos por estágio

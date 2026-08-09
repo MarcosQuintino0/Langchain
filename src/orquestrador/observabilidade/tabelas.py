@@ -22,6 +22,21 @@ if TYPE_CHECKING:
     from orquestrador.observabilidade.telemetria import Telemetria
 
 
+def raciocinio_da_saida(uso: UsoDeTokens) -> str:
+    """Quanto da saída foi pensamento, em token e porcentagem.
+
+    Num modelo de raciocínio, pensamento e resposta dividem o mesmo orçamento de
+    saída. Sem esta célula, uma espiral de raciocínio (o modelo gasta o teto
+    inteiro pensando e a resposta chega cortada) aparece como "saída grande" —
+    e a decisão de trocar de modelo, limitar o pensamento ou não fazer nada
+    fica sem o número que a justifica. Modelo que não reporta pensamento mostra
+    zero, e zero constante é informação: não há o que limitar.
+    """
+    if not uso.saida:
+        return "—"
+    return f"{uso.raciocinio:,} ({uso.raciocinio / uso.saida:.0%})" if uso.raciocinio else "0"
+
+
 def cache_da_entrada(uso: UsoDeTokens) -> str:
     """Quanto da entrada veio do cache, em token e em porcentagem.
 
@@ -48,6 +63,7 @@ def tabela_por_estagio(telemetria: Telemetria) -> Table:
     tabela.add_column("entrada", justify="right")
     tabela.add_column("do cache", justify="right")
     tabela.add_column("saída", justify="right")
+    tabela.add_column("pensando", justify="right")
     tabela.add_column("total", justify="right")
     tabela.add_column("tempo (s)", justify="right")
     for estagio, agregado in sorted(telemetria.por_estagio().items()):
@@ -57,6 +73,7 @@ def tabela_por_estagio(telemetria: Telemetria) -> Table:
             f"{agregado.uso.entrada:,}",
             cache_da_entrada(agregado.uso),
             f"{agregado.uso.saida:,}",
+            raciocinio_da_saida(agregado.uso),
             f"{agregado.uso.total:,}",
             f"{agregado.duracao_s:.1f}",
         )
@@ -68,6 +85,7 @@ def tabela_por_estagio(telemetria: Telemetria) -> Table:
         f"[bold]{total.entrada:,}",
         f"[bold]{cache_da_entrada(total)}",
         f"[bold]{total.saida:,}",
+        f"[bold]{raciocinio_da_saida(total)}",
         f"[bold]{total.total:,}",
         f"[bold]{sum(c.duracao_s for c in telemetria.chamadas):.1f}",
     )

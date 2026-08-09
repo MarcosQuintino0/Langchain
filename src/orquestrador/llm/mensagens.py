@@ -14,13 +14,21 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
 from orquestrador.observabilidade.medidas import UsoDeTokens
 
-# Os três nomes que os provedores dão ao mesmo número: quanto da entrada veio do
+# Os nomes que os provedores dão ao mesmo número: quanto da entrada veio do
 # cache. `cached_tokens` é a rota compatível com OpenAI (é o que o OpenRouter devolve
 # em `prompt_tokens_details`); `cache_read_input_tokens` é a Anthropic nativa;
-# `cache_read` aparece em rotas que abreviam. Aceitar os três aqui, na fronteira, é o
-# que evita espalhar `if provedor ==` pelo resto do projeto.
-_LIDO = ("cached_tokens", "cache_read_input_tokens", "cache_read")
+# `cache_read` aparece em rotas que abreviam; `prompt_cache_hit_tokens` é o nome
+# nativo da API direta do DeepSeek — vem por último de propósito: quando a rota
+# compatível também estiver presente, é ela a autoridade, e os dois concordam.
+# Aceitar todos aqui, na fronteira, é o que evita espalhar `if provedor ==` pelo
+# resto do projeto.
+_LIDO = ("cached_tokens", "cache_read_input_tokens", "cache_read", "prompt_cache_hit_tokens")
 _ESCRITO = ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation")
+# Quanto da SAÍDA foi pensamento: `reasoning_tokens` é a rota compatível com OpenAI
+# (dentro de `completion_tokens_details`); `reasoning` é a normalização do LangChain
+# (`output_token_details`). A Anthropic não reporta o pensamento separado no uso, e
+# tudo bem — ausência vira zero, nunca palpite.
+_RACIOCINIO = ("reasoning_tokens", "reasoning")
 
 
 def _contar(mapa: dict[str, Any], nomes: tuple[str, ...]) -> int:
@@ -53,12 +61,17 @@ def uso_da_mensagem(mensagem: BaseMessage) -> UsoDeTokens:
     # em vez de sondar o atributo com `getattr`, é o que dá ao verificador os nomes
     # dos contadores. Sondar apagava o tipo da mensagem inteira.
     if isinstance(mensagem, AIMessage) and mensagem.usage_metadata:
-        detalhado = _detalhes(cast(dict[str, Any], mensagem.usage_metadata), "input_token_details")
+        detalhado = _detalhes(
+            cast(dict[str, Any], mensagem.usage_metadata),
+            "input_token_details",
+            "output_token_details",
+        )
         return UsoDeTokens(
             entrada=mensagem.usage_metadata.get("input_tokens") or 0,
             saida=mensagem.usage_metadata.get("output_tokens") or 0,
             cache_lido=_contar(detalhado, _LIDO),
             cache_escrito=_contar(detalhado, _ESCRITO),
+            raciocinio=_contar(detalhado, _RACIOCINIO),
         )
     # `response_metadata` é o corpo cru do provedor: sem forma declarada, e cada rota
     # do OpenRouter nomeia os contadores à sua maneira. Aqui `Any` é honesto — o que
@@ -70,12 +83,19 @@ def uso_da_mensagem(mensagem: BaseMessage) -> UsoDeTokens:
     )
     if isinstance(uso, dict) and uso:
         contadores = cast(dict[str, Any], uso)
-        detalhado = _detalhes(contadores, "prompt_tokens_details", "input_token_details")
+        detalhado = _detalhes(
+            contadores,
+            "prompt_tokens_details",
+            "input_token_details",
+            "completion_tokens_details",
+            "output_token_details",
+        )
         return UsoDeTokens(
             entrada=int(contadores.get("prompt_tokens") or contadores.get("input_tokens") or 0),
             saida=int(contadores.get("completion_tokens") or contadores.get("output_tokens") or 0),
             cache_lido=_contar(detalhado, _LIDO),
             cache_escrito=_contar(detalhado, _ESCRITO),
+            raciocinio=_contar(detalhado, _RACIOCINIO),
         )
     return UsoDeTokens()
 

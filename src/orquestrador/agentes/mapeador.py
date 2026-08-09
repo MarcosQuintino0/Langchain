@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.errors import GraphRecursionError
 from pydantic import ValidationError
 
@@ -30,11 +30,13 @@ from orquestrador.agentes.grafo_react import (
     criar_agente,
 )
 from orquestrador.agentes.guarda_de_orcamento import exigir_folga
+from orquestrador.analise_estatica.extrator_de_endpoints import arquivos_do_grafo, extrair
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import SUFIXO_SCHEMA, SaidaMapeador
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import Delta, Violacao
-from orquestrador.excecoes import FalhaDeEstagio
+from orquestrador.excecoes import FalhaDeEstagio, GrafoNaoPreparado
+from orquestrador.ferramentas.arquivos import CaminhoForaDaRaiz
 from orquestrador.ferramentas.json_externo import extrair_json
 from orquestrador.llm.cliente import (
     PoliticaDeRetentativa,
@@ -43,8 +45,9 @@ from orquestrador.llm.cliente import (
     descrever_volta,
 )
 from orquestrador.llm.estruturado import exigir_resposta_inteira, violacoes_de_validacao
-from orquestrador.llm.mensagens import texto_da_mensagem, uso_das_mensagens
+from orquestrador.llm.mensagens import texto_da_mensagem, uso_da_mensagem, uso_das_mensagens
 from orquestrador.llm.montagem import (
+    LIMITE_PADRAO,
     carregar_prompt,
     esquema_json,
     montar_entrada_inicial,
@@ -74,14 +77,117 @@ def instrucao_do_estagio(config: Config, recurso: Recurso) -> str:
 
 
 def entrada_inicial(config: Config, recurso: Recurso) -> str:
-    return montar_entrada_inicial(
-        {
-            "Recurso alvo": recurso.nome,
-            "Backend": str(config.caminhos.backend),
-            "Grafo estrutural": str(config.caminhos.graph_abs),
-            "Diretório do recurso no projeto de testes": str(recurso.caminho_testes),
-        }
+    secoes = {
+        "Recurso alvo": recurso.nome,
+        "Backend": str(config.caminhos.backend),
+        "Grafo estrutural": str(config.caminhos.graph_abs),
+        "Diretório do recurso no projeto de testes": str(recurso.caminho_testes),
+    }
+    semente = _semente_estatica(config)
+    if semente:
+        secoes["Endpoints extraídos estaticamente do backend (ponto de partida verificado)"] = (
+            semente
+        )
+    arvore = _arvore_de_fontes(config)
+    if arvore:
+        secoes["Árvore de fontes do backend (do grafo estrutural)"] = arvore
+    return montar_entrada_inicial(secoes)
+
+
+# Acima disto, a árvore vira resumo por diretório. O teto protege o prefixo, não o
+# modelo: uma lista de milhares de caminhos custa em toda volta do ReAct, enquanto
+# o resumo continua respondendo "onde ficam as coisas" com vinte linhas.
+TETO_DE_ARQUIVOS_NA_ARVORE = 400
+
+
+def _arvore_de_fontes(config: Config) -> str:
+    """Os arquivos-fonte do backend, direto do `graph.json`, para a entrada.
+
+    A fase mais cara da exploração medida não era ler arquivo — era DESCOBRIR que
+    arquivo existe: até 18 chamadas de `listar_diretorio`, cada uma devolvendo
+    poucas dezenas de caracteres e custando uma volta inteira de histórico
+    reenviado. A lista completa já mora no grafo que o Bloco 0 validou; entregá-la
+    na entrada eliminou quase todas as listagens (medido: 18 → 1-4, com -37% a
+    -47% de tokens de entrada no estágio).
+
+    É informação, nunca restrição: a tool de listagem continua disponível e o
+    modelo continua obrigado a ler a fonte. Backend acima do teto vira resumo por
+    diretório — informação a menos, nunca errada. Falha na leitura do grafo vira
+    árvore vazia, pelo mesmo motivo da semente: o mapeador sabe explorar sem ela.
+    """
+    try:
+        arquivos = arquivos_do_grafo(config.caminhos.graph_abs)
+    except (GrafoNaoPreparado, OSError):
+        return ""
+    if not arquivos:
+        return ""
+
+    cabecalho = (
+        "Todos os arquivos-fonte que o grafo conhece, relativos à raiz do backend. "
+        "Use-a para navegar direto ao arquivo: não gaste voltas listando diretórios "
+        "um a um."
     )
+    if len(arquivos) <= TETO_DE_ARQUIVOS_NA_ARVORE:
+        return cabecalho + "\n\n" + "\n".join(f"- {caminho}" for caminho in arquivos)
+
+    por_diretorio: dict[str, int] = {}
+    for caminho in arquivos:
+        diretorio = caminho.rpartition("/")[0] or "."
+        por_diretorio[diretorio] = por_diretorio.get(diretorio, 0) + 1
+    resumo = "\n".join(
+        f"- {diretorio}/ ({quantidade} arquivo(s))"
+        for diretorio, quantidade in sorted(por_diretorio.items())
+    )
+    return (
+        cabecalho + f"\n\nO backend tem {len(arquivos)} arquivos; a árvore está resumida por "
+        "diretório. Use `listar_diretorio` para detalhar os que interessarem.\n\n" + resumo
+    )
+
+
+def _semente_estatica(config: Config) -> str:
+    """Os endpoints que a análise estática já conhece, prontos para a entrada.
+
+    O Gate A cruza o manifesto com `extrator_de_endpoints` DEPOIS do modelo
+    trabalhar — o orquestrador sempre soube o universo de endpoints e só o usava
+    para reprovar. Entregar a mesma lista na entrada corta a fase de descoberta
+    do ReAct (medido: -33% a -76% de tokens de entrada no estágio) sem afrouxar
+    nada: o denominador do gate continua sendo a extração, e as decisões que só
+    o modelo toma (categorias, campos, schemas) continuam exigindo ler a fonte.
+
+    Falha na extração vira semente vazia, nunca erro: o mapeador sabe explorar
+    sem ela, e é o Bloco 0/Gate A quem responde por grafo ausente ou defasado.
+    A ordem é fixa (classes por nome) porque a entrada da tentativa é prefixo de
+    cache e diff de log — texto que muda de ordem entre execuções custa nos dois.
+    """
+    try:
+        backend_lido = extrair(graph=config.caminhos.graph_abs, backend=config.caminhos.backend)
+    except (GrafoNaoPreparado, CaminhoForaDaRaiz, OSError):
+        return ""
+    if not backend_lido.endpoints:
+        return ""
+
+    linhas = [
+        "A lista abaixo foi extraída deterministicamente do código-fonte, com evidência "
+        "de arquivo e linha. Use-a como ponto de partida do inventário: NÃO gaste voltas "
+        "redescobrindo rotas — confirme na fonte apenas o que precisar para as decisões "
+        "de categoria, campos e schemas (entidades, DTOs, validações, migrações), e "
+        "registre em `rotas_dinamicas_nao_resolvidas` qualquer rota que encontrar além "
+        "destas. O escopo do seu recurso é o do inventário; as outras classes estão "
+        "listadas para você reconhecer dependências e vizinhança.",
+        "",
+    ]
+    for classe in sorted(backend_lido.classes, key=lambda c: c.classe):
+        if not classe.endpoints and not classe.nao_resolvidas:
+            continue
+        linhas.append(f"- {classe.classe} ({classe.arquivo}):")
+        for endpoint in classe.endpoints:
+            linhas.append(
+                f"    {endpoint.canonico} | handler {endpoint.handler} | "
+                f"{endpoint.arquivo}:{endpoint.linha}"
+            )
+        for rota in classe.nao_resolvidas:
+            linhas.append(f"    (não resolvida) {rota.expressao} | {rota.motivo}")
+    return "\n".join(linhas)
 
 
 def executar(
@@ -126,7 +232,7 @@ def executar(
 
     for passo in range(1, parametros.max_tentativas_schema + 1):
         # Dentro do laço, e não antes dele: o mini-loop de schema dá várias voltas
-        # de modelo por tentativa, e cada uma reenvia a exploração inteira do ReAct.
+        # de modelo por tentativa, e a primeira delas é a exploração inteira do ReAct.
         exigir_folga(config, telemetria, estagio=ESTAGIO, recurso=recurso.nome)
         inicio = time.perf_counter()
 
@@ -135,6 +241,9 @@ def executar(
                 {"messages": [HumanMessage(content=entrada)]},
                 config={"recursion_limit": parametros.limite_passos},
             )
+
+        def invocar_direto(entrada: str = entrada) -> BaseMessage:
+            return modelo.invoke([SystemMessage(content=instrucao), HumanMessage(content=entrada)])
 
         # `passo` e `entrada` viajam como padrão porque os dois mudam a cada volta do
         # laço: capturados por referência, a telemetria mediria o que a tentativa
@@ -163,22 +272,43 @@ def executar(
                 )
             )
 
-        try:
-            estado = chamar_com_retentativas(
-                invocar,
+        if passo == 1:
+            try:
+                estado = chamar_com_retentativas(
+                    invocar,
+                    politica=politica,
+                    estagio=ESTAGIO,
+                    recurso=recurso.nome,
+                    ao_falhar=perdeu_a_volta,
+                )
+            except GraphRecursionError as erro:
+                # GraphRecursionError herda de RecursionError, não de FalhaDeEstagio: sem
+                # esta conversão ele passa por cima dos `except` de pipeline.py e derruba a
+                # execução inteira com traceback, em vez de falhar só este recurso.
+                raise _sem_passos(parametros.limite_passos, recurso.nome, str(erro)) from erro
+            mensagens = estado.get("messages") or []
+            uso = uso_das_mensagens(mensagens)
+            resposta = mensagens[-1] if mensagens else None
+            detalhe = f"schema:{passo}; mensagens:{len(mensagens)}"
+        else:
+            # Reparo de schema é defeito de FORMA — a saída não validou contra o
+            # contrato. Não há nada a descobrir no backend, então o reparo NÃO passa
+            # pelo agente com tools: reenviar a tarefa a ele fazia o modelo re-explorar
+            # obedientemente (medido: 16-20 tool calls e 150-230 mil tokens por reparo,
+            # às vezes sem convergir). A chamada direta com instrução + artefato inteiro
+            # + violações converge numa volta de ~10 mil tokens e devolve o artefato
+            # idêntico fora dos pontos reclamados.
+            resposta = chamar_com_retentativas(
+                invocar_direto,
                 politica=politica,
                 estagio=ESTAGIO,
                 recurso=recurso.nome,
                 ao_falhar=perdeu_a_volta,
             )
-        except GraphRecursionError as erro:
-            # GraphRecursionError herda de RecursionError, não de FalhaDeEstagio: sem
-            # esta conversão ele passa por cima dos `except` de pipeline.py e derruba a
-            # execução inteira com traceback, em vez de falhar só este recurso.
-            raise _sem_passos(parametros.limite_passos, recurso.nome, str(erro)) from erro
+            mensagens = [resposta]
+            uso = uso_da_mensagem(resposta)
+            detalhe = f"schema:{passo}; reparo-direto"
 
-        mensagens = estado.get("messages") or []
-        uso = uso_das_mensagens(mensagens)
         telemetria.registrar(
             RegistroDeChamada(
                 estagio=ESTAGIO,
@@ -188,7 +318,7 @@ def executar(
                 uso=uso or UsoDeTokens(),
                 duracao_s=time.perf_counter() - inicio,
                 simulado=getattr(modelo, "simulado", False),
-                detalhe=f"schema:{passo}; mensagens:{len(mensagens)}",
+                detalhe=detalhe,
                 caracteres_instrucao=len(instrucao),
                 caracteres_entrada=len(entrada),
             )
@@ -196,17 +326,15 @@ def executar(
 
         # Depois de registrar a telemetria: os tokens desta volta foram gastos de
         # verdade e precisam aparecer no relatório, mesmo que ela termine em falha.
-        exigir_resposta_inteira(
-            mensagens[-1] if mensagens else None, estagio=ESTAGIO, recurso=recurso.nome
-        )
-        if acabaram_os_passos(mensagens):
+        exigir_resposta_inteira(resposta, estagio=ESTAGIO, recurso=recurso.nome)
+        if passo == 1 and acabaram_os_passos(mensagens):
             # O caminho que realmente acontece no LangGraph 1.x (ver SENTINELA_SEM_PASSOS):
             # em vez de levantar, o agente encerra com uma mensagem de desculpa. Sem
             # reconhecê-la aqui, o pipeline gastaria todas as tentativas de schema tentando
             # parsear essa frase como JSON e falharia com um motivo que esconde a causa.
             raise _sem_passos(parametros.limite_passos, recurso.nome, SENTINELA_SEM_PASSOS)
 
-        ultimo_texto = texto_da_mensagem(mensagens[-1] if mensagens else None)
+        ultimo_texto = texto_da_mensagem(resposta)
         saida, ultimas_violacoes = _parsear(ultimo_texto)
         if saida is not None:
             return saida
@@ -220,6 +348,11 @@ def executar(
                 tentativa=passo,
                 codigos=[violacao.codigo for violacao in ultimas_violacoes],
             )
+        # `limite=LIMITE_PADRAO`, e não o padrão de 2.000 do executor: a resposta do
+        # mapeador tem dezenas de KB, e cortá-la a 2.000 entregava ao reparo ~5% do
+        # próprio trabalho — ou ele re-explorava tudo, ou reconstruía errado e o
+        # estágio inteiro era perdido. O artefato malformado É o material do reparo
+        # aqui; o teto de 60 KB é o mesmo da projeção de artefato do reparo de gate.
         entrada = montar_entrada_reparo_de_schema(
             entrada_da_tentativa,
             ultimo_texto,
@@ -229,6 +362,7 @@ def executar(
                 violacoes=ultimas_violacoes,
                 tentativa=passo,
             ),
+            limite=LIMITE_PADRAO,
         )
 
     detalhes = "; ".join(violacao.render() for violacao in ultimas_violacoes)

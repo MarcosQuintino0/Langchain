@@ -36,7 +36,7 @@ from orquestrador.llm.cliente import (
     descrever_volta,
 )
 from orquestrador.llm.mensagens import medir_mensagens, texto_da_mensagem, uso_da_mensagem
-from orquestrador.llm.montagem import montar_entrada_reparo_de_schema
+from orquestrador.llm.montagem import LIMITE_PADRAO, montar_entrada_reparo_de_schema
 from orquestrador.observabilidade.medidas import RegistroDeChamada, UsoDeTokens
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
@@ -198,7 +198,17 @@ class GeradorEstruturado:
             # A tarefa original volta junto. Sem ela, a volta seguinte recebia só
             # o fragmento malformado e perdia o que era para construir — e as
             # tentativas eram gastas num pedido impossível de atender.
-            entrada_atual = montar_entrada_reparo_de_schema(entrada, ultimo_texto, delta)
+            #
+            # `limite=LIMITE_PADRAO`, e não o padrão de 2.000 da função: a saída do
+            # executor tem dezenas de KB, e o corte a 2.000 entregava ao reparo ~5%
+            # do próprio trabalho — medido num artefato real de 35 KB com defeito
+            # profundo, o reparo truncado entrou em espiral de raciocínio e não
+            # convergiu, enquanto o reparo com o artefato inteiro devolveu os 7
+            # arquivos byte-idênticos fora do ponto reclamado, numa volta só. O teto
+            # de 60 KB preserva a proteção da janela que o corte existia para dar.
+            entrada_atual = montar_entrada_reparo_de_schema(
+                entrada, ultimo_texto, delta, limite=LIMITE_PADRAO
+            )
 
         detalhes = "; ".join(violacao.render() for violacao in ultimas_violacoes)
         raise FalhaDeEstagio(

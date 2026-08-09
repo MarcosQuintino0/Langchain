@@ -81,6 +81,31 @@ def test_dialeto_anthropic():
     assert (uso.cache_lido, uso.cache_escrito) == (700, 200)
 
 
+def test_dialeto_deepseek_direto():
+    """`prompt_cache_hit_tokens`, solto no uso — o nome nativo da API do DeepSeek.
+
+    Quem usa a chave do DeepSeek direto (sem OpenRouter) recebe este nome; sem o
+    apelido na fronteira, o cache automático dele apareceria como 0% e a decisão
+    de otimização seria tomada contra um número falso.
+    """
+    mensagem = AIMessage(
+        content="ok",
+        response_metadata={
+            "token_usage": {
+                "prompt_tokens": 12_000,
+                "completion_tokens": 300,
+                "prompt_cache_hit_tokens": 11_000,
+                "prompt_cache_miss_tokens": 1_000,
+            }
+        },
+    )
+
+    uso = uso_da_mensagem(mensagem)
+
+    assert (uso.entrada, uso.saida) == (12_000, 300)
+    assert uso.cache_lido == 11_000
+
+
 def test_usage_metadata_normalizado_do_langchain():
     """Quando o LangChain normaliza, o detalhe vira `input_token_details`.
 
