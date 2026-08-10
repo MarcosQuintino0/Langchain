@@ -126,7 +126,7 @@ def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path:
 
     # Telemetria por estágio no log.
     telemetria = next(evento for evento in eventos if evento["tipo"] == "telemetria")
-    assert set(telemetria["por_estagio"]) == {"mapeador", "executor"}
+    assert set(telemetria["por_estagio"]) == {"mapeador", "planejador", "executor"}
     assert telemetria["total"]["entrada"] > 0
 
 

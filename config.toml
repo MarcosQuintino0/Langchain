@@ -93,6 +93,14 @@ modo_estruturado = "prompt"
 max_tentativas_schema = 3
 limite_passos = 60
 
+# O planejador expande o gabarito em cenários concretos, um endpoint por chamada.
+# É onde mora o julgamento que o executor não deve improvisar no meio da escrita.
+[estagios.planejador]
+modelo = "deepseek/deepseek-v4-flash-0731"
+temperatura = 0.0
+modo_estruturado = "prompt"
+max_tentativas_schema = 3
+
 [estagios.executor]
 modelo = "deepseek/deepseek-v4-flash-0731"
 temperatura = 0.0
@@ -157,7 +165,12 @@ exigir_formatadores = false
 #
 #   cypress = ["npx", "--no-install", "cypress", "run",
 #              "--reporter", "json", "--reporter-options", "output={relatorio}"]
-cypress = []
+# Escopado ao recurso em teste nesta bateria: o specPattern do projeto cobre
+# todas as APIs, e a suíte de outro recurso reprovando viraria veredito do
+# recurso errado. Parametrizar o --spec pelo recurso é melhoria pendente.
+cypress = ["npx", "--no-install", "cypress", "run",
+           "--spec", "cypress/e2e/apis/customers/*.cy.js",
+           "--reporter", "json", "--reporter-options", "output={relatorio}"]
 
 max_bytes_arquivo = 2000000
 max_resultados_busca = 40

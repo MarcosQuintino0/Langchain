@@ -154,6 +154,7 @@ def test_recurso_que_falha_nao_derruba_os_seguintes(pipeline: Pipeline, monkeypa
 
     monkeypatch.setattr(pipeline, "bloco0", lambda: preparacao(ok=True))
     monkeypatch.setattr(pipeline, "bloco1", bloco1_falso)
+    monkeypatch.setattr(pipeline, "bloco_plano", lambda *_a, **_k: None)
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
@@ -191,6 +192,7 @@ def test_ferramenta_indisponivel_interrompe_sem_perder_o_que_terminou(
 
     monkeypatch.setattr(pipeline, "bloco0", lambda: preparacao(ok=True))
     monkeypatch.setattr(pipeline, "bloco1", bloco1_falso)
+    monkeypatch.setattr(pipeline, "bloco_plano", lambda *_a, **_k: None)
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
@@ -267,6 +269,7 @@ def test_resultado_do_recurso_registra_o_que_ficou_reprovado(
         )
 
     monkeypatch.setattr(pipeline, "bloco1", bloco1_falso)
+    monkeypatch.setattr(pipeline, "bloco_plano", lambda *_a, **_k: None)
     resultado = pipeline._rodar_recurso(recurso_de(pipeline.config))
 
     assert resultado.sucesso is False
@@ -345,6 +348,7 @@ def test_bloco0_aprovado_segue_para_os_recursos(pipeline: Pipeline, monkeypatch)
     monkeypatch.setattr(
         pipeline, "bloco1", lambda *_a: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
     )
+    monkeypatch.setattr(pipeline, "bloco_plano", lambda *_a, **_k: None)
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )
@@ -467,6 +471,7 @@ def test_recurso_que_nao_rodou_cypress_nao_finge_ter_rodado(pipeline: Pipeline, 
     monkeypatch.setattr(
         pipeline, "bloco1", lambda *_a: (_saida_qualquer(), ResultadoGate.aprovado_por(), 1)
     )
+    monkeypatch.setattr(pipeline, "bloco_plano", lambda *_a, **_k: None)
     monkeypatch.setattr(
         pipeline, "bloco2", lambda *_a, **_k: (None, ResultadoGate.aprovado_por(), 1)
     )

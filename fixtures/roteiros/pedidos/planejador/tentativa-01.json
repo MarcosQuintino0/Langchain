@@ -1,0 +1,85 @@
+{
+ "descricao": "Plano generico: um passo unico cujo plano cobre as 12 categorias, servindo a qualquer endpoint do gabarito da fixture.",
+ "passos": [
+  {
+   "tipo": "final",
+   "artefato": {
+    "endpoint": "GET /pedidos",
+    "cenarios": [
+     {
+      "cat": "CAT-01",
+      "nome": "cenario-01",
+      "entrada": "requisicao de exemplo para fluxo principal valido",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-02",
+      "nome": "cenario-02",
+      "entrada": "requisicao de exemplo para omitir campo obrigatorio",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-03",
+      "nome": "cenario-03",
+      "entrada": "requisicao de exemplo para tipo invalido em campo",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-04",
+      "nome": "cenario-04",
+      "entrada": "requisicao de exemplo para valor na fronteira e acima",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-05",
+      "nome": "cenario-05",
+      "entrada": "requisicao de exemplo para body malformado",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-06",
+      "nome": "cenario-06",
+      "entrada": "requisicao de exemplo para id inexistente",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-07",
+      "nome": "cenario-07",
+      "entrada": "requisicao de exemplo para regra de negocio violada",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-08",
+      "nome": "cenario-08",
+      "entrada": "requisicao de exemplo para sem credencial e sem permissao",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-09",
+      "nome": "cenario-09",
+      "entrada": "requisicao de exemplo para injetar campo do servidor",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-10",
+      "nome": "cenario-10",
+      "entrada": "requisicao de exemplo para paginacao e filtros",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-11",
+      "nome": "cenario-11",
+      "entrada": "requisicao de exemplo para repeticao da operacao",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     },
+     {
+      "cat": "CAT-12",
+      "nome": "cenario-12",
+      "entrada": "requisicao de exemplo para upload invalido",
+      "espera": "status e estado conforme o contrato; sem 5xx"
+     }
+    ]
+   }
+  }
+ ]
+}

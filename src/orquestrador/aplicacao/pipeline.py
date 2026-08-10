@@ -32,12 +32,14 @@ from langchain_core.language_models import BaseChatModel
 
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
+from orquestrador.agentes import planejador as agente_planejador
 from orquestrador.aplicacao.ciclo_de_reparo import CicloDeReparo
 from orquestrador.aplicacao.persistencia import PersistenciaDeArtefatos
 from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import SaidaExecutor, SaidaMapeador
 from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.plano import PlanoDeTestes
 from orquestrador.dominio.propriedade import DivergenciaDeSchema, EntradaDoDiario
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
@@ -302,10 +304,53 @@ class Pipeline:
             ),
         )
 
+    # -- Plano de cenários (entre o Gate A e o executor) ----------------------
+
+    def bloco_plano(self, recurso: Recurso, saida_mapeador: SaidaMapeador) -> PlanoDeTestes:
+        """Expande o gabarito aprovado em cenários concretos, endpoint a endpoint.
+
+        Vem DEPOIS do Gate A de propósito: planejar sobre gabarito reprovado seria
+        gastar cenário em endpoint que o diff vai mandar reescrever. O plano é
+        persistido no diretório da execução — é artefato de auditoria (um humano
+        revisa os casos antes de existir código), não parte da suíte publicada.
+        """
+        self.registro.titulo(f"Plano de cenários · {recurso.nome}")
+        plano = agente_planejador.executar(
+            self.config,
+            recurso,
+            saida_mapeador.manifesto,
+            saida_mapeador.schemas,
+            modelo=self.modelo(agente_planejador.ESTAGIO, recurso.nome, 1),
+            telemetria=self.telemetria,
+            registro=self.registro,
+        )
+        destino = self.dir_execucao / "artefatos" / recurso.nome
+        destino.mkdir(parents=True, exist_ok=True)
+        arquivos = [destino / "plano.json", destino / "plano.md"]
+        arquivos[0].write_text(
+            plano.model_dump_json(by_alias=True, indent=1), encoding="utf-8", newline="\n"
+        )
+        arquivos[1].write_text(plano.render() + "\n", encoding="utf-8", newline="\n")
+        self.registro.evento(
+            TipoDeEvento.ARTEFATOS,
+            estagio=agente_planejador.ESTAGIO,
+            recurso=recurso.nome,
+            arquivos=[str(caminho) for caminho in arquivos],
+        )
+        self.registro.ok(
+            f"plano com {plano.total_de_cenarios()} cenário(s) em "
+            f"{len(plano.endpoints)} endpoint(s)"
+        )
+        return plano
+
     # -- Bloco 2 + Gate B ---------------------------------------------------
 
     def bloco2(
-        self, recurso: Recurso, manifesto: Manifesto, area: AreaDeStaging
+        self,
+        recurso: Recurso,
+        manifesto: Manifesto,
+        area: AreaDeStaging,
+        plano: PlanoDeTestes | None = None,
     ) -> tuple[SaidaExecutor, ResultadoGate, int]:
         self.registro.titulo(f"Bloco 2 — executor · {recurso.nome}")
 
@@ -321,6 +366,7 @@ class Pipeline:
                 delta=delta,
                 artefato_atual=atual,
                 superficie=self.superficie,
+                plano=plano,
             )
 
         def persistir(saida: SaidaExecutor) -> list[Path]:
@@ -534,8 +580,10 @@ class Pipeline:
             resultado.gate_a = gate_a_ok
             resultado.tentativas_mapeador = tentativas_a
 
+            plano = self.bloco_plano(recurso, saida_mapeador)
+
             _saida_executor, gate_b_ok, tentativas_b = self.bloco2(
-                recurso, saida_mapeador.manifesto, area
+                recurso, saida_mapeador.manifesto, area, plano
             )
             resultado.gate_b = gate_b_ok
             resultado.tentativas_executor = tentativas_b

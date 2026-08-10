@@ -132,6 +132,7 @@ def test_gate_reprovado_deixa_o_projeto_intacto(pipeline, recurso, monkeypatch):
         raise FalhaDeGate("gate_a reprovou", arquivos=[area.dir_recurso / "crud.cy.js"])
 
     monkeypatch.setattr(pipeline, "bloco1", bloco1_falso)
+    monkeypatch.setattr(pipeline, "bloco_plano", lambda *_a, **_k: None)
 
     resultado = pipeline._rodar_recurso(recurso)
 
@@ -419,12 +420,13 @@ def blocos_falsos(pipeline: Pipeline, monkeypatch, specs: dict[str, str]) -> Non
         area.escrever("_support/cobertura.json", "{}\n")
         return _saida_com_manifesto(), ResultadoGate.aprovado_por(), 1
 
-    def bloco2(_recurso, _manifesto, area):
+    def bloco2(_recurso, _manifesto, area, _plano=None):
         for nome, conteudo in specs.items():
             area.escrever(nome, conteudo)
         return None, ResultadoGate.aprovado_por(), 1
 
     monkeypatch.setattr(pipeline, "bloco1", bloco1)
+    monkeypatch.setattr(pipeline, "bloco_plano", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline, "bloco2", bloco2)
     monkeypatch.setattr(pipeline, "bloco3", lambda _r: _bloco3_falso())
 

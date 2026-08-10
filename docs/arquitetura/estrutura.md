@@ -32,6 +32,7 @@ src/orquestrador/
     recurso.py       Recurso e NomeDeRecurso — a unidade de trabalho e o nome que vira diretório
     inventario.py    o que o backend expõe, segundo quem leu o código
     manifesto.py     o gabarito de cobertura — espelho de _support/cobertura.json
+    plano.py         o gabarito expandido em cenários concretos, e a conferência de completude
     veredito.py      Violacao, ResultadoGate, Delta, EstadoDoRecurso
     artefatos.py     SaidaMapeador, SaidaExecutor e o confinamento de forma de caminho
     propriedade.py   diário de propriedade, classificação e divergência de schema
@@ -57,7 +58,8 @@ src/orquestrador/
     ferramentas_do_mapeador.py  as cinco tools e a medição de cada chamada
     guarda_de_orcamento.py      a checagem que os dois agentes fazem antes de chamar
     grafo_react.py              todo o acoplamento com o LangGraph
-    executor.py                 chamada estruturada, sem tools
+    planejador.py               expande o gabarito em cenários, um endpoint por chamada
+    executor.py                 chamadas estruturadas por fatia de arquivo, sem tools
     auditor.py                  STUB, interface definida
   analise_estatica/
     __init__.py
