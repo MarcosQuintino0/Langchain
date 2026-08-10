@@ -14,6 +14,7 @@ mesmo artefato.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, TypeVar
@@ -23,6 +24,7 @@ from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import Delta, EstagioDelta, ResultadoGate
 from orquestrador.excecoes import FalhaDeEstagio, FalhaDeGate
 from orquestrador.observabilidade.eventos import TipoDeEvento
+from orquestrador.observabilidade.rastreamento import Rastreador
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria
 
@@ -86,12 +88,16 @@ class CicloDeReparo:
         artefato_atual: str | None = None
         resultado: ResultadoGate | None = None
         persistidos: list[Path] = []
+        rastreador = Rastreador(self.registro)
 
         for tentativa in range(1, maximo + 1):
             marca = len(self.telemetria.chamadas)
             marca_tools = len(self.telemetria.tools)
             try:
-                artefato = produzir(tentativa, delta, artefato_atual)
+                with rastreador.operacao(
+                    "tentativa", estagio=estagio, recurso=recurso.nome, tentativa=tentativa
+                ):
+                    artefato = produzir(tentativa, delta, artefato_atual)
             except FalhaDeEstagio as erro:
                 # O que já foi escrito em disco continua lá; quem falha precisa dizer
                 # o que deixou para trás (A3).
@@ -108,8 +114,20 @@ class CicloDeReparo:
                     desde=marca,
                     desde_tools=marca_tools,
                 )
-            persistidos = _unir_caminhos(persistidos, persistir(artefato))
-            resultado = avaliar(artefato)
+            with rastreador.operacao(
+                "persistencia", estagio=estagio, recurso=recurso.nome, tentativa=tentativa
+            ):
+                persistidos = _unir_caminhos(persistidos, persistir(artefato))
+            inicio_gate = time.perf_counter()
+            with rastreador.operacao(
+                "gate",
+                gate=f"gate_{gate}",
+                estagio=estagio,
+                recurso=recurso.nome,
+                tentativa=tentativa,
+            ):
+                resultado = avaliar(artefato)
+            duracao_gate_s = time.perf_counter() - inicio_gate
 
             self.registro.evento(
                 TipoDeEvento.GATE,
@@ -118,6 +136,7 @@ class CicloDeReparo:
                 recurso=recurso.nome,
                 tentativa=tentativa,
                 aprovado=resultado.aprovado,
+                duracao_s=round(duracao_gate_s, 6),
                 violacoes=[v.model_dump() for v in resultado.violacoes],
                 avisos=[v.model_dump() for v in resultado.avisos],
             )

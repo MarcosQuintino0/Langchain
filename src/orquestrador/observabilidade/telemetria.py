@@ -93,10 +93,9 @@ class Telemetria:
 
     def registrar(self, chamada: RegistroDeChamada) -> RegistroDeChamada:
         self.chamadas.append(chamada)
-        if self.registro is not None:
-            # Uma linha por chamada no JSONL: sem isso o log só teria o agregado, e
-            # "quantos tokens custou a tentativa 2" viraria dedução em vez de registro.
-            self.registro.evento(TipoDeEvento.CHAMADA_LLM, **chamada.model_dump())
+        # No schema v2 a linha nasce no callback do provedor, no instante exato da
+        # requisição. Emitir aqui repetiria a mesma chamada e voltaria a confundir
+        # uma invocação ReAct (que pode conter várias requisições) com uma request.
         return chamada
 
     def registrar_tool(self, tool: RegistroDeTool) -> RegistroDeTool:

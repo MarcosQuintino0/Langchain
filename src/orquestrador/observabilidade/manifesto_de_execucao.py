@@ -36,6 +36,7 @@ import os
 import platform
 import re
 import sys
+import uuid
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as versao_instalada
 from itertools import pairwise
@@ -392,7 +393,12 @@ def escrever(
     )
     try:
         destino.parent.mkdir(parents=True, exist_ok=True)
-        destino.write_text(_serializar(manifesto), encoding="utf-8", newline="\n")
+        temporario = destino.with_name(f".{destino.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporario.write_text(_serializar(manifesto), encoding="utf-8", newline="\n")
+            temporario.replace(destino)
+        finally:
+            temporario.unlink(missing_ok=True)
     except OSError as erro:
         manifesto["campos_ausentes"][f"escrita[{destino}]"] = f"{type(erro).__name__}: {erro}"
     return manifesto

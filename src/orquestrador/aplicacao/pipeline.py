@@ -38,6 +38,9 @@ from orquestrador.aplicacao.persistencia import PersistenciaDeArtefatos
 from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import SaidaExecutor, SaidaMapeador
+from orquestrador.dominio.dossie import DossieDoRecurso
+from orquestrador.dominio.inventario import Inventario
+from orquestrador.dominio.limpeza import render_ausencias, render_limpeza
 from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.plano import PlanoDeTestes
 from orquestrador.dominio.propriedade import DivergenciaDeSchema, EntradaDoDiario
@@ -68,7 +71,9 @@ from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.gates import gate_a, gate_b
 from orquestrador.gates.saidas import resumo_da_cobertura
 from orquestrador.llm.cliente import criar_modelo
+from orquestrador.observabilidade.artefatos import medir_arquivos
 from orquestrador.observabilidade.eventos import TipoDeEvento
+from orquestrador.observabilidade.rastreamento import Rastreador
 from orquestrador.observabilidade.registro import Registro
 from orquestrador.observabilidade.telemetria import Telemetria
 
@@ -244,7 +249,9 @@ class Pipeline:
         self, recurso: Recurso, area: AreaDeStaging
     ) -> tuple[SaidaMapeador, ResultadoGate, int]:
         self.registro.titulo(f"Bloco 1 — mapeador · {recurso.nome}")
-        inventario_path = self.dir_execucao / "artefatos" / recurso.nome / "inventario.json"
+        dir_artefatos = self.dir_execucao / "artefatos" / recurso.nome
+        inventario_path = dir_artefatos / "inventario.json"
+        dossie_path = dir_artefatos / "dossie.json"
 
         def produzir(tentativa: int, delta: Delta | None, atual: str | None) -> SaidaMapeador:
             return agente_mapeador.executar(
@@ -270,13 +277,37 @@ class Pipeline:
                 TipoDeEvento.ARTEFATOS,
                 estagio=agente_mapeador.ESTAGIO,
                 recurso=recurso.nome,
-                arquivos=[str(caminho) for caminho in escritos],
+                arquivos=medir_arquivos(escritos),
             )
 
             inventario_path.parent.mkdir(parents=True, exist_ok=True)
             inventario_path.write_text(saida.inventario.para_json(), encoding="utf-8", newline="\n")
-            # O inventário fica no diretório da execução, que é nosso, e por isso
-            # não entra na conta do que precisa ser publicado.
+            # O inventário e o dossiê ficam no diretório da execução, que é nosso,
+            # e por isso não entram na conta do que precisa ser publicado.
+            if saida.dossie is not None:
+                dossie_path.write_text(
+                    saida.dossie.model_dump_json(by_alias=True, exclude_none=True, indent=1)
+                    + "\n",
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                dossie_path.with_suffix(".md").write_text(
+                    "\n\n".join(
+                        [
+                            saida.dossie.render() or "(dossiê vazio)",
+                            render_limpeza(saida.inventario, saida.dossie),
+                            render_ausencias(saida.inventario),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                    newline="\n",
+                )
+            else:
+                # Tentativa sem dossiê apaga o da anterior: o bundle de reparo lê o
+                # disco, e um dossiê velho ao lado de um QAORQ-063 seria contradição.
+                dossie_path.unlink(missing_ok=True)
+                dossie_path.with_suffix(".md").unlink(missing_ok=True)
             return escritos
 
         def avaliar(saida: SaidaMapeador) -> ResultadoGate:
@@ -287,6 +318,7 @@ class Pipeline:
                 dir_schemas=area.dir_schemas,
                 inventario=saida.inventario,
                 manifesto=saida.manifesto,
+                dossie=saida.dossie,
             )
 
         return self.ciclo.executar(
@@ -301,6 +333,7 @@ class Pipeline:
                 inventario=inventario_path,
                 dir_schemas=area.dir_schemas,
                 recurso=recurso.nome,
+                dossie=dossie_path,
             ),
         )
 
@@ -323,6 +356,7 @@ class Pipeline:
             modelo=self.modelo(agente_planejador.ESTAGIO, recurso.nome, 1),
             telemetria=self.telemetria,
             registro=self.registro,
+            dossie=saida_mapeador.dossie,
         )
         destino = self.dir_execucao / "artefatos" / recurso.nome
         destino.mkdir(parents=True, exist_ok=True)
@@ -335,7 +369,7 @@ class Pipeline:
             TipoDeEvento.ARTEFATOS,
             estagio=agente_planejador.ESTAGIO,
             recurso=recurso.nome,
-            arquivos=[str(caminho) for caminho in arquivos],
+            arquivos=medir_arquivos(arquivos),
         )
         self.registro.ok(
             f"plano com {plano.total_de_cenarios()} cenário(s) em "
@@ -351,6 +385,8 @@ class Pipeline:
         manifesto: Manifesto,
         area: AreaDeStaging,
         plano: PlanoDeTestes | None = None,
+        dossie: DossieDoRecurso | None = None,
+        inventario: Inventario | None = None,
     ) -> tuple[SaidaExecutor, ResultadoGate, int]:
         self.registro.titulo(f"Bloco 2 — executor · {recurso.nome}")
 
@@ -367,6 +403,8 @@ class Pipeline:
                 artefato_atual=atual,
                 superficie=self.superficie,
                 plano=plano,
+                dossie=dossie,
+                inventario=inventario,
             )
 
         def persistir(saida: SaidaExecutor) -> list[Path]:
@@ -375,7 +413,7 @@ class Pipeline:
                 TipoDeEvento.ARTEFATOS,
                 estagio=agente_executor.ESTAGIO,
                 recurso=recurso.nome,
-                arquivos=[str(caminho) for caminho in escritos],
+                arquivos=medir_arquivos(escritos),
             )
             return escritos
 
@@ -527,9 +565,11 @@ class Pipeline:
                 "Nenhum modelo foi chamado."
             )
         resultados: list[ResultadoDoRecurso] = []
+        rastreador = Rastreador(self.registro)
         for indice, recurso in enumerate(recursos):
             try:
-                resultados.append(self._rodar_recurso(recurso))
+                with rastreador.operacao("recurso", recurso=recurso.nome):
+                    resultados.append(self._rodar_recurso(recurso))
             except (ErroDeFerramenta, ErroDeConfiguracao) as erro:
                 # Indisponibilidade — de ferramenta ou de provedor, que é subclasse —
                 # não é falha do recurso, e por isso não é isolada como se fosse: o
@@ -583,7 +623,12 @@ class Pipeline:
             plano = self.bloco_plano(recurso, saida_mapeador)
 
             _saida_executor, gate_b_ok, tentativas_b = self.bloco2(
-                recurso, saida_mapeador.manifesto, area, plano
+                recurso,
+                saida_mapeador.manifesto,
+                area,
+                plano,
+                dossie=saida_mapeador.dossie,
+                inventario=saida_mapeador.inventario,
             )
             resultado.gate_b = gate_b_ok
             resultado.tentativas_executor = tentativas_b
@@ -625,7 +670,7 @@ class Pipeline:
                     recurso=recurso.nome,
                     codigos=erro.codigos,
                     publicado=resultado.publicado,
-                    arquivos=[str(caminho) for caminho in erro.arquivos],
+                    arquivos=medir_arquivos(erro.arquivos),
                 )
         finally:
             # O staging é o único diretório nosso que fica dentro do projeto do

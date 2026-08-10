@@ -648,6 +648,90 @@
         "title": "ArquivoSchema",
         "type": "object"
       },
+      "ConsultaDoEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "parametroDesconhecido": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parametrodesconhecido"
+          },
+          "parametros": {
+            "items": {
+              "$ref": "#/$defs/ParametroDeConsulta"
+            },
+            "minItems": 1,
+            "title": "Parametros",
+            "type": "array"
+          }
+        },
+        "required": [
+          "endpoint",
+          "parametros"
+        ],
+        "title": "ConsultaDoEndpoint",
+        "type": "object"
+      },
+      "DossieDoRecurso": {
+        "additionalProperties": false,
+        "properties": {
+          "consultas": {
+            "items": {
+              "$ref": "#/$defs/ConsultaDoEndpoint"
+            },
+            "title": "Consultas",
+            "type": "array"
+          },
+          "erros": {
+            "items": {
+              "$ref": "#/$defs/ErrosDoEndpoint"
+            },
+            "title": "Erros",
+            "type": "array"
+          },
+          "incertezas": {
+            "items": {
+              "$ref": "#/$defs/Incerteza"
+            },
+            "title": "Incertezas",
+            "type": "array"
+          },
+          "recurso": {
+            "title": "Recurso",
+            "type": "string"
+          },
+          "regras": {
+            "items": {
+              "$ref": "#/$defs/RegraDeNegocio"
+            },
+            "title": "Regras",
+            "type": "array"
+          },
+          "verificacoesNegativas": {
+            "items": {
+              "$ref": "#/$defs/VerificacaoNegativa"
+            },
+            "title": "Verificacoesnegativas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recurso"
+        ],
+        "title": "DossieDoRecurso",
+        "type": "object"
+      },
       "Endpoint": {
         "additionalProperties": false,
         "properties": {
@@ -769,6 +853,79 @@
         "title": "EndpointManifesto",
         "type": "object"
       },
+      "ErrosDoEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "respostas": {
+            "items": {
+              "$ref": "#/$defs/RespostaDeErro"
+            },
+            "minItems": 1,
+            "title": "Respostas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "endpoint",
+          "respostas"
+        ],
+        "title": "ErrosDoEndpoint",
+        "type": "object"
+      },
+      "Evidencia": {
+        "additionalProperties": false,
+        "properties": {
+          "arquivo": {
+            "minLength": 1,
+            "title": "Arquivo",
+            "type": "string"
+          },
+          "linha": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Linha"
+          }
+        },
+        "required": [
+          "arquivo"
+        ],
+        "title": "Evidencia",
+        "type": "object"
+      },
+      "Incerteza": {
+        "additionalProperties": false,
+        "properties": {
+          "descricao": {
+            "minLength": 1,
+            "title": "Descricao",
+            "type": "string"
+          },
+          "endpoints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Endpoints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "descricao"
+        ],
+        "title": "Incerteza",
+        "type": "object"
+      },
       "Inventario": {
         "additionalProperties": false,
         "properties": {
@@ -877,6 +1034,123 @@
         "title": "Manifesto",
         "type": "object"
       },
+      "ParametroDeConsulta": {
+        "additionalProperties": false,
+        "properties": {
+          "comportamento": {
+            "minLength": 1,
+            "title": "Comportamento",
+            "type": "string"
+          },
+          "erroQuandoInvalido": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Erroquandoinvalido"
+          },
+          "nome": {
+            "minLength": 1,
+            "title": "Nome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nome",
+          "comportamento"
+        ],
+        "title": "ParametroDeConsulta",
+        "type": "object"
+      },
+      "RegraDeNegocio": {
+        "additionalProperties": false,
+        "properties": {
+          "codigosDeErro": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Codigosdeerro",
+            "type": "array"
+          },
+          "efeito": {
+            "minLength": 1,
+            "title": "Efeito",
+            "type": "string"
+          },
+          "endpoints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Endpoints",
+            "type": "array"
+          },
+          "evidencias": {
+            "items": {
+              "$ref": "#/$defs/Evidencia"
+            },
+            "minItems": 1,
+            "title": "Evidencias",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^RN-\\d{2,}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "resumo": {
+            "minLength": 1,
+            "title": "Resumo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "resumo",
+          "efeito",
+          "evidencias"
+        ],
+        "title": "RegraDeNegocio",
+        "type": "object"
+      },
+      "RespostaDeErro": {
+        "additionalProperties": false,
+        "properties": {
+          "codigo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Codigo"
+          },
+          "quando": {
+            "minLength": 1,
+            "title": "Quando",
+            "type": "string"
+          },
+          "status": {
+            "maximum": 599,
+            "minimum": 400,
+            "title": "Status",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "quando"
+        ],
+        "title": "RespostaDeErro",
+        "type": "object"
+      },
       "RotaDinamica": {
         "additionalProperties": false,
         "properties": {
@@ -935,10 +1209,47 @@
         ],
         "title": "SubDominio",
         "type": "object"
+      },
+      "VerificacaoNegativa": {
+        "additionalProperties": false,
+        "properties": {
+          "aspecto": {
+            "enum": [
+              "campos-derivados",
+              "maquina-de-estados",
+              "regras-condicionais-entre-campos",
+              "efeitos-colaterais-em-outros-recursos"
+            ],
+            "title": "Aspecto",
+            "type": "string"
+          },
+          "resultado": {
+            "minLength": 1,
+            "title": "Resultado",
+            "type": "string"
+          }
+        },
+        "required": [
+          "aspecto",
+          "resultado"
+        ],
+        "title": "VerificacaoNegativa",
+        "type": "object"
       }
     },
     "additionalProperties": false,
     "properties": {
+      "dossie": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DossieDoRecurso"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "inventario": {
         "$ref": "#/$defs/Inventario"
       },

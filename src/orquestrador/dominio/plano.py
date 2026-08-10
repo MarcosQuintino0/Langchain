@@ -20,10 +20,32 @@ não um veredito de qualidade sobre artefato publicado.
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from orquestrador.dominio.manifesto import Cat, Manifesto
 from orquestrador.dominio.recurso import NomeDeRecurso
+
+# A partição das 12 categorias em grupos. Nasceu como arquitetura dos arquivos do
+# executor (um spec por grupo) e virou também a unidade de pedido do planejador:
+# planejar um grupo por chamada é o que mantém a resposta pedida pequena — medido
+# em 2026-08-10, o endpoint de listagem inteiro numa chamada estourou o teto de
+# saída do provedor (65.536 tokens, resposta cortada). Vive aqui, e não no
+# executor, porque os dois estágios precisam da MESMA partição: fatia de plano que
+# não bate com fatia de spec faria cenário trocar de arquivo entre os dois.
+CATS_VALIDACOES: tuple[str, ...] = ("CAT-02", "CAT-03", "CAT-04", "CAT-05")
+CATS_SEGURANCA: tuple[str, ...] = ("CAT-06", "CAT-08", "CAT-09")
+CATS_CRUD: tuple[str, ...] = ("CAT-01", "CAT-07", "CAT-10", "CAT-11", "CAT-12")
+
+# (chave curta para telemetria, cats do grupo) — a ordem é fixa: é a ordem das
+# chamadas do planejador e da montagem do plano, e ordem estável é prefixo de
+# cache e diff de log legível.
+GRUPOS_DE_CATS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("crud", CATS_CRUD),
+    ("validacoes", CATS_VALIDACOES),
+    ("seguranca", CATS_SEGURANCA),
+)
 
 
 class Cenario(BaseModel):
@@ -40,11 +62,16 @@ class Cenario(BaseModel):
     # e sem ela o QAAPI-025 acusa o campo como não testado — foi a reprovação
     # medida na primeira execução real desta arquitetura.
     campo: str | None = None
+    # A regra do dossiê (`RN-xx`) que o cenário prova, quando houver uma. É o elo
+    # na direção oposta ao `campo`: liga o caso à evidência de fonte, e é por ele
+    # que a fatia do executor recebe junto o texto da regra que está transcrevendo.
+    regra: str | None = None
 
     def render(self) -> str:
         marca_campo = f" | campo: {self.campo}" if self.campo else ""
+        marca_regra = f" | regra: {self.regra}" if self.regra else ""
         return (
-            f"- [{self.cat}] {self.nome}{marca_campo} | entrada: {self.entrada} "
+            f"- [{self.cat}] {self.nome}{marca_campo}{marca_regra} | entrada: {self.entrada} "
             f"| espera: {self.espera}"
         )
 
@@ -102,6 +129,20 @@ class PlanoDeTestes(BaseModel):
             partes += [cenario.render() for cenario in selecionados]
         return "\n".join(partes)
 
+    def regras_citadas(self, cats: tuple[str, ...]) -> list[str]:
+        """Ids de regra citados pelos cenários dessas categorias, na ordem do plano.
+
+        É o outro lado de `cenarios_das_cats`: a fatia diz o que transcrever, e
+        esta lista diz quais regras do dossiê precisam ir junto — só as citadas,
+        porque reenviar o dossiê inteiro em cada fatia pagaria o custo N vezes.
+        """
+        vistos: dict[str, None] = {}
+        for parte in self.endpoints:
+            for cenario in parte.cenarios:
+                if cenario.cat in cats and cenario.regra:
+                    vistos.setdefault(cenario.regra, None)
+        return list(vistos)
+
     def render(self) -> str:
         return "\n\n".join(parte.render() for parte in self.endpoints)
 
@@ -121,6 +162,64 @@ def cenarios_faltantes(
     """
     cobertas = plano_do_endpoint.cats_cobertas()
     return [cat for cat in cats_do_gabarito if cat not in cobertas]
+
+
+# Um método de escrita citado na entrada do cenário. É o gatilho da exigência de
+# prova de estado: quem muda estado precisa prová-lo; quem só lê, não.
+_ESCRITA_NA_ENTRADA = re.compile(r"\b(POST|PUT|PATCH|DELETE)\b")
+
+# O vocabulário que conta como prova de estado no `espera`. Heurística assumida:
+# falso negativo custa UMA volta de reparo; falso positivo não existe como risco
+# de aprovação — quem aprova artefato continua sendo o gate, nunca esta lista.
+_PROVA_DE_ESTADO = re.compile(
+    r"releitura|rel(?:er|ê)|confirma|comprova|prova(?:ndo)?\b"
+    r"|estado\s+(?:inalterado|intacto|preservado)|não\s+mud"
+    r"|sem\s+(?:criação|alteração|persistência|efeito)"
+    r"|não\s+(?:cria|criou|lista|grava|gravou|persiste|persistiu|altera|alterou|aparece)"
+    r"|nenhum(?:a)?\s+(?:registro|efeito|criação|alteração)|permanece|continua",
+    re.IGNORECASE,
+)
+
+# Acima disto, variações do mesmo campo na mesma categoria são repetição do mesmo
+# defeito, não cobertura — o teto que o prompt pede e esta função cobra.
+LIMITE_DE_VARIACOES_POR_CAMPO = 3
+
+
+def cenarios_sem_prova_de_estado(parte: PlanoDoEndpoint) -> list[str]:
+    """Nomes dos cenários de escrita cujo `espera` não prova o estado.
+
+    Foi medido (2026-08-10): a proporção de cenários com releitura caiu de 55%
+    para 25% numa mudança de prompt — sinal de que exigência que vive só em
+    prosa flutua com a atenção do modelo. Esta função a torna cobrável na mesma
+    moeda do QAORQ-050: o estágio repara a própria saída, uma volta.
+    """
+    return [
+        cenario.nome
+        for cenario in parte.cenarios
+        if _ESCRITA_NA_ENTRADA.search(cenario.entrada)
+        and not _PROVA_DE_ESTADO.search(cenario.espera)
+    ]
+
+
+def variacoes_excedentes(parte: PlanoDoEndpoint) -> list[str]:
+    """Mensagens sobre (categoria, campo) com mais cenários que o limite.
+
+    O freio do prompt ("um cenário por partição, nunca um por variação de dado")
+    vira número aqui: acima de `LIMITE_DE_VARIACOES_POR_CAMPO` para o mesmo campo
+    na mesma categoria é repetição, e repetição custa executor, Cypress e leitura
+    humana sem comprar cobertura.
+    """
+    contagem: dict[tuple[str, str], int] = {}
+    for cenario in parte.cenarios:
+        if cenario.campo:
+            chave = (cenario.cat, cenario.campo)
+            contagem[chave] = contagem.get(chave, 0) + 1
+    return [
+        f"{cat} tem {quantidade} cenários para o campo {campo!r} "
+        f"(limite {LIMITE_DE_VARIACOES_POR_CAMPO}): mantenha os mais reveladores"
+        for (cat, campo), quantidade in sorted(contagem.items())
+        if quantidade > LIMITE_DE_VARIACOES_POR_CAMPO
+    ]
 
 
 def conferir_plano(plano: PlanoDeTestes, manifesto: Manifesto) -> list[str]:

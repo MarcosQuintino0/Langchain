@@ -54,6 +54,19 @@ graph = ".agents/state/qa-api/graphify-out/graph.json"
 # Relativo a este diretório: logs, artefatos e sandbox de cada execução.
 saida = ".execucoes"
 
+# O JSONL local continua sendo a fonte primária. OTLP/HTTP é apenas uma cópia de
+# traces e métricas sanitizadas para um Collector, desligada por padrão.
+[observabilidade]
+intervalo_pulso_s = 30.0
+
+[observabilidade.otlp]
+habilitado = false
+endpoint = "http://localhost:4318"
+timeout_s = 5.0
+service_name = "orquestrador"
+headers_env = "OTEL_EXPORTER_OTLP_HEADERS"
+incluir_identificadores = false
+
 [skill]
 # Hash dos `.mjs` que este orquestrador invoca. Vazio desliga a trava — que é o
 # certo até você conferir o contrato pela primeira vez. `orquestrador doctor`

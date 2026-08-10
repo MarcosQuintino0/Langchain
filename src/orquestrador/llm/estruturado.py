@@ -38,6 +38,7 @@ from orquestrador.llm.cliente import (
 from orquestrador.llm.mensagens import medir_mensagens, texto_da_mensagem, uso_da_mensagem
 from orquestrador.llm.montagem import LIMITE_PADRAO, montar_entrada_reparo_de_schema
 from orquestrador.observabilidade.medidas import RegistroDeChamada, UsoDeTokens
+from orquestrador.observabilidade.provedor import ObservadorDeProvedor
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
 
@@ -140,6 +141,7 @@ class GeradorEstruturado:
         telemetria: Telemetria,
         registro: RegistradorDeEventos | None = None,
         politica: PoliticaDeRetentativa | None = None,
+        antes_de_chamar: Callable[[], None] | None = None,
     ) -> None:
         self.modelo = modelo
         self.estagio = estagio
@@ -150,6 +152,7 @@ class GeradorEstruturado:
         # `[openrouter].max_retries`. Quem tem a `Config` na mão passa
         # `PoliticaDeRetentativa.do_config(config)` e a configuração volta a mandar.
         self.politica = politica or PoliticaDeRetentativa()
+        self.antes_de_chamar = antes_de_chamar
         self._modo = parametros.modo_estruturado
 
     def gerar(
@@ -160,6 +163,8 @@ class GeradorEstruturado:
         entrada: str,
         recurso: str,
         tentativa: int = 1,
+        endpoint: str = "",
+        fatia: str = "",
     ) -> T:
         entrada_atual = entrada
         ultimo_texto = ""
@@ -170,7 +175,15 @@ class GeradorEstruturado:
                 SystemMessage(content=instrucao),
                 HumanMessage(content=entrada_atual),
             ]
-            resposta, objeto, erro = self._invocar(tipo, mensagens, recurso, tentativa, passo)
+            resposta, objeto, erro = self._invocar(
+                tipo,
+                mensagens,
+                recurso,
+                tentativa,
+                passo,
+                endpoint=endpoint,
+                fatia=fatia,
+            )
             exigir_resposta_inteira(resposta, estagio=self.estagio, recurso=recurso)
             ultimo_texto = texto_da_mensagem(resposta) or ultimo_texto
 
@@ -226,6 +239,9 @@ class GeradorEstruturado:
         recurso: str,
         tentativa: int,
         passo: int,
+        *,
+        endpoint: str = "",
+        fatia: str = "",
     ) -> tuple[BaseMessage | None, T | None, list[Violacao] | None]:
         inicio = time.perf_counter()
         modo = self._modo
@@ -236,6 +252,20 @@ class GeradorEstruturado:
         # tentativa que morre no provedor precisa aparecer na telemetria com ele.
         instrucao, entrada = medir_mensagens(mensagens)
         tamanhos = (instrucao, entrada)
+        observador = ObservadorDeProvedor(
+            telemetria=self.telemetria,
+            registro=self.registro,
+            estagio=self.estagio,
+            recurso=recurso,
+            tentativa=tentativa,
+            modelo=self.parametros.modelo,
+            endpoint=endpoint,
+            fatia=fatia,
+            detalhe=f"schema:{passo}",
+            simulado=getattr(self.modelo, "simulado", False),
+            antes_de_chamar=self.antes_de_chamar,
+        )
+        config_de_callback = {"callbacks": [observador]}
 
         if modo != "prompt":
             try:
@@ -243,7 +273,7 @@ class GeradorEstruturado:
                     tipo, method=_METODOS[modo], include_raw=True
                 )
                 retorno = self._com_retentativas(
-                    lambda: estruturado.invoke(mensagens),
+                    lambda: estruturado.invoke(mensagens, config=config_de_callback),
                     recurso=recurso,
                     tentativa=tentativa,
                     passo=passo,
@@ -274,7 +304,7 @@ class GeradorEstruturado:
 
         if modo == "prompt":
             resposta = self._com_retentativas(
-                lambda: self.modelo.invoke(mensagens),
+                lambda: self.modelo.invoke(mensagens, config=config_de_callback),
                 recurso=recurso,
                 tentativa=tentativa,
                 passo=passo,
@@ -282,20 +312,26 @@ class GeradorEstruturado:
             )
             objeto, problemas = self._parsear(tipo, texto_da_mensagem(resposta))
 
-        self.telemetria.registrar(
-            RegistroDeChamada(
-                estagio=self.estagio,
-                recurso=recurso,
-                tentativa=tentativa,
-                modelo=self.parametros.modelo,
-                uso=uso_da_mensagem(resposta) if resposta else UsoDeTokens(),
-                duracao_s=time.perf_counter() - inicio,
-                simulado=getattr(self.modelo, "simulado", False),
-                detalhe=f"schema:{passo}",
-                caracteres_instrucao=instrucao,
-                caracteres_entrada=entrada,
+        # Modelos LangChain normais disparam o callback por request. O fallback é
+        # só para duplos/implementações de terceiro que não honram callbacks; sem
+        # ele a execução continuaria correta, mas o custo sumiria do relatório.
+        if observador.chamadas_finalizadas == 0:
+            self.telemetria.registrar(
+                RegistroDeChamada(
+                    estagio=self.estagio,
+                    recurso=recurso,
+                    tentativa=tentativa,
+                    modelo=self.parametros.modelo,
+                    uso=uso_da_mensagem(resposta) if resposta else UsoDeTokens(),
+                    duracao_s=time.perf_counter() - inicio,
+                    simulado=getattr(self.modelo, "simulado", False),
+                    detalhe=f"schema:{passo}; callback:ausente",
+                    caracteres_instrucao=instrucao,
+                    caracteres_entrada=entrada,
+                    endpoint=endpoint,
+                    fatia=fatia,
+                )
             )
-        )
         return resposta, objeto, problemas
 
     def _com_retentativas[R](

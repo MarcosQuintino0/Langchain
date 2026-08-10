@@ -1,5 +1,5 @@
 {
-  "descricao": "Reparo do mapeador a partir do delta do Gate A: CAT-05 passa a ser contabilizada em POST /pedidos.",
+  "descricao": "Reparo do mapeador a partir do delta do Gate A: CAT-05 passa a ser contabilizada em POST /pedidos e o dossiê ausente (QAORQ-063) é emitido.",
   "passos": [
     {
       "tipo": "final",
@@ -73,7 +73,63 @@
             "caminho": "pedidos/entidade.schema.json",
             "conteudo": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"title\": \"Pedido\",\n  \"type\": \"object\",\n  \"required\": [\"situacao\"],\n  \"properties\": {\n    \"situacao\": {\n      \"type\": \"string\",\n      \"enum\": [\"ABERTO\", \"FECHADO\"]\n    }\n  }\n}\n"
           }
-        ]
+        ],
+        "dossie": {
+          "recurso": "pedidos",
+          "regras": [
+            {
+              "id": "RN-01",
+              "resumo": "a criacao valida o corpo antes de gravar",
+              "efeito": "POST com situacao fora do conjunto ABERTO/FECHADO responde erro funcional de validacao e nenhum registro e criado",
+              "evidencias": [
+                {
+                  "arquivo": "src/controllers/PedidoController.java",
+                  "linha": 17
+                }
+              ],
+              "endpoints": [
+                "POST /pedidos"
+              ]
+            }
+          ],
+          "erros": [
+            {
+              "endpoint": "POST /pedidos",
+              "respostas": [
+                {
+                  "status": 400,
+                  "quando": "situacao ausente ou fora do conjunto ABERTO/FECHADO"
+                }
+              ]
+            }
+          ],
+          "incertezas": [
+            {
+              "descricao": "nao foi possivel determinar pela fonte se campo desconhecido no corpo e rejeitado ou ignorado",
+              "endpoints": [
+                "POST /pedidos"
+              ]
+            }
+          ],
+          "verificacoesNegativas": [
+            {
+              "aspecto": "campos-derivados",
+              "resultado": "nenhum: a resposta devolve o registro exatamente como enviado"
+            },
+            {
+              "aspecto": "maquina-de-estados",
+              "resultado": "nenhuma: situacao aceita qualquer valor do conjunto em qualquer ordem"
+            },
+            {
+              "aspecto": "regras-condicionais-entre-campos",
+              "resultado": "nenhuma: o unico campo valida sozinho"
+            },
+            {
+              "aspecto": "efeitos-colaterais-em-outros-recursos",
+              "resultado": "nenhum: criar e listar pedidos nao toca outra entidade"
+            }
+          ]
+        }
       }
     }
   ]

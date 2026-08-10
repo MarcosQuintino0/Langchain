@@ -251,6 +251,12 @@ class ConfigEstagio(BaseModel):
     modo_estruturado: ModoEstruturado = "prompt"
     # Mini-loop de reparo do delta "schema" (saída que não valida).
     max_tentativas_schema: Tentativas = 3
+    # Chamadas simultâneas do estágio (hoje só o planejador honra; os demais são
+    # sequenciais por natureza — o ReAct do mapeador encadeia voltas e as fatias
+    # do executor dependem do `_support` gerado antes). 1 = fila. As chamadas do
+    # planejador são independentes por construção (nenhuma lê a saída de outra),
+    # então o limite protege contra o 429 do provedor, não contra a arquitetura.
+    paralelismo: Annotated[int, Field(ge=1, le=16)] = 1
     # Teto de passos do loop ReAct (só o mapeador usa).
     limite_passos: PassosDoAgente = 40
 
@@ -269,6 +275,18 @@ class ConfigEstagio(BaseModel):
     # passou porque o contrato exige ao menos um arquivo. Limitar resolve; desligar
     # troca um defeito por outro.
     max_tokens_de_raciocinio: Annotated[PositiveInt, Field(le=100_000)] | None = None
+
+    # Liga/desliga a fase de pensamento por chamada, nos modelos híbridos que a
+    # expõem (OpenRouter: `reasoning.enabled`). `None` deixa o padrão do modelo.
+    #
+    # É diferente do teto acima: o teto limita o pensamento, isto o remove. Medido
+    # em 2026-08-10 no planejador com a entrada enriquecida pelo dossiê: a fase de
+    # pensamento espiralava (~1 chamada em 5-10 corria aos 65.536 tokens sem
+    # começar a resposta, 10-15 minutos perdidos cada); sem a fase, a espiral é
+    # impossível por construção. O aviso do teto vale aqui também: desligar em
+    # estágio que precisa deliberar troca um defeito por outro — foi desligando o
+    # raciocínio que o executor devolveu estrutura válida e vazia.
+    raciocinio: bool | None = None
 
 
 class ConfigGate(BaseModel):
@@ -324,6 +342,28 @@ class ConfigSkill(BaseModel):
     impressao_esperada: str = ""
 
 
+class ConfigOtlp(BaseModel):
+    """Destino OTLP/HTTP opcional; o valor de headers nunca entra no TOML."""
+
+    model_config = MODELO_DE_CONFIG
+
+    habilitado: bool = False
+    endpoint: AnyHttpUrl = AnyHttpUrl("http://localhost:4318")
+    timeout_s: SegundosFracionados = 5.0
+    service_name: str = Field(default="orquestrador", min_length=1, max_length=100)
+    headers_env: str = "OTEL_EXPORTER_OTLP_HEADERS"
+    incluir_identificadores: bool = False
+
+
+class ConfigObservabilidade(BaseModel):
+    """Ciclo local de observabilidade e exportação remota opt-in."""
+
+    model_config = MODELO_DE_CONFIG
+
+    intervalo_pulso_s: SegundosFracionados = 30.0
+    otlp: ConfigOtlp = Field(default_factory=ConfigOtlp)
+
+
 class Config(BaseModel):
     model_config = MODELO_DE_CONFIG
 
@@ -333,6 +373,7 @@ class Config(BaseModel):
     gates: dict[str, ConfigGate]
     execucao: ConfigExecucao = Field(default_factory=ConfigExecucao)
     skill: ConfigSkill = Field(default_factory=lambda: ConfigSkill())
+    observabilidade: ConfigObservabilidade = Field(default_factory=ConfigObservabilidade)
     # Sem tetos configurados, `Orcamento.configurado` é falso e a checagem custa
     # uma comparação por chamada. Orçamento que aparece sem ninguém pedir
     # interrompe execução legítima e ensina a desligá-lo.

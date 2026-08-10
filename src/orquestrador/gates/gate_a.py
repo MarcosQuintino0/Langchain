@@ -26,12 +26,14 @@ from orquestrador.analise_estatica.extrator_de_endpoints import (
     matriz_em_texto,
 )
 from orquestrador.config import Config
+from orquestrador.dominio.dossie import DossieDoRecurso
 from orquestrador.dominio.inventario import Endpoint, Inventario
 from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import GrafoNaoPreparado
 from orquestrador.ferramentas.scripts_qa import Validador
+from orquestrador.gates.evidencias import conferir_dossie
 from orquestrador.gates.saidas import resultado_do_validador
 
 NOME = "gate_a"
@@ -53,6 +55,7 @@ def executar(
     dir_schemas: Path,
     inventario: Inventario | None = None,
     manifesto: Manifesto | None = None,
+    dossie: DossieDoRecurso | None = None,
 ) -> ResultadoGate:
     """Roda as duas checagens do Gate A sobre o artefato em disco.
 
@@ -75,9 +78,14 @@ def executar(
         manifesto=manifesto,
         recurso=recurso,
     )
+    partes = [manifesto_ok, diff]
+    if manifesto is not None:
+        # O dossiê só é conferível contra um gabarito: sem manifesto em memória o
+        # diff acima já vira erro de ferramenta, e empilhar outro não acrescenta.
+        partes.append(conferir_dossie(dossie, manifesto, config.caminhos.backend))
     # `exigir_veredito` interrompe quando o validador não se comportou como o
     # contrato dele diz: sem veredito confiável não há o que mandar ao mapeador.
-    return ResultadoGate.combinar([manifesto_ok, diff], gate=NOME).exigir_veredito()
+    return ResultadoGate.combinar(partes, gate=NOME).exigir_veredito()
 
 
 def diff_grafo_manifesto(

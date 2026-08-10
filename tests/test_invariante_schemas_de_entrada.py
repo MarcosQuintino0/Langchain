@@ -167,9 +167,12 @@ def test_o_evento_artefatos_registra_o_schema(pipeline, recurso, area, monkeypat
     artefatos = next(
         evento
         for evento in eventos
-        if evento["tipo"] == "artefatos" and evento["estagio"] == "mapeador"
+        if evento["tipo"] == "artefatos" and evento["dados"]["estagio"] == "mapeador"
     )
-    assert any("entidade.schema.json" in caminho for caminho in artefatos["arquivos"])
+    assert any(
+        "entidade.schema.json" in arquivo["caminho"]
+        for arquivo in artefatos["dados"]["arquivos"]
+    )
 
 
 def test_recurso_sem_raiz_de_schemas_diz_o_que_falta(config_falso):

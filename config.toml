@@ -33,6 +33,22 @@ support_compartilhado = "cypress/support/api"
 # Relativo a este diretório: logs, artefatos e sandbox de cada execução.
 saida = ".execucoes"
 
+# O JSONL local é sempre a fonte primária. O pulso permite distinguir uma execução
+# viva de uma que morreu sem evento terminal.
+[observabilidade]
+intervalo_pulso_s = 30.0
+
+# Exportação opcional de traces e métricas sanitizadas via OTLP/HTTP. Desligada por
+# padrão; falha do Collector nunca interrompe o pipeline. O valor de autenticação
+# vem da variável indicada, nunca deste arquivo.
+[observabilidade.otlp]
+habilitado = false
+endpoint = "http://localhost:4318"
+timeout_s = 5.0
+service_name = "orquestrador"
+headers_env = "OTEL_EXPORTER_OTLP_HEADERS"
+incluir_identificadores = false
+
 # ---------------------------------------------------------------------------
 # Compatibilidade com a skill
 # ---------------------------------------------------------------------------
@@ -95,9 +111,29 @@ limite_passos = 60
 
 # O planejador expande o gabarito em cenários concretos, um endpoint por chamada.
 # É onde mora o julgamento que o executor não deve improvisar no meio da escrita.
+#
+# temperatura 0.6, e não 0.0: com a entrada enriquecida pelo dossiê, temp 0.0
+# degenerou em espiral de raciocínio (medido 2026-08-10: 65.536 tokens, 100%
+# pensamento, resposta nunca começada, no GET de listagem). Com 0.6 a mesma
+# chamada completou com 39 cenários e 9,3 mil tokens de saída.
+#
+# raciocinio = false: o modelo é híbrido e o pensamento é desligável por chamada.
+# Com o dossiê na entrada, planejar virou transcrição — as regras, códigos e
+# defaults chegam decididos — e a fase de pensamento só oferecia a espiral
+# (2026-08-10: ~1 chamada em 5-10 corria aos 65.536 tokens sem começar a
+# resposta). O mapeador mantém o raciocínio: lá a deliberação é o trabalho.
 [estagios.planejador]
 modelo = "deepseek/deepseek-v4-flash-0731"
-temperatura = 0.0
+temperatura = 0.6
+raciocinio = false
+# Backstop contra loop de repetição no conteúdo (2026-08-10: sem raciocínio, uma
+# chamada travou permutando o mesmo nome de cenário até os 65.536). As chamadas
+# saudáveis ficam abaixo de 12k; um loop agora morre em ~2 min e o retry único
+# do estágio rola o dado de novo.
+max_tokens = 16000
+# 3 chamadas simultâneas: as ~16 chamadas do estágio são independentes entre si,
+# e em fila somavam ~4 min. Moderado (não 6+) por causa dos 429 da Together.
+paralelismo = 3
 modo_estruturado = "prompt"
 max_tentativas_schema = 3
 

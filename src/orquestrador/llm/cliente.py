@@ -105,12 +105,19 @@ def criar_modelo(config: Config, estagio: str) -> BaseChatModel:
     # uma política que mora em outro lugar não é política — é preferência. O que
     # ela pede está em `ConfigOpenRouter.roteamento`.
     corpo: dict[str, Any] = {"provider": config.openrouter.roteamento()}
+    raciocinio: dict[str, Any] = {}
     if parametros.max_tokens_de_raciocinio is not None:
         # Num modelo de raciocínio, o pensamento gasta o orçamento de saída. Sem
         # teto, um pedido grande faz o modelo pensar até o limite e devolver a
         # resposta cortada — que chega aqui como `QAORQ-011`, não como erro de
         # provedor. Ver `[estagios.*].max_tokens_de_raciocinio`.
-        corpo["reasoning"] = {"max_tokens": parametros.max_tokens_de_raciocinio}
+        raciocinio["max_tokens"] = parametros.max_tokens_de_raciocinio
+    if parametros.raciocinio is not None:
+        # Liga/desliga a fase de pensamento nos modelos híbridos. Ver o comentário
+        # de `[estagios.*].raciocinio` para a medição que motivou o campo.
+        raciocinio["enabled"] = parametros.raciocinio
+    if raciocinio:
+        corpo["reasoning"] = raciocinio
     extras["extra_body"] = corpo
     return ChatOpenAI(
         model=parametros.modelo,

@@ -15,7 +15,9 @@ from orquestrador.dominio.plano import (
     PlanoDeTestes,
     PlanoDoEndpoint,
     cenarios_faltantes,
+    cenarios_sem_prova_de_estado,
     conferir_plano,
+    variacoes_excedentes,
 )
 
 pytestmark = pytest.mark.unit
@@ -90,6 +92,68 @@ def test_fatia_por_categoria_seleciona_so_o_que_e_do_spec():
     assert "caso-CAT-08" not in fatia
     # Endpoint sem cenário na fatia não ganha seção vazia.
     assert fatia.count("### ") == 2
+
+
+def test_escrita_sem_prova_de_estado_e_apontada():
+    """A régua do QAORQ-051: quem muda estado prova o estado; quem só lê, não."""
+    parte = PlanoDoEndpoint(
+        endpoint="POST /pedidos",
+        cenarios=[
+            Cenario(cat="CAT-01", nome="cego", entrada="POST com corpo x", espera="201"),
+            Cenario(
+                cat="CAT-01",
+                nome="provado",
+                entrada="POST com corpo x",
+                espera="201; GET confirma que persistiu",
+            ),
+            Cenario(cat="CAT-10", nome="leitura", entrada="GET /pedidos", espera="200 e lista"),
+        ],
+    )
+
+    assert cenarios_sem_prova_de_estado(parte) == ["cego"]
+
+
+def test_rejeicao_com_estado_inalterado_conta_como_prova():
+    parte = PlanoDoEndpoint(
+        endpoint="POST /pedidos",
+        cenarios=[
+            Cenario(
+                cat="CAT-02",
+                nome="rejeitado",
+                entrada="POST sem campo obrigatório",
+                espera="400 VALIDATION_ERROR; nenhum registro criado",
+            )
+        ],
+    )
+
+    assert cenarios_sem_prova_de_estado(parte) == []
+
+
+def test_variacoes_excedentes_por_campo_e_categoria():
+    """A régua do QAORQ-052: acima do limite é repetição, não cobertura."""
+    parte = PlanoDoEndpoint(
+        endpoint="POST /pedidos",
+        cenarios=[
+            *(
+                Cenario(
+                    cat="CAT-03",
+                    nome=f"email-{i}",
+                    entrada="POST",
+                    espera="400; nada criado",
+                    campo="email",
+                )
+                for i in range(4)
+            ),
+            Cenario(
+                cat="CAT-03", nome="nome-1", entrada="POST", espera="400; nada criado", campo="name"
+            ),
+        ],
+    )
+
+    excessos = variacoes_excedentes(parte)
+
+    assert len(excessos) == 1
+    assert "'email'" in excessos[0] and "4" in excessos[0]
 
 
 def test_render_e_uma_linha_por_cenario_legivel():

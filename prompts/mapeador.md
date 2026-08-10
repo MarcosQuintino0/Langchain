@@ -265,6 +265,43 @@ dentro do arquivo, nunca outro arquivo.
 Um recurso emite apenas os schemas do próprio recurso. Endpoint sem corpo não
 declara `schemaEntrada` e não emite schema: declara `semCorpo` com a justificativa.
 
+## Emitir o dossiê
+
+O gabarito diz **o que** testar; o dossiê registra **o que você leu** para decidir
+isso — e é a única memória que sobrevive de sua exploração. O planejador não lê o
+backend: regra que não estiver no dossiê não existe para quem escreve os testes, e
+o cenário sai genérico ("espera 4xx") em vez de exato ("409 CUSTOMER_CODE_EXISTS").
+Emita em `dossie` (mesmo `recurso` do manifesto):
+
+- **`regras`** — cada regra de negócio com efeito observável por HTTP que você
+  encontrou ao decidir as categorias: unicidade, normalização (trim, caixa),
+  imutabilidade, precedência de validações, bloqueio de exclusão por dependente,
+  isolamento por tenant. Cada regra tem `id` (`RN-01`, `RN-02`, ...), `resumo`,
+  `efeito` (entrada → resposta/estado, com o status e o código de erro exatos),
+  `endpoints` (forma canônica do gabarito; **vazio = vale para o recurso inteiro**,
+  como um protocolo de versão via header) e `evidencias` com `arquivo` (relativo à
+  raiz do backend, como no inventário) e `linha`. **A evidência é conferida por
+  script** (QAORQ-060): cite o lugar real de onde leu, nunca de memória.
+- **`erros`** — por endpoint, os modos de falha lidos na fonte: `status`, `codigo`
+  do corpo quando existir, e `quando`. É daqui que o teste negativo deixa de
+  chutar o status.
+- **`consultas`** — para endpoints de listagem: **todos** os parâmetros aceitos
+  (comportamento e default quando ausente, erro quando inválido) e o que acontece
+  com parâmetro desconhecido. A lista é exaustiva por contrato: parâmetro fora
+  dela não existe, e é isso que impede teste de filtro imaginário.
+- **`incertezas`** — o que você procurou e não conseguiu determinar pela fonte.
+  Registrar autoriza o planejador a caracterizar o resultado em vez de afirmar um
+  código. Incerteza registrada é informação; incerteza omitida vira chute alheio.
+- **`verificacoesNegativas`** — a checklist fechada, todas obrigatórias
+  (QAORQ-062): `campos-derivados`, `maquina-de-estados`,
+  `regras-condicionais-entre-campos`, `efeitos-colaterais-em-outros-recursos`.
+  Diga o que vasculhou e o que encontrou — inclusive quando a resposta é
+  "nenhum". "Não encontrei" sem dizer onde procurou não é resposta.
+
+Não repita no dossiê o que já está declarado: restrição de campo mora no schema de
+entrada, categoria em `cats`/`naoAplica`. O dossiê carrega o que nenhum dos dois
+carrega — comportamento.
+
 ## Profundidade e handler compartilhado
 
 Quando os endpoints herdam de um handler genérico do backend, confirme os herdeiros

@@ -196,4 +196,4 @@ def test_a_linha_do_jsonl_carrega_versao_e_o_valor_do_enum(tmp_path: Path):
     linha = json.loads(destino.read_text(encoding="utf-8").strip())
     assert linha["tipo"] == "gate"
     assert linha["schema_version"] == ESQUEMA_DOS_EVENTOS
-    assert linha["recurso"] == "pedidos"
+    assert linha["dados"]["recurso"] == "pedidos"

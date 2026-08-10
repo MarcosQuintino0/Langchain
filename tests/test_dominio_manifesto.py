@@ -77,3 +77,29 @@ def test_contabilidade_das_doze_nao_e_checada_aqui():
 def test_campo_desconhecido_no_manifesto_e_recusado(manifesto_minimo):
     with pytest.raises(ValidationError):
         Manifesto.model_validate(manifesto_minimo(profundidadee="completa"))
+
+
+
+def test_para_prompt_omite_justificativas_e_para_json_as_preserva():
+    """A projeção de prompt tira o naoAplica; a serialização da skill, nunca.
+
+    As justificativas existem para o relatório e para o gate — nos estágios de
+    LLM elas eram 1-2k caracteres por chamada sem consumidor. O arquivo em disco
+    (para_json) continua íntegro: é ele que o validador .mjs lê.
+    """
+    manifesto = Manifesto.model_validate(
+        {
+            "recurso": "pedidos",
+            "endpoints": [
+                {
+                    "endpoint": "GET /pedidos",
+                    "cats": ["CAT-01"],
+                    "naoAplica": {"CAT-12": "a rota devolve JSON e nao recebe arquivo"},
+                }
+            ],
+        }
+    )
+
+    assert "nao recebe arquivo" not in manifesto.para_prompt()
+    assert "cats" in manifesto.para_prompt()
+    assert "nao recebe arquivo" in manifesto.para_json()

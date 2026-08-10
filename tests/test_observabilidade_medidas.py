@@ -27,6 +27,10 @@ CAMPOS_DE_TOOL = {
     "recurso",
     "tentativa",
     "ordem",
+    "tool_call_id",
+    "ordem_solicitada",
+    "ordem_inicio",
+    "ordem_conclusao",
     "nome",
     "argumentos",
     "caracteres",
@@ -45,6 +49,14 @@ CAMPOS_DE_CHAMADA = {
     "detalhe",
     "caracteres_instrucao",
     "caracteres_entrada",
+    "endpoint",
+    "fatia",
+    "request_id",
+    "status",
+    "finish_reason",
+    "provedor",
+    "custo_reportado",
+    "estado",
 }
 
 

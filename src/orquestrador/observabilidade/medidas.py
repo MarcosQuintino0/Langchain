@@ -78,6 +78,16 @@ class RegistroDeChamada(BaseModel):
     detalhe: str = ""
     caracteres_instrucao: int = 0
     caracteres_entrada: int = 0
+    endpoint: str = ""
+    fatia: str = ""
+    request_id: str = ""
+    status: int | None = None
+    finish_reason: str = ""
+    provedor: str = ""
+    # Só entra quando a resposta do provedor trouxer o valor. Não há tabela de
+    # preços embutida: estimativa local ficaria errada ao trocar modelo ou rota.
+    custo_reportado: float | None = None
+    estado: str = "concluida"
 
 
 class RegistroDeTool(BaseModel):
@@ -101,6 +111,10 @@ class RegistroDeTool(BaseModel):
     recurso: str
     tentativa: int
     ordem: int
+    tool_call_id: str = ""
+    ordem_solicitada: int = 0
+    ordem_inicio: int = 0
+    ordem_conclusao: int = 0
     nome: str
     argumentos: dict[str, Any] = Field(default_factory=dict)
     caracteres: int = 0

@@ -395,7 +395,10 @@ def test_cada_volta_perdida_aparece_na_telemetria(monkeypatch: pytest.MonkeyPatc
     assert all(c.uso.total == 0 for c in perdidas)
     assert all(c.caracteres_instrucao > 0 for c in perdidas)
     assert sum(c.uso.total for c in chamadas) == 15
-    assert registro.tipos().count("chamada_llm") == 3
+    assert registro.tipos().count("requisicao_llm_iniciada") == 3
+    assert registro.tipos().count("requisicao_llm_falhou") == 2
+    assert registro.tipos().count("requisicao_llm_concluida") == 1
+    assert "chamada_llm" not in registro.tipos()
 
 
 # ---------------------------------------------------------------------------

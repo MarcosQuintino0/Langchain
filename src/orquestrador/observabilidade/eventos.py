@@ -32,10 +32,13 @@ acrescentar campo novo é compatível e não exige incremento.
 from __future__ import annotations
 
 from enum import StrEnum, unique
+from typing import Any
 
-__all__ = ["ESQUEMA_DOS_EVENTOS", "TipoDeEvento", "catalogo_markdown"]
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-ESQUEMA_DOS_EVENTOS = 1
+__all__ = ["ESQUEMA_DOS_EVENTOS", "Evento", "TipoDeEvento", "catalogo_markdown"]
+
+ESQUEMA_DOS_EVENTOS = 2
 
 
 @unique
@@ -66,6 +69,19 @@ class TipoDeEvento(StrEnum):
         "manifesto_de_execucao",
         "onde o `manifesto-execucao.json` foi escrito e quais campos não puderam ser coletados",
     )
+    PULSO = ("pulso", "sinal periódico de que a execução continua viva")
+    OPERACAO_INICIADA = (
+        "operacao_iniciada",
+        "abertura de uma operação correlacionada por trace e span",
+    )
+    OPERACAO_CONCLUIDA = (
+        "operacao_concluida",
+        "fechamento bem-sucedido de uma operação, com sua duração",
+    )
+    OPERACAO_FALHOU = (
+        "operacao_falhou",
+        "fechamento com falha de uma operação, sem conteúdo sensível da exceção",
+    )
 
     # -- Bloco 0 ------------------------------------------------------------
     BLOCO0 = ("bloco0", "preparação determinística: se o `graph.json` ficou utilizável, e por quê")
@@ -82,6 +98,18 @@ class TipoDeEvento(StrEnum):
     CHAMADA_LLM = (
         "chamada_llm",
         "uma chamada ao modelo: estágio, recurso, tentativa, modelo e tokens de entrada e saída",
+    )
+    REQUISICAO_LLM_INICIADA = (
+        "requisicao_llm_iniciada",
+        "uma requisição real ao provedor começou, com contexto da unidade de trabalho",
+    )
+    REQUISICAO_LLM_CONCLUIDA = (
+        "requisicao_llm_concluida",
+        "uma requisição real ao provedor terminou, com uso, duração e motivo de parada",
+    )
+    REQUISICAO_LLM_FALHOU = (
+        "requisicao_llm_falhou",
+        "uma requisição real ao provedor falhou, com categoria e identificador de suporte",
     )
     TOOL = ("tool", "uma chamada de tool do mapeador: ordem, argumentos, tamanho do retorno e erro")
     GATE = ("gate", "veredito de um gate numa tentativa, com violações e avisos")
@@ -115,6 +143,10 @@ class TipoDeEvento(StrEnum):
         "cypress",
         "execução da suíte: código de saída e relatório desta execução, ou o motivo de não rodar",
     )
+    PROCESSO = (
+        "processo",
+        "subprocesso externo medido por código, duração, bytes, timeout e hash do comando",
+    )
     COBERTURA = ("cobertura", "contadores do `qa-cobertura.mjs` e se houve execução de runtime")
 
     # -- desfecho -----------------------------------------------------------
@@ -136,6 +168,25 @@ class TipoDeEvento(StrEnum):
         "execucao_concluida",
         "fechamento: sucesso, interrupção e o resumo por recurso",
     )
+
+
+class Evento(BaseModel):
+    """Evento antes de receber o envelope de execução do escritor JSONL.
+
+    O payload aceita somente valores JSON. Isso mantém `Path`, modelos Pydantic e
+    objetos de terceiros do lado de fora do contrato persistido; a camada de
+    compatibilidade de `Registro.evento` converte esses valores antes de construir
+    este modelo.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tipo: TipoDeEvento
+    dados: dict[str, JsonValue] = Field(default_factory=dict[str, JsonValue])
+
+    @classmethod
+    def de_campos(cls, tipo: TipoDeEvento, campos: dict[str, Any]) -> Evento:
+        return cls(tipo=tipo, dados=campos)
 
 
 def catalogo_markdown() -> str:

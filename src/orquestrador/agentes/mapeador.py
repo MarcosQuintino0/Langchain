@@ -14,7 +14,6 @@ diferentes, e é por isso que são três arquivos.
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
@@ -45,7 +44,7 @@ from orquestrador.llm.cliente import (
     descrever_volta,
 )
 from orquestrador.llm.estruturado import exigir_resposta_inteira, violacoes_de_validacao
-from orquestrador.llm.mensagens import texto_da_mensagem, uso_da_mensagem, uso_das_mensagens
+from orquestrador.llm.mensagens import texto_da_mensagem
 from orquestrador.llm.montagem import (
     LIMITE_PADRAO,
     carregar_prompt,
@@ -55,6 +54,7 @@ from orquestrador.llm.montagem import (
     montar_entrada_reparo_de_schema,
 )
 from orquestrador.observabilidade.medidas import RegistroDeChamada, UsoDeTokens
+from orquestrador.observabilidade.provedor import ObservadorDeProvedor
 from orquestrador.observabilidade.registro import RegistradorDeEventos
 from orquestrador.observabilidade.telemetria import Telemetria
 
@@ -231,19 +231,46 @@ def executar(
     politica = PoliticaDeRetentativa.do_config(config)
 
     for passo in range(1, parametros.max_tentativas_schema + 1):
-        # Dentro do laço, e não antes dele: o mini-loop de schema dá várias voltas
-        # de modelo por tentativa, e a primeira delas é a exploração inteira do ReAct.
-        exigir_folga(config, telemetria, estagio=ESTAGIO, recurso=recurso.nome)
-        inicio = time.perf_counter()
+        observador = ObservadorDeProvedor(
+            telemetria=telemetria,
+            registro=registro,
+            estagio=ESTAGIO,
+            recurso=recurso.nome,
+            tentativa=tentativa,
+            modelo=parametros.modelo,
+            fatia="exploracao" if passo == 1 else "reparo_schema",
+            detalhe=(
+                f"schema:{passo}; mensagens:por_request"
+                if passo == 1
+                else f"schema:{passo}; reparo-direto"
+            ),
+            simulado=getattr(modelo, "simulado", False),
+            # O callback acontece na fronteira do chat model, inclusive para cada
+            # volta interna do ReAct: é o único ponto que realmente significa
+            # "antes de toda requisição".
+            antes_de_chamar=lambda: exigir_folga(
+                config, telemetria, estagio=ESTAGIO, recurso=recurso.nome
+            ),
+        )
 
-        def invocar(entrada: str = entrada) -> EstadoDoReAct:
+        def invocar(
+            entrada: str = entrada, observador: ObservadorDeProvedor = observador
+        ) -> EstadoDoReAct:
             return agente.invoke(
                 {"messages": [HumanMessage(content=entrada)]},
-                config={"recursion_limit": parametros.limite_passos},
+                config={
+                    "recursion_limit": parametros.limite_passos,
+                    "callbacks": [observador],
+                },
             )
 
-        def invocar_direto(entrada: str = entrada) -> BaseMessage:
-            return modelo.invoke([SystemMessage(content=instrucao), HumanMessage(content=entrada)])
+        def invocar_direto(
+            entrada: str = entrada, observador: ObservadorDeProvedor = observador
+        ) -> BaseMessage:
+            return modelo.invoke(
+                [SystemMessage(content=instrucao), HumanMessage(content=entrada)],
+                config={"callbacks": [observador]},
+            )
 
         # `passo` e `entrada` viajam como padrão porque os dois mudam a cada volta do
         # laço: capturados por referência, a telemetria mediria o que a tentativa
@@ -287,9 +314,7 @@ def executar(
                 # execução inteira com traceback, em vez de falhar só este recurso.
                 raise _sem_passos(parametros.limite_passos, recurso.nome, str(erro)) from erro
             mensagens = estado.get("messages") or []
-            uso = uso_das_mensagens(mensagens)
             resposta = mensagens[-1] if mensagens else None
-            detalhe = f"schema:{passo}; mensagens:{len(mensagens)}"
         else:
             # Reparo de schema é defeito de FORMA — a saída não validou contra o
             # contrato. Não há nada a descobrir no backend, então o reparo NÃO passa
@@ -306,26 +331,8 @@ def executar(
                 ao_falhar=perdeu_a_volta,
             )
             mensagens = [resposta]
-            uso = uso_da_mensagem(resposta)
-            detalhe = f"schema:{passo}; reparo-direto"
 
-        telemetria.registrar(
-            RegistroDeChamada(
-                estagio=ESTAGIO,
-                recurso=recurso.nome,
-                tentativa=tentativa,
-                modelo=parametros.modelo,
-                uso=uso or UsoDeTokens(),
-                duracao_s=time.perf_counter() - inicio,
-                simulado=getattr(modelo, "simulado", False),
-                detalhe=detalhe,
-                caracteres_instrucao=len(instrucao),
-                caracteres_entrada=len(entrada),
-            )
-        )
-
-        # Depois de registrar a telemetria: os tokens desta volta foram gastos de
-        # verdade e precisam aparecer no relatório, mesmo que ela termine em falha.
+        # O callback já registrou cada request real antes de chegarmos aqui.
         exigir_resposta_inteira(resposta, estagio=ESTAGIO, recurso=recurso.nome)
         if passo == 1 and acabaram_os_passos(mensagens):
             # O caminho que realmente acontece no LangGraph 1.x (ver SENTINELA_SEM_PASSOS):
@@ -372,7 +379,14 @@ def executar(
     )
 
 
-def artefato_em_disco(*, manifesto: Path, inventario: Path, dir_schemas: Path, recurso: str) -> str:
+def artefato_em_disco(
+    *,
+    manifesto: Path,
+    inventario: Path,
+    dir_schemas: Path,
+    recurso: str,
+    dossie: Path | None = None,
+) -> str:
     """O artefato **inteiro** do Bloco 1, lido do staging, para o prompt de reparo.
 
     `SaidaMapeador` tem três partes — inventário, manifesto e schemas — e o reparo
@@ -395,6 +409,11 @@ def artefato_em_disco(*, manifesto: Path, inventario: Path, dir_schemas: Path, r
         _secao("inventario.json", inventario),
         _secao("_support/cobertura.json", manifesto),
     ]
+    if dossie is not None:
+        # Depois de inventário e manifesto, sempre nesta posição: as violações
+        # QAORQ-060..063 falam do dossiê, e o reparo precisa vê-lo inteiro — ou
+        # ver "(ausente)", que é exatamente o que o QAORQ-063 está cobrando.
+        partes.append(_secao("dossie.json", dossie))
     raiz_do_recurso = dir_schemas / recurso
     if raiz_do_recurso.is_dir():
         for arquivo in sorted(raiz_do_recurso.rglob(f"*{SUFIXO_SCHEMA}")):

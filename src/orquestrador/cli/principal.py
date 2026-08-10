@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,6 +32,7 @@ from orquestrador.cli.codigos_de_saida import (
 )
 from orquestrador.cli.doctor import comando_doctor
 from orquestrador.cli.estimativa import estimar
+from orquestrador.cli.execucoes import comando_execucoes
 from orquestrador.cli.init import comando_init
 from orquestrador.config import Config
 from orquestrador.dominio.recurso import Recurso
@@ -40,9 +42,11 @@ from orquestrador.excecoes import (
     ErroDeFerramenta,
     ErroDeProvedor,
 )
+from orquestrador.ferramentas.processo import observar_processos
 from orquestrador.ferramentas.publicacao import remover_criados
 from orquestrador.observabilidade import manifesto_de_execucao, tabelas
 from orquestrador.observabilidade.eventos import TipoDeEvento
+from orquestrador.observabilidade.exportacao_otlp import ExportadorOtlp
 from orquestrador.observabilidade.registro import (
     Registro,
     configurar_console,
@@ -299,7 +303,7 @@ def escrever_manifesto(
 # inventar um `run` e quebrar toda invocação existente; um opcional torna
 # ambíguo o argumento posicional. O despacho por primeira palavra preserva as
 # duas formas sem ambiguidade: `init` e `doctor` não são valores de flag nenhuma.
-COMANDOS = ("init", "doctor")
+COMANDOS = ("init", "doctor", "execucoes")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -309,6 +313,8 @@ def main(argv: list[str] | None = None) -> int:
         console = Console()
         if argumentos[0] == "init":
             return comando_init(argumentos[1:], console)
+        if argumentos[0] == "execucoes":
+            return comando_execucoes(argumentos[1:], console)
         return comando_doctor(argumentos[1:], console)
     return executar_pipeline(argumentos)
 
@@ -365,7 +371,15 @@ def executar_pipeline(argv: list[str] | None = None) -> int:
         console.print("[red]informe ao menos um --recurso.[/red]")
         return ERRO_DE_USO
 
-    with Registro(dir_execucao / "execucao.jsonl", console) as registro:
+    with (
+        Registro(
+            dir_execucao / "execucao.jsonl",
+            console,
+            intervalo_pulso_s=float(config.observabilidade.intervalo_pulso_s),
+            exportador=ExportadorOtlp(config.observabilidade.otlp),
+        ) as registro,
+        observar_processos(lambda medida: registro.evento(TipoDeEvento.PROCESSO, **asdict(medida))),
+    ):
         registro.info(f"log estruturado: {registro.caminho}")
         registro.evento(
             TipoDeEvento.EXECUCAO_INICIADA,
@@ -388,6 +402,11 @@ def executar_pipeline(argv: list[str] | None = None) -> int:
             config.validar_caminhos(exigir_backend=True)
         except ErroDeConfiguracao as erro:
             registro.falha(str(erro))
+            registro.evento(
+                TipoDeEvento.EXECUCAO_ABORTADA,
+                motivo="configuração de caminhos inválida",
+                erro_tipo=type(erro).__name__,
+            )
             return ERRO_DE_USO
 
         pipeline = Pipeline(

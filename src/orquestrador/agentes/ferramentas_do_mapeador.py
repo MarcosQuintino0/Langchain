@@ -24,6 +24,7 @@ import functools
 import inspect
 import itertools
 import time
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -122,7 +123,9 @@ def criar_ferramentas(
     confinamento = fa.Confinamento(config.caminhos.backend)
     # Escopo por invocação de `criar_ferramentas`, que é por tentativa do estágio —
     # inclusive as voltas do mini-loop de schema, que são a mesma tentativa.
-    contador = itertools.count(1)
+    solicitadas = itertools.count(1)
+    iniciadas = itertools.count(1)
+    concluidas = itertools.count(1)
 
     def observado(nome: str, funcao: Callable[..., str]) -> Callable[..., str]:
         """Envolve uma tool para medi-la sem tocar no que ela devolve ao modelo."""
@@ -130,28 +133,43 @@ def criar_ferramentas(
 
         @functools.wraps(funcao)
         def envolvida(*posicionais: Any, **nomeados: Any) -> str:
+            ordem_solicitada = next(solicitadas)
+            ordem_inicio = next(iniciadas)
+            tool_call_id = str(uuid.uuid4())
             inicio = time.perf_counter()
-            saida = funcao(*posicionais, **nomeados)
-            if telemetria is not None:
-                argumentos = assinatura.bind(*posicionais, **nomeados)
-                argumentos.apply_defaults()
-                telemetria.registrar_tool(
-                    RegistroDeTool(
-                        estagio=estagio,
-                        recurso=recurso,
-                        tentativa=tentativa,
-                        ordem=next(contador),
-                        nome=nome,
-                        argumentos=dict(argumentos.arguments),
-                        caracteres=len(saida),
-                        duracao_s=time.perf_counter() - inicio,
-                        # As tools engolem a exceção e devolvem "ERRO: ..." como texto
-                        # normal, para o modelo poder se corrigir. Este é o único
-                        # lugar onde a falha vira dado.
-                        erro=saida.startswith("ERRO:"),
+            argumentos = assinatura.bind(*posicionais, **nomeados)
+            argumentos.apply_defaults()
+            saida = ""
+            falhou = False
+            try:
+                saida = funcao(*posicionais, **nomeados)
+                falhou = saida.startswith("ERRO:")
+                return saida
+            except BaseException:
+                falhou = True
+                raise
+            finally:
+                if telemetria is not None:
+                    telemetria.registrar_tool(
+                        RegistroDeTool(
+                            estagio=estagio,
+                            recurso=recurso,
+                            tentativa=tentativa,
+                            ordem=ordem_solicitada,
+                            tool_call_id=tool_call_id,
+                            ordem_solicitada=ordem_solicitada,
+                            ordem_inicio=ordem_inicio,
+                            ordem_conclusao=next(concluidas),
+                            nome=nome,
+                            argumentos=dict(argumentos.arguments),
+                            caracteres=len(saida),
+                            duracao_s=time.perf_counter() - inicio,
+                            # As tools engolem a exceção e devolvem "ERRO: ..." como
+                            # texto normal. O `finally` cobre também adaptadores de
+                            # terceiro que levantem antes de devolver essa marca.
+                            erro=falhou,
+                        )
                     )
-                )
-            return saida
 
         return envolvida
 

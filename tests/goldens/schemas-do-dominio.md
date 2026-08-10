@@ -29,3 +29,11 @@ que ela recusa.
 
 Diferença que apareça sem você ter tocado num modelo de `dominio/`. Nesse caso o
 Pydantic mudou de versão, e o que precisa de revisão é o pin, não o arquivo.
+
+## 2026-08-10 — dossiê no contrato do mapeador
+
+`SaidaMapeador` ganhou o campo opcional `dossie` (`DossieDoRecurso`): as
+regras de negócio com evidência, o contrato de erro, os parâmetros de consulta,
+as incertezas e a checklist negativa que o mapeador lê de qualquer forma e antes
+descartava. O diff é aditivo — nenhum campo existente mudou de nome, tipo ou
+obrigatoriedade — e o `` novo entra pelo mesmo mecanismo de sempre.

@@ -103,6 +103,10 @@ def test_ordem_reconstroi_a_sequencia_de_exploracao(config_falso, backend):
         (2, "ler_arquivo"),
         (3, "listar_diretorio"),
     ]
+    assert [t.ordem_solicitada for t in telemetria.tools] == [1, 2, 3]
+    assert [t.ordem_inicio for t in telemetria.tools] == [1, 2, 3]
+    assert [t.ordem_conclusao for t in telemetria.tools] == [1, 2, 3]
+    assert len({t.tool_call_id for t in telemetria.tools}) == 3
 
 
 def test_sem_telemetria_as_tools_continuam_funcionando(config_falso, backend):

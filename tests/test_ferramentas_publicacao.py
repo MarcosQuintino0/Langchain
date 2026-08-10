@@ -420,7 +420,7 @@ def blocos_falsos(pipeline: Pipeline, monkeypatch, specs: dict[str, str]) -> Non
         area.escrever("_support/cobertura.json", "{}\n")
         return _saida_com_manifesto(), ResultadoGate.aprovado_por(), 1
 
-    def bloco2(_recurso, _manifesto, area, _plano=None):
+    def bloco2(_recurso, _manifesto, area, _plano=None, **_extras):
         for nome, conteudo in specs.items():
             area.escrever(nome, conteudo)
         return None, ResultadoGate.aprovado_por(), 1
@@ -513,6 +513,8 @@ def test_o_codigo_de_saida_distingue_os_tres_estados(estados, esperado):
 def _saida_com_manifesto():
     class Saida:
         manifesto = None
+        dossie = None
+        inventario = None
 
     return Saida()
 

@@ -169,6 +169,23 @@ def test_o_teto_de_raciocinio_viaja_na_chamada(monkeypatch: pytest.MonkeyPatch):
     assert corpo["provider"]["data_collection"] == "deny"
 
 
+def test_raciocinio_desligado_viaja_no_corpo(monkeypatch: pytest.MonkeyPatch):
+    """`raciocinio = false` vira `reasoning.enabled` — é o interruptor dos híbridos.
+
+    A espiral da causa 2 (65.536 tokens, 100% pensamento, resposta nunca começada)
+    só é impossível quando a fase de pensamento não existe; o teto convive com o
+    interruptor porque usam a mesma porta do protocolo.
+    """
+    monkeypatch.setenv("OPENROUTER_API_KEY", "chave-de-teste")
+    config = config_com()
+    config.estagios["executor"].raciocinio = False
+
+    assert corpo_extra(config)["reasoning"] == {"enabled": False}
+
+    config.estagios["executor"].max_tokens_de_raciocinio = 4_000
+    assert corpo_extra(config)["reasoning"] == {"max_tokens": 4_000, "enabled": False}
+
+
 def test_zero_nao_e_teto_de_raciocinio_valido():
     """Desligar o raciocínio troca um defeito por outro.
 

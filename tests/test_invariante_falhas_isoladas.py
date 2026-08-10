@@ -133,7 +133,13 @@ def test_falta_de_passos_nao_gasta_as_tentativas_de_schema(config_falso):
             telemetria=telemetria,
         )
 
-    assert len(telemetria.chamadas) == 1, "desistiu na primeira, sem reparo inútil"
+    assert telemetria.chamadas, "a exploração que consumiu requisições precisa ser observável"
+    assert {chamada.detalhe.split(";", 1)[0] for chamada in telemetria.chamadas} == {
+        "schema:1"
+    }, "desistiu na primeira tentativa de schema, sem reparo inútil"
+    assert {chamada.fatia for chamada in telemetria.chamadas} == {
+        "exploracao"
+    }, "nenhuma requisição pode pertencer à fatia de reparo de schema"
 
 
 def test_falha_de_estagio_e_capturavel_pelo_pipeline():
@@ -219,10 +225,12 @@ def test_ferramenta_indisponivel_interrompe_sem_perder_o_que_terminou(
 
 
 def _saida_qualquer():
-    """Objeto mínimo com o `.manifesto` que `_rodar_recurso` repassa ao bloco 2."""
+    """Objeto mínimo com o que `_rodar_recurso` repassa ao bloco 2."""
 
     class Saida:
         manifesto = None
+        dossie = None
+        inventario = None
 
     return Saida()
 

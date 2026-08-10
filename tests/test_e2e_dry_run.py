@@ -96,10 +96,10 @@ def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path:
     assert codigo == 0
 
     execucao = ultima_execucao(tmp_path / "execucoes")
-    eventos = [
-        json.loads(linha)
-        for linha in (execucao / "execucao.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    eventos = []
+    for linha in (execucao / "execucao.jsonl").read_text(encoding="utf-8").splitlines():
+        evento = json.loads(linha)
+        eventos.append({**evento, **evento.get("dados", {})})
     gates = [evento for evento in eventos if evento["tipo"] == "gate"]
 
     # Cada gate reprovou uma vez e aprovou na tentativa seguinte.
@@ -121,7 +121,9 @@ def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path:
     assert {"QAAPI-025", "QAAPI-002"} <= set(delta_b["codigos"])
 
     # Nenhum modelo foi chamado.
-    chamadas = [evento for evento in eventos if evento["tipo"] == "chamada_llm"]
+    chamadas = [
+        evento for evento in eventos if evento["tipo"] == "requisicao_llm_concluida"
+    ]
     assert chamadas and all(evento["simulado"] for evento in chamadas)
 
     # Telemetria por estágio no log.
@@ -139,13 +141,18 @@ def test_o_reparo_nao_cresce_o_contexto(config_toml: Path, tmp_path: Path):
     # não a exploração inteira que a antecedeu.
     assert modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]) == 0
     execucao = ultima_execucao(tmp_path / "execucoes")
-    chamadas = [
-        json.loads(linha)
-        for linha in (execucao / "execucao.jsonl").read_text(encoding="utf-8").splitlines()
-        if json.loads(linha)["tipo"] == "chamada_llm"
-    ]
+    chamadas = []
+    for linha in (execucao / "execucao.jsonl").read_text(encoding="utf-8").splitlines():
+        evento = json.loads(linha)
+        if evento["tipo"] == "requisicao_llm_concluida":
+            chamadas.append({**evento, **evento.get("dados", {})})
     mapeador = [evento for evento in chamadas if evento["estagio"] == "mapeador"]
-    assert mapeador[1]["uso"]["entrada"] < mapeador[0]["uso"]["entrada"]
+    por_tentativa: dict[int, int] = {}
+    for evento in mapeador:
+        por_tentativa[evento["tentativa"]] = (
+            por_tentativa.get(evento["tentativa"], 0) + evento["uso"]["entrada"]
+        )
+    assert por_tentativa[2] < por_tentativa[1]
 
 
 @e2e

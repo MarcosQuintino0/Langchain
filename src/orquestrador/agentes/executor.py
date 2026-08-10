@@ -22,6 +22,7 @@ gigante que o fatiamento fechou.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
@@ -29,8 +30,16 @@ from langchain_core.language_models import BaseChatModel
 from orquestrador.agentes.guarda_de_orcamento import exigir_folga
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import ArquivoGerado, SaidaExecutor
+from orquestrador.dominio.dossie import DossieDoRecurso
+from orquestrador.dominio.inventario import Inventario
+from orquestrador.dominio.limpeza import render_ausencias, render_limpeza
 from orquestrador.dominio.manifesto import Manifesto
-from orquestrador.dominio.plano import PlanoDeTestes
+from orquestrador.dominio.plano import (
+    CATS_CRUD,
+    CATS_SEGURANCA,
+    CATS_VALIDACOES,
+    PlanoDeTestes,
+)
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
 from orquestrador.dominio.veredito import Delta
@@ -52,11 +61,9 @@ ESTAGIO = "executor"
 
 # A partição das 12 categorias entre os specs-base espelha a "Arquitetura dos
 # arquivos" do prompt: validações levam entrada/forma; segurança leva identidade;
-# o CRUD leva o resto (fluxo principal, regras, listagem, repetição e — enquanto
-# não houver spec de capacidade próprio — upload/download).
-CATS_VALIDACOES: tuple[str, ...] = ("CAT-02", "CAT-03", "CAT-04", "CAT-05")
-CATS_SEGURANCA: tuple[str, ...] = ("CAT-06", "CAT-08", "CAT-09")
-CATS_CRUD: tuple[str, ...] = ("CAT-01", "CAT-07", "CAT-10", "CAT-11", "CAT-12")
+# o CRUD leva o resto. A definição mora em `dominio/plano.py` porque o planejador
+# fatia as chamadas pela MESMA partição — divergência faria cenário trocar de
+# arquivo entre o plano e o spec.
 
 # O código da categoria dentro da mensagem de uma violação QAORQ-030.
 _CAT_NA_MENSAGEM = re.compile(r"CAT-(?:0[1-9]|1[0-2])")
@@ -102,8 +109,10 @@ def entrada_inicial(recurso: Recurso, manifesto: Manifesto) -> str:
         {
             "Recurso alvo": recurso.nome,
             "Diretório do recurso": str(recurso.caminho_testes),
-            "Gabarito do recurso (_support/cobertura.json)": (
-                f"```json\n{manifesto.para_json().strip()}\n```"
+            # `para_prompt`, não `para_json`: as justificativas de naoAplica não
+            # têm consumidor aqui, e viajavam em cada uma das 4 fatias.
+            "Gabarito do recurso (endpoints e categorias)": (
+                f"```json\n{manifesto.para_prompt().strip()}\n```"
             ),
         }
     )
@@ -122,6 +131,8 @@ def executar(
     artefato_atual: str | None = None,
     superficie: SuperficieDoProjeto | None = None,
     plano: PlanoDeTestes | None = None,
+    dossie: DossieDoRecurso | None = None,
+    inventario: Inventario | None = None,
 ) -> SaidaExecutor:
     """Uma tentativa do executor para um recurso. Sem histórico algum.
 
@@ -135,7 +146,6 @@ def executar(
     * nenhum dos dois → o caminho antigo de chamada única. Existe para quem invoca
       o estágio isolado (testes, ferramentas) sem plano; o pipeline sempre planeja.
     """
-    exigir_folga(config, telemetria, estagio=ESTAGIO, recurso=recurso.nome)
     parametros = config.estagio(ESTAGIO)
     gerador = GeradorEstruturado(
         modelo=modelo,
@@ -147,13 +157,18 @@ def executar(
         # ao gerador e vale o padrão da classe — que hoje coincide, mas passaria a
         # divergir em silêncio no dia em que alguém mudasse o arquivo.
         politica=PoliticaDeRetentativa.do_config(config),
+        antes_de_chamar=lambda: exigir_folga(
+            config, telemetria, estagio=ESTAGIO, recurso=recurso.nome
+        ),
     )
     instrucao = instrucao_do_estagio(config, recurso, superficie)
 
     if delta is not None:
         return _reparar(gerador, instrucao, recurso, delta, artefato_atual, tentativa, plano)
     if plano is not None:
-        return _gerar_fatiado(gerador, instrucao, recurso, manifesto, plano, tentativa)
+        return _gerar_fatiado(
+            gerador, instrucao, recurso, manifesto, plano, tentativa, dossie, inventario
+        )
 
     return gerador.gerar(
         SaidaExecutor,
@@ -161,6 +176,7 @@ def executar(
         entrada=entrada_inicial(recurso, manifesto),
         recurso=recurso.nome,
         tentativa=tentativa,
+        fatia="recurso_inteiro",
     )
 
 
@@ -171,12 +187,17 @@ def _gerar_fatiado(
     manifesto: Manifesto,
     plano: PlanoDeTestes,
     tentativa: int,
+    dossie: DossieDoRecurso | None = None,
+    inventario: Inventario | None = None,
 ) -> SaidaExecutor:
     base = entrada_inicial(recurso, manifesto)
     arquivos: list[ArquivoGerado] = []
 
     # Fatia 1 — `_support/`: recebe o plano INTEIRO porque factories, helpers e
     # asserts servem a todos os specs; é a visão global que decide o que extrair.
+    # O protocolo e a receita de limpeza entram AQUI, e não nos specs: é no
+    # `_support/` que nasce o helper de cleanup, e um DELETE cego que ignora o
+    # pré-requisito de versão "limpa" sem apagar nada.
     suporte = _fatia(
         gerador,
         instrucao,
@@ -185,10 +206,13 @@ def _gerar_fatiado(
         "Gere api.js e, quando a arquitetura dos arquivos pedir, factories.js, "
         "helpers.js e asserts.js. O plano completo abaixo é o contexto do que os "
         "specs vão consumir. Os specs serão gerados em chamadas próprias.\n\n"
-        "### Plano de cenários do recurso\n\n" + plano.render(),
+        "### Plano de cenários do recurso\n\n" + plano.render() + _contexto_do_suporte(
+            dossie, inventario
+        ),
         tentativa=tentativa,
         aceitos=lambda caminho: caminho.startswith(PREFIXO_SUPPORT),
         rotulo="_support/",
+        endpoint=",".join(parte.endpoint for parte in plano.endpoints),
     )
     # Fatia vazia não interrompe: quem reprova é o Gate B, que mede o diretório e
     # acusa o spec-base ausente (QAAPI-002) com um delta que o reparo sabe atender.
@@ -214,15 +238,61 @@ def _gerar_fatiado(
             "Transcreva os cenários do plano abaixo em `it`s — cada linha do plano "
             "vira um caso, na ordem, com a tag da categoria. Os arquivos "
             "`_support/` JÁ EXISTEM com o conteúdo mostrado; importe deles.\n\n"
-            f"### Plano desta fatia\n\n{fatia_do_plano}\n\n"
-            f"### _support já gerado\n\n{suporte_texto}",
+            f"### Plano desta fatia\n\n{fatia_do_plano}"
+            + _regras_da_fatia(dossie, plano, cats)
+            + f"\n\n### _support já gerado\n\n{suporte_texto}",
             tentativa=tentativa,
             aceitos=lambda caminho, nome=nome: caminho == nome,
             rotulo=nome,
+            endpoint=",".join(
+                parte.endpoint
+                for parte in plano.endpoints
+                if any(cenario.cat in cats for cenario in parte.cenarios)
+            ),
         )
         arquivos += gerados
 
     return SaidaExecutor(recurso=manifesto.recurso, arquivos=arquivos)
+
+
+def _contexto_do_suporte(dossie: DossieDoRecurso | None, inventario: Inventario | None) -> str:
+    """As seções do dossiê que o `_support/` precisa e os specs não repetem.
+
+    Regras transversais (protocolo de versão, autenticação) viram helper; a
+    receita de limpeza vira o cleanup; as ausências impedem helper para rota
+    imaginária. Tudo determinístico ou já pago pelo mapeador — zero token novo.
+    """
+    partes: list[str] = []
+    if dossie is not None and dossie.regras_transversais:
+        partes.append(
+            "## Protocolo do recurso — regras transversais lidas da fonte\n\n"
+            + "\n\n".join(regra.render() for regra in dossie.regras_transversais)
+        )
+    if inventario is not None:
+        partes.append(render_limpeza(inventario, dossie))
+        partes.append(render_ausencias(inventario))
+    if not partes:
+        return ""
+    return "\n\n" + "\n\n".join(partes)
+
+
+def _regras_da_fatia(
+    dossie: DossieDoRecurso | None, plano: PlanoDeTestes, cats: tuple[str, ...]
+) -> str:
+    """As regras do dossiê que os cenários desta fatia citam — e só elas.
+
+    A fatia diz o que transcrever; a regra diz o que o `espera` está provando e
+    com que evidência. Reenviar o dossiê inteiro em cada fatia pagaria o custo
+    três vezes; regra não citada por cenário nenhum não entra.
+    """
+    if dossie is None:
+        return ""
+    citadas = dossie.regras_por_id(plano.regras_citadas(cats))
+    if not citadas:
+        return ""
+    return "\n\n### Regras do dossiê citadas por esta fatia\n\n" + "\n\n".join(
+        regra.render() for regra in citadas
+    )
 
 
 def _fatia(
@@ -232,8 +302,9 @@ def _fatia(
     entrada: str,
     *,
     tentativa: int,
-    aceitos,
+    aceitos: Callable[[str], bool],
     rotulo: str,
+    endpoint: str = "",
 ) -> list[ArquivoGerado]:
     """Uma chamada de fatia, com o filtro que faz o contrato dela valer.
 
@@ -250,6 +321,8 @@ def _fatia(
         f"desta fatia ({rotulo}).",
         recurso=recurso.nome,
         tentativa=tentativa,
+        endpoint=endpoint,
+        fatia=rotulo,
     )
     return [arquivo for arquivo in saida.arquivos if aceitos(arquivo.caminho)]
 
@@ -319,6 +392,7 @@ def _reparar(
         + alvo,
         recurso=recurso.nome,
         tentativa=tentativa,
+        fatia="reparo_gate",
     )
 
 

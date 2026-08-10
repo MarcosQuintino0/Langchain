@@ -27,11 +27,7 @@ from pydantic import (
     model_validator,
 )
 
-from orquestrador.dominio.endpoint import (
-    METODOS_DE_ESCRITA,
-    METODOS_HTTP,
-    normalizar_endpoint,
-)
+from orquestrador.dominio.endpoint import METODOS_DE_ESCRITA, exigir_endpoint_canonico
 from orquestrador.dominio.recurso import NomeDeRecurso
 
 # As 12 categorias do catálogo. O *significado* de cada uma vive em
@@ -76,13 +72,7 @@ class EndpointManifesto(BaseModel):
         # QAAPI-024 reprova endpoint fora da forma canônica. Rejeitar aqui (em vez de
         # normalizar em silêncio) transforma o desvio num delta de schema — o reparo
         # mais barato que existe — sem tirar do gate a autoridade sobre o arquivo.
-        canonico = normalizar_endpoint(valor)
-        if valor != canonico:
-            raise ValueError(f'endpoint fora da forma canônica "{canonico}": {valor!r}')
-        partes = canonico.split(" ", 1)
-        if len(partes) != 2 or partes[0] not in METODOS_HTTP or not partes[1].startswith("/"):
-            raise ValueError(f'endpoint deve ter a forma "MÉTODO /rota/completa": {valor!r}')
-        return canonico
+        return exigir_endpoint_canonico(valor)
 
     @field_validator("cats")
     @classmethod
@@ -139,6 +129,20 @@ class Manifesto(BaseModel):
         """Serializa exatamente na forma que o `validar-suite-gerada.mjs` espera."""
         dados = self.model_dump(by_alias=True, exclude_none=True)
         return json.dumps(dados, ensure_ascii=False, indent=2) + "\n"
+
+    def para_prompt(self) -> str:
+        """A projeção que os estágios de LLM recebem: o gabarito sem justificativas.
+
+        `naoAplica` existe para o relatório e para o gate; planejador e executor
+        só usam o que SERÁ testado. Medido em 2026-08-10: as justificativas eram
+        1-2k caracteres reenviados em cada uma das ~19 chamadas por recurso, sem
+        nenhum consumidor do lado de lá. O arquivo em disco continua íntegro —
+        isto é projeção de prompt, nunca serialização de artefato.
+        """
+        dados = self.model_dump(by_alias=True, exclude_none=True)
+        for endpoint in dados.get("endpoints", []):
+            endpoint.pop("naoAplica", None)
+        return json.dumps(dados, ensure_ascii=False, indent=1)
 
     def endpoints_canonicos(self) -> list[str]:
         return [item.endpoint for item in self.endpoints]

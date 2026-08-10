@@ -18,6 +18,7 @@ src/orquestrador/
     estimativa.py    `--estimar`: conta endpoints e devolve a faixa de token
     init.py          `orquestrador init`: o config.toml comentado
     doctor.py        `orquestrador doctor`: 14 diagnósticos do ambiente
+    execucoes.py     listar, mostrar, validar e comparar execuções locais
     principal.py     argumentos, montagem da execução e apresentação
   aplicacao/
     __init__.py
@@ -27,12 +28,14 @@ src/orquestrador/
     simulacao.py     modelo falso dirigido por fixture + sandbox do --dry-run
   dominio/
     __init__.py
-    endpoint.py      o vocabulário HTTP que inventário e manifesto compartilham
+    endpoint.py      o vocabulário HTTP que os artefatos compartilham: métodos e forma canônica
     orcamento.py     tetos, consumo e a decisão pura de parar
     recurso.py       Recurso e NomeDeRecurso — a unidade de trabalho e o nome que vira diretório
     inventario.py    o que o backend expõe, segundo quem leu o código
     manifesto.py     o gabarito de cobertura — espelho de _support/cobertura.json
     plano.py         o gabarito expandido em cenários concretos, e a conferência de completude
+    dossie.py        o que o mapeador leu além do gabarito: regras, erros, consultas e incertezas
+    limpeza.py       veredito determinístico de limpeza e ausências derivadas do inventário
     veredito.py      Violacao, ResultadoGate, Delta, EstadoDoRecurso
     artefatos.py     SaidaMapeador, SaidaExecutor e o confinamento de forma de caminho
     propriedade.py   diário de propriedade, classificação e divergência de schema
@@ -46,10 +49,16 @@ src/orquestrador/
     montagem.py      carga dos prompts e a regra do prompt de reparo
   observabilidade/
     __init__.py
+    artefatos.py     mede caminho, bytes e hash dos artefatos, sem copiar conteúdo
     eventos.py       TipoDeEvento — o vocabulário fechado do JSONL e a versão do formato
     medidas.py       UsoDeTokens, RegistroDeChamada, RegistroDeTool — o que se mede
     manifesto_de_execucao.py  manifesto-execucao.json: ambiente, commits, hashes, config redigida
     registro.py      log estruturado (JSONL) + console
+    rastreamento.py  contexto local de trace/span, operações aninhadas e duração
+    provedor.py       callback por requisição efetiva, inclusive voltas internas do ReAct
+    leitura.py        leitor e validador somente leitura dos JSONL v0, v1 e v2
+    relatorios.py     resumos, histórico real/dry-run e comparação de execuções
+    exportacao_otlp.py  projeção minimizada e assíncrona de traces/métricas via OTLP/HTTP
     telemetria.py    agregação de tokens e caracteres por estágio, recurso, tentativa
     tabelas.py       as tabelas Rich do resumo final
   agentes/
@@ -71,6 +80,7 @@ src/orquestrador/
   ferramentas/
     __init__.py
     processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
+    retencao_de_execucoes.py  prévia, confinamento, revalidação e remoção explícita
     graphify.py      wrappers query/affected/reindex
     arquivos.py      ler/listar/buscar com confinamento de caminho
     privacidade.py   denylist, .llmignore e redação de segredo antes do envio
@@ -80,7 +90,8 @@ src/orquestrador/
   gates/
     __init__.py
     codigos.py       catálogo dos códigos de violação QAORQ-
-    gate_a.py        --so-manifesto + diff grafo × manifesto
+    evidencias.py    verificação determinística do dossiê: evidência, citações, checklist
+    gate_a.py        --so-manifesto + diff grafo × manifesto + dossiê
     gate_b.py        prettier + eslint + validador + lacuna de cobertura
     lacunas.py       QAORQ-030: categoria planejada que não virou teste
     saidas.py        JSON dos .mjs → ResultadoGate/Violacao

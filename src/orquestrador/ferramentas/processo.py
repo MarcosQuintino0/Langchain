@@ -14,11 +14,15 @@ Regras que valem para todo subprocess deste projeto (aprendidas no Windows):
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Generator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,12 +32,88 @@ __all__ = [
     "PREFIXOS_PROIBIDOS",
     "VARIAVEIS_BASE",
     "VARIAVEIS_DO_CYPRESS",
+    "MedidaProcesso",
     "SaidaProcesso",
     "executar",
     "executar_node",
     "montar_ambiente",
+    "observar_processos",
     "resolver_executavel",
 ]
+
+
+@dataclass(frozen=True)
+class MedidaProcesso:
+    """Metadados seguros de uma invocação, sem comando, cwd ou saída bruta."""
+
+    executavel: str
+    comando_sha256: str
+    script_sha256: str
+    codigo: int | None
+    duracao_s: float
+    stdout_bytes: int
+    stderr_bytes: int
+    timeout: bool = False
+    erro_tipo: str = ""
+
+
+_OBSERVADOR: ContextVar[Callable[[MedidaProcesso], None] | None] = ContextVar(
+    "observador_de_processos", default=None
+)
+
+
+@contextmanager
+def observar_processos(observador: Callable[[MedidaProcesso], None]) -> Generator[None]:
+    """Aplica um observador às subprocessos do contexto, inclusive os aninhados."""
+    token = _OBSERVADOR.set(observador)
+    try:
+        yield
+    finally:
+        _OBSERVADOR.reset(token)
+
+
+def _hash_de_script(argv: list[str]) -> str:
+    for item in argv[1:]:
+        caminho = Path(item)
+        if caminho.suffix.lower() != ".mjs" or not caminho.is_file():
+            continue
+        try:
+            return hashlib.sha256(caminho.read_bytes()).hexdigest()
+        except OSError:
+            return ""
+    return ""
+
+
+def _notificar(
+    argv: list[str],
+    *,
+    inicio: float,
+    codigo: int | None,
+    stdout: str = "",
+    stderr: str = "",
+    timeout: bool = False,
+    erro_tipo: str = "",
+) -> None:
+    observador = _OBSERVADOR.get()
+    if observador is None:
+        return
+    serializado = json.dumps(argv, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    medida = MedidaProcesso(
+        executavel=Path(argv[0]).name if argv else "",
+        comando_sha256=hashlib.sha256(serializado).hexdigest(),
+        script_sha256=_hash_de_script(argv),
+        codigo=codigo,
+        duracao_s=time.perf_counter() - inicio,
+        stdout_bytes=len(stdout.encode("utf-8")),
+        stderr_bytes=len(stderr.encode("utf-8")),
+        timeout=timeout,
+        erro_tipo=erro_tipo,
+    )
+    try:
+        observador(medida)
+    except Exception:
+        # Observabilidade não decide se o processo pode rodar nem muda seu retorno.
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -182,13 +262,16 @@ def executar(
     módulo. `variaveis_extras` amplia a allowlist para esta chamada — é por onde o
     Cypress recebe `VARIAVEIS_DO_CYPRESS`.
     """
+    inicio = time.perf_counter()
     if not argv:
         raise ErroDeFerramenta("comando vazio")
     comando = list(argv)
-    if resolver:
-        comando[0] = resolver_executavel(comando[0])
-
-    inicio = time.perf_counter()
+    try:
+        if resolver:
+            comando[0] = resolver_executavel(comando[0])
+    except ExecutavelAusente as erro:
+        _notificar(argv, inicio=inicio, codigo=None, erro_tipo=type(erro).__name__)
+        raise
     try:
         concluido = subprocess.run(  # noqa: S603  # lista de argumentos, sem shell
             comando,
@@ -203,11 +286,19 @@ def executar(
             check=False,
         )
     except FileNotFoundError as erro:
+        _notificar(argv, inicio=inicio, codigo=None, erro_tipo=type(erro).__name__)
         raise ExecutavelAusente(f"não foi possível executar {comando[0]}: {erro}") from erro
     except subprocess.TimeoutExpired as erro:
+        _notificar(
+            argv,
+            inicio=inicio,
+            codigo=None,
+            timeout=True,
+            erro_tipo=type(erro).__name__,
+        )
         raise ErroDeFerramenta(f"tempo esgotado ({timeout_s}s) em: {' '.join(argv)}") from erro
 
-    return SaidaProcesso(
+    saida = SaidaProcesso(
         argv=argv,
         codigo=concluido.returncode,
         stdout=concluido.stdout or "",
@@ -215,6 +306,14 @@ def executar(
         duracao_s=time.perf_counter() - inicio,
         cwd=str(cwd) if cwd else None,
     )
+    _notificar(
+        argv,
+        inicio=inicio,
+        codigo=saida.codigo,
+        stdout=saida.stdout,
+        stderr=saida.stderr,
+    )
+    return saida
 
 
 def executar_node(

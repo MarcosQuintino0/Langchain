@@ -23,6 +23,12 @@ CODIGOS_DO_ORQUESTRADOR: dict[str, str] = {
     "QAORQ-030": "categoria declarada em cats sem nenhum `it` que a cubra",
     "QAORQ-040": "schema preservado do consumidor não declara campo que o mapeador achou",
     "QAORQ-050": "o plano de cenários não cobre uma categoria que o gabarito declara em cats",
+    "QAORQ-051": "cenário de escrita sem prova de estado no espera (releitura ausente)",
+    "QAORQ-052": "variações excedentes do mesmo campo na mesma categoria do plano",
+    "QAORQ-060": "evidência do dossiê aponta arquivo ou linha que não existe no backend",
+    "QAORQ-061": "o dossiê cita endpoint que não está no gabarito",
+    "QAORQ-062": "a checklist negativa do dossiê não respondeu todos os aspectos",
+    "QAORQ-063": "o mapeador não emitiu o dossiê do recurso",
 }
 
 

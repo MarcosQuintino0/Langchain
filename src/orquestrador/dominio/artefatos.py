@@ -15,6 +15,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from orquestrador.dominio.dossie import DossieDoRecurso
 from orquestrador.dominio.inventario import Inventario
 from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.recurso import NomeDeRecurso
@@ -86,6 +87,10 @@ class SaidaMapeador(BaseModel):
     inventario: Inventario
     manifesto: Manifesto
     schemas: list[ArquivoSchema] = Field(default_factory=list[ArquivoSchema])
+    # Opcional no Pydantic e obrigatório no Gate A (QAORQ-063), de propósito: a
+    # ausência precisa virar delta de reparo com o bundle inteiro à vista, não uma
+    # falha de schema que devolveria só o fragmento reclamado.
+    dossie: DossieDoRecurso | None = None
 
     @model_validator(mode="after")
     def _mesmo_recurso(self) -> SaidaMapeador:
@@ -93,6 +98,11 @@ class SaidaMapeador(BaseModel):
             raise ValueError(
                 "inventario.recurso e manifesto.recurso precisam ser o mesmo recurso: "
                 f"{self.inventario.recurso!r} != {self.manifesto.recurso!r}"
+            )
+        if self.dossie is not None and self.dossie.recurso != self.manifesto.recurso:
+            raise ValueError(
+                "dossie.recurso precisa ser o mesmo recurso do manifesto: "
+                f"{self.dossie.recurso!r} != {self.manifesto.recurso!r}"
             )
         return self
 
