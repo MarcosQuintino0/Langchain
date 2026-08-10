@@ -76,10 +76,14 @@ def _imprimir(console: Console, dados: Any, *, como_json: bool) -> None:
         console.print_json(data=dados)
     elif isinstance(dados, list):
         for item in cast(list[dict[str, Any]], dados):
+            falhas = item.get("requisicoes_falhas") or 0
+            custo = item.get("custo_reportado")
             console.print(
                 f"{item['run_id']}  {item['terminal'] or 'SEM TERMINAL'}  "
                 f"{item['duracao_s']:.3f}s  {item['tokens']} tokens  "
-                f"{item['problemas']} problema(s)"
+                + (f"US$ {custo:.4f}  " if isinstance(custo, int | float) else "")
+                + (f"[yellow]{falhas} requisição(ões) falha(s)[/yellow]  " if falhas else "")
+                + f"{item['problemas']} problema(s)"
             )
     else:
         console.print_json(data=dados)

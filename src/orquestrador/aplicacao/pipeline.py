@@ -67,9 +67,7 @@ from orquestrador.ferramentas.publicacao import (
     Diario,
     criar_area,
 )
-from orquestrador.ferramentas.scripts_qa import Cobertura
 from orquestrador.gates import gate_a, gate_b
-from orquestrador.gates.saidas import resumo_da_cobertura
 from orquestrador.llm.cliente import criar_modelo
 from orquestrador.observabilidade.artefatos import medir_arquivos
 from orquestrador.observabilidade.eventos import TipoDeEvento
@@ -286,8 +284,7 @@ class Pipeline:
             # e por isso não entram na conta do que precisa ser publicado.
             if saida.dossie is not None:
                 dossie_path.write_text(
-                    saida.dossie.model_dump_json(by_alias=True, exclude_none=True, indent=1)
-                    + "\n",
+                    saida.dossie.model_dump_json(by_alias=True, exclude_none=True, indent=1) + "\n",
                     encoding="utf-8",
                     newline="\n",
                 )
@@ -433,6 +430,8 @@ class Pipeline:
                 dir_schemas=area.dir_schemas,
                 manifesto=manifesto,
                 out_cobertura=self.dir_execucao / "cobertura" / recurso.nome / "gate.html",
+                inventario=inventario,
+                dossie=dossie,
             ),
             texto_do_artefato=lambda saida, delta: agente_executor.artefato_em_disco(
                 area.dir_recurso, saida, delta
@@ -465,25 +464,23 @@ class Pipeline:
                 "nenhum teste foi rodado."
             )
 
-        saida = Cobertura(self.config).executar(
-            recurso.caminho_testes,
-            report=report,
-            out=self.dir_execucao / "cobertura" / recurso.nome / "cobertura.html",
-        )
-        contadores = resumo_da_cobertura(saida)
+        # O relatório de cobertura por categoria e por campo vinha do
+        # `qa-cobertura.mjs` e saiu com o desacoplamento da skill (2026-08-10).
+        # Contadores vazios, e o aviso diz isso com todas as letras: número que
+        # não existe não pode virar zero silencioso num relatório de cobertura.
+        contadores: dict[str, Any] = {}
         self.registro.evento(
             TipoDeEvento.COBERTURA,
             recurso=recurso.nome,
             contadores=contadores,
             execucao_de_testes=estado,
-            saida=saida.texto[:2000],
+            saida="relatório de cobertura pendente: ver docs/arquitetura/pendencias.md",
         )
-        if contadores:
-            self.registro.ok(f"relatório de cobertura ({estado}): {contadores}")
-        else:
-            self.registro.aviso(
-                f"qa-cobertura.mjs não produziu contadores: {saida.texto[:400] or '(sem saída)'}"
-            )
+        self.registro.aviso(
+            "sem relatório de cobertura por categoria/campo — a checagem saiu com a "
+            "skill e os gates novos ainda não foram desenhados "
+            "(docs/arquitetura/pendencias.md)."
+        )
         return ResultadoDaExecucaoDeTestes(
             estado=estado, contadores=contadores, relatorio=report, motivo=motivo
         )

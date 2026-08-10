@@ -27,6 +27,7 @@ reparo de schema: `instrução + plano atual + violações` (QAORQ-050).
 
 from __future__ import annotations
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.language_models import BaseChatModel
@@ -204,8 +205,20 @@ def executar(
     # tarefas, nunca a de chegada. O limite vem da config porque o gargalo é o
     # provedor (429), não a arquitetura.
     if parametros.paralelismo > 1 and len(tarefas) > 1:
+        # Uma cópia do contexto POR TAREFA, tirada aqui na thread que chama:
+        # thread nova nasce com contexto vazio, e sem isto o span do recurso não
+        # atravessa — medido, as chamadas deste estágio saíam órfãs na raiz do
+        # trace. A cópia é por tarefa porque um mesmo `Context` não pode ser
+        # entrado por duas threads ao mesmo tempo.
+        def planejar_no_contexto(
+            par: tuple[contextvars.Context, tuple[EndpointManifesto, str, list[str]]],
+        ) -> list[Cenario]:
+            contexto, tarefa = par
+            return contexto.run(planejar, tarefa)
+
+        pares = [(contextvars.copy_context(), tarefa) for tarefa in tarefas]
         with ThreadPoolExecutor(max_workers=parametros.paralelismo) as fila:
-            resultados = list(fila.map(planejar, tarefas))
+            resultados = list(fila.map(planejar_no_contexto, pares))
     else:
         resultados = [planejar(tarefa) for tarefa in tarefas]
 
@@ -287,7 +300,7 @@ def _planejar_grupo(
             violacoes=violacoes,
             tentativa=tentativa,
         )
-        parte = _gerar_tolerando_um_corte(
+        reparada = _gerar_tolerando_um_corte(
             gerador,
             registro,
             instrucao=instrucao,
@@ -297,19 +310,35 @@ def _planejar_grupo(
             endpoint=item.endpoint,
             fatia=f"reparo_plano:{chave}",
         )
-        faltantes = cenarios_faltantes(parte, cats_do_grupo)
-        if faltantes:
+        faltantes_depois = cenarios_faltantes(reparada, cats_do_grupo)
+        if faltantes_depois and not cenarios_faltantes(parte, cats_do_grupo):
+            # O reparo APAGOU cobertura que já existia. Medido em 2026-08-10: uma
+            # volta pedida por QAORQ-051 devolveu 193 tokens no lugar de 1.846, e
+            # CAT-08/CAT-09 sumiram de um grupo que estava completo.
+            #
+            # Cobertura é a invariante; qualidade é melhor-esforço. Reparo que
+            # troca uma pendência heurística por uma categoria a menos é um mau
+            # negócio, e a assimetria do projeto já diz de que lado ficar:
+            # planejar a mais custa um teste, planejar a menos apaga cobertura
+            # sem deixar rastro. Fica o original, com a pendência registrada.
+            if registro:
+                registro.aviso(
+                    f"{item.endpoint}: o reparo do grupo {chave} perdeu "
+                    f"{faltantes_depois} — mantido o plano anterior, que cobria tudo"
+                )
+        elif faltantes_depois:
             # Só a cobertura é fatal: categoria sem cenário apaga cobertura em
             # silêncio. As checagens heurísticas (QAORQ-051/052) que sobrarem
             # após o reparo viram aviso — falso positivo de palavra-chave não
             # pode custar o estágio inteiro.
             raise FalhaDeEstagio(
-                f"o planejador não cobriu as categorias {faltantes} do endpoint "
+                f"o planejador não cobriu as categorias {faltantes_depois} do endpoint "
                 f"{item.endpoint!r} mesmo depois do reparo (QAORQ-050)."
             )
+        else:
+            parte = reparada
         if registro:
-            remanescentes = _violacoes_do_grupo(parte, cats_do_grupo, item.endpoint)
-            for violacao in remanescentes:
+            for violacao in _violacoes_do_grupo(parte, cats_do_grupo, item.endpoint):
                 registro.aviso(f"plano aceito com pendência: {violacao.render()}")
     return [cenario for cenario in parte.cenarios if cenario.cat in cats_do_grupo]
 

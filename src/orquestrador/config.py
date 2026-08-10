@@ -18,7 +18,6 @@ configuração quanto o próprio arquivo.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import tomllib
 from pathlib import Path
@@ -453,11 +452,11 @@ class Config(BaseModel):
     def validar_caminhos(self, *, exigir_backend: bool = True) -> None:
         """Confere o que precisa existir antes de uma execução real."""
         problemas: list[str] = []
-        if not self.caminhos.skill.is_dir():
-            problemas.append(f"skill não encontrada: {self.caminhos.skill}")
-        for nome in ("validar-suite-gerada.mjs", "qa-cobertura.mjs", "qa-reindex.mjs"):
-            if not self.caminhos.script(nome).is_file():
-                problemas.append(f"script ausente: {self.caminhos.script(nome)}")
+        # A skill deixou de ser obrigatória em 2026-08-10: o Bloco 0 chama o
+        # `graphify` direto (pacote Python deste projeto) e as checagens de
+        # padrão de código dela saíram do fluxo. O que sobrou dela é opcional, e
+        # a ausência vira aviso no `doctor`, não impedimento — um cliente instala
+        # o orquestrador sem ter repositório nenhum de terceiro na máquina.
         if not self.caminhos.projeto_testes.is_dir():
             problemas.append(f"projeto de testes não encontrado: {self.caminhos.projeto_testes}")
         if exigir_backend and not self.caminhos.backend.is_dir():
@@ -466,56 +465,6 @@ class Config(BaseModel):
             raise ErroDeConfiguracao(
                 "configuração inválida:\n" + "\n".join(f"  - {item}" for item in problemas)
             )
-        self.validar_impressao_da_skill()
-
-    def validar_impressao_da_skill(self) -> None:
-        """Recusa rodar contra uma skill diferente da que este consumidor conhece.
-
-        A skill é outro repositório, e a integração com ela é um contrato implícito:
-        formato dos argumentos, código de saída, forma do JSON e semântica dos
-        códigos `QAAPI-`. Nada disso é declarado em lugar nenhum — uma mudança
-        compatível do ponto de vista dela pode quebrar este consumidor, ou pior,
-        mudar em silêncio o significado de uma aprovação.
-
-        A verificação é a mesma que o `qa-reindex.mjs` já faz com a versão do
-        Graphify, e pelo mesmo motivo: descobrir a incompatibilidade na primeira
-        linha do log é barato; descobri-la num veredito errado, não.
-
-        Impressão de conteúdo em vez de commit: a skill nem sempre é um checkout
-        Git na máquina do consumidor, e o que importa não é qual revisão está lá —
-        é se os scripts que invocamos mudaram.
-        """
-        if not self.skill.impressao_esperada:
-            return
-        atual = self.impressao_da_skill()
-        if atual == self.skill.impressao_esperada:
-            return
-        raise ErroDeConfiguracao(
-            f"a skill em {self.caminhos.scripts} mudou desde a última verificação.\n"
-            f"  esperada: {self.skill.impressao_esperada}\n"
-            f"  atual:    {atual}\n"
-            "Reveja o contrato antes de seguir — argumentos, códigos de saída, forma do "
-            "JSON e os códigos QAAPI- são acordo implícito entre os dois repositórios, e "
-            "os prompts em prompts/ são destilados das references/ dela.\n"
-            f'Conferido, atualize [skill].impressao_esperada = "{atual}" na configuração. '
-            "Para desligar a verificação, deixe o campo vazio."
-        )
-
-    def impressao_da_skill(self) -> str:
-        """Hash do conteúdo dos scripts `.mjs` que este orquestrador invoca.
-
-        O caminho relativo entra no hash junto do conteúdo: renomear um módulo de
-        `cobertura/` sem mudar uma linha dele também muda o contrato.
-
-        `script()` em vez de `self.caminhos.scripts` direto porque é ele que
-        transforma `scripts` ausente numa mensagem acionável.
-        """
-        raiz = self.caminhos.script("qa-cobertura.mjs").parent
-        resumo = hashlib.sha256()
-        for arquivo in sorted(raiz.rglob("*.mjs")):
-            resumo.update(arquivo.relative_to(raiz).as_posix().encode("utf-8"))
-            resumo.update(arquivo.read_bytes())
-        return resumo.hexdigest()[:16]
 
 
 def _resolver_caminhos(bruto: dict[str, Any], base: Path) -> dict[str, Any]:

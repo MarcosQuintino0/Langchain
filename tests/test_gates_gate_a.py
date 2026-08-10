@@ -407,8 +407,15 @@ def test_classe_que_o_gabarito_nao_toca_nao_gera_cobranca(tmp_path: Path):
     assert resultado.aprovado
 
 
-def test_linguagem_fora_da_matriz_nao_termina_como_aprovado(tmp_path: Path):
-    """A regra que não pode ser quebrada: sem denominador, nunca aprovação silenciosa."""
+def test_linguagem_fora_da_matriz_nao_interrompe_mas_avisa_alto(tmp_path: Path):
+    """Backend fora da matriz não impede a geração — mas a falta de prova aparece.
+
+    Decisão de produto de 2026-08-10: antes isto era `ERRO_DA_FERRAMENTA` e
+    interrompia o recurso, o que inviabilizava vender para quem não tem backend
+    Java/Spring. A troca é deliberada e tem um limite: a ausência de verificação
+    **não pode passar por verificação bem-sucedida**, então ela sai como aviso
+    destacado, vai para o log e para o manifesto da execução.
+    """
     backend = tmp_path / "backend"
     backend.mkdir()
     (backend / "app.py").write_text(
@@ -424,10 +431,12 @@ def test_linguagem_fora_da_matriz_nao_termina_como_aprovado(tmp_path: Path):
         manifesto=manifesto_de("GET /api/v1/products"),
         recurso=recurso_de(),
     )
-    assert resultado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
-    assert not resultado.aprovado
-    assert "matriz de suporte" in resultado.motivo
-    assert ".py" in resultado.motivo
+
+    assert resultado.aprovado, "backend fora da matriz não pode mais barrar a geração"
+    assert not resultado.violacoes, "não há o que o modelo consertar aqui"
+    aviso = "\n".join(item.mensagem for item in resultado.avisos)
+    assert "NÃO conseguiu provar" in aviso, "a perda da prova precisa estar explícita"
+    assert ".py" in aviso, "o aviso diz qual extensão ficou de fora"
 
 
 def test_grafo_ausente_interrompe_em_vez_de_aprovar(tmp_path: Path):

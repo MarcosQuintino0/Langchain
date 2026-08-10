@@ -135,8 +135,7 @@ def _sanitizar(valor: Any, contagem: _ContagemDeSanitizacao, *, chave: str = "")
     if isinstance(convertido, dict):
         itens_do_mapa = cast(dict[Any, Any], convertido).items()
         return {
-            str(nome): _sanitizar(item, contagem, chave=str(nome))
-            for nome, item in itens_do_mapa
+            str(nome): _sanitizar(item, contagem, chave=str(nome)) for nome, item in itens_do_mapa
         }
     return cast(JsonValue, convertido)
 

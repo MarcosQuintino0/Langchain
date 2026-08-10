@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orquestrador"
 version = "0.1.0"
-description = "Orquestrador multi-agente de testes de API para a skill qa-api."
+description = "Orquestrador multi-agente de geração de testes de API em Cypress."
 requires-python = ">=3.12"
 
 # Versões congeladas a partir do ambiente que funciona. Esta fase não é para
@@ -13,6 +13,13 @@ requires-python = ">=3.12"
 # `pip install -e .` reproduzir exatamente o ambiente validado.
 dependencies = [
   # Diretas
+  # O extrator estrutural do backend. Era instalado à parte, como "skill irmã"
+  # numa pasta fora do projeto, e o cliente descobriria a falta por erro em
+  # runtime. Como dependência declarada, `pip install` resolve — e o Bloco 0
+  # deixou de precisar de Node para chamá-lo. O extra `sql` não é opcional: sem
+  # ele as migrações não geram nós e a extração termina em silêncio, como se
+  # tivesse funcionado.
+  "graphifyy[sql]==0.9.26",
   "langgraph==1.2.10",
   "langchain-core==1.5.3",
   "langchain-openai==1.4.2",

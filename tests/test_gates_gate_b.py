@@ -1,32 +1,25 @@
-"""Etapa de formatadores do Gate B (prettier/eslint) e a união das checagens.
+"""Etapa de formatadores do Gate B (prettier/eslint).
 
 O comando é configurável, então o teste usa o próprio Python como "formatador"
 para exercitar os desfechos sem depender do toolchain do projeto.
+
+A união das checagens deixou de ser exercitada aqui com o desacoplamento da skill
+(2026-08-10): o validador `.mjs` e a medida de lacunas saíram do Gate B, e o que
+sobrou ao lado dos formatadores é `conferir_limpeza`, coberto em
+`tests/test_gates_limpeza.py`.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import VereditoDeGate
-from orquestrador.excecoes import ErroDeFerramenta
 from orquestrador.gates import gate_b
-from orquestrador.gates import lacunas as gate_lacunas
 
 pytestmark = pytest.mark.unit
-
-
-def recurso_de(config) -> Recurso:
-    caminho = config.caminhos.recurso("pedidos")
-    caminho.mkdir(parents=True, exist_ok=True)
-    return Recurso(
-        nome="pedidos", caminho_testes=caminho, raiz_schemas=config.caminhos.dir_schemas_abs
-    )
 
 
 def staging_de(config) -> Path:
@@ -94,69 +87,6 @@ def test_formatador_ausente_e_exigido_e_erro_da_ferramenta(config_falso):
     assert resultado.veredito is VereditoDeGate.ERRO_DA_FERRAMENTA
     assert resultado.violacoes == []
     assert "eslint" in resultado.motivo
-
-
-@pytest.fixture
-def com_validador(monkeypatch, saida_de_processo):
-    """Substitui o `validar-suite-gerada.mjs` por um veredito fixo."""
-
-    def aplicar(*, valido: bool, erros: list[dict] | None = None) -> None:
-        corpo = json.dumps({"valid": valido, "errors": erros or []})
-        monkeypatch.setattr(
-            gate_b.Validador,
-            "executar",
-            lambda *_a, **_k: saida_de_processo(codigo=0 if valido else 1, stdout=corpo),
-        )
-
-    return aplicar
-
-
-@pytest.fixture
-def com_cobertura(monkeypatch, saida_de_processo):
-    """Substitui o `qa-cobertura.mjs` pelo stdout dado."""
-
-    def aplicar(corpo: str) -> None:
-        monkeypatch.setattr(
-            gate_lacunas.Cobertura, "executar", lambda *_a, **_k: saida_de_processo(stdout=corpo)
-        )
-
-    return aplicar
-
-
-def test_checagem_que_nao_rodou_interrompe_em_vez_de_virar_delta(
-    config_falso, com_validador, com_cobertura
-):
-    # O validador aprovou, mas a lacuna ficou sem medida. Aprovar aqui declararia
-    # cobertura que ninguém contou; reprovar mandaria o executor reescrever specs
-    # por causa de um script que não rodou.
-    com_validador(valido=True)
-    com_cobertura("falha ao gerar o relatório")
-
-    with pytest.raises(ErroDeFerramenta, match="qa-cobertura"):
-        gate_b.executar(
-            config_falso,
-            recurso_de(config_falso),
-            dir_recurso=staging_de(config_falso),
-            dir_schemas=config_falso.caminhos.dir_schemas_abs,
-        )
-
-
-def test_reprovacao_normal_atravessa_a_uniao(config_falso, com_validador, com_cobertura):
-    com_validador(
-        valido=False,
-        erros=[{"code": "QAAPI-025", "message": "campo sem teste"}],
-    )
-    com_cobertura(json.dumps({"lacunas": 0}))
-
-    resultado = gate_b.executar(
-        config_falso,
-        recurso_de(config_falso),
-        dir_recurso=staging_de(config_falso),
-        dir_schemas=config_falso.caminhos.dir_schemas_abs,
-    )
-
-    assert resultado.veredito is VereditoDeGate.REPROVADO
-    assert resultado.codigos == ["QAAPI-025"]
 
 
 def test_o_recurso_e_passado_relativo_ao_projeto(config_falso):

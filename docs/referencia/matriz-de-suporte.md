@@ -87,7 +87,7 @@ nem reprovado —, com a mensagem dizendo quantos arquivos o grafo tinha, quanto
 foram analisados e quais extensões ficaram de fora. Aprovar ali seria declarar
 cobertura completa sem ter contra o que comparar; reprovar mandaria o mapeador
 consertar um artefato correto e queimaria as tentativas sem chance de convergir. É
-a mesma escolha que `gates/lacunas.py` faz quando o contador de cobertura não vem.
+a mesma escolha que `gates/evidencias.py` faz quando o backend não é legível.
 
 Confiança declarada: **menor**. A cobertura medida continua sendo a do gabarito
 contra si mesmo, que é exatamente o que o projeto existe para superar.

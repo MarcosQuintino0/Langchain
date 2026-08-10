@@ -34,6 +34,15 @@ _TERMINAIS = frozenset(
     {TipoDeEvento.EXECUCAO_CONCLUIDA.value, TipoDeEvento.EXECUCAO_ABORTADA.value}
 )
 
+# As versões que este leitor sabe interpretar. Versão fora desta lista NÃO cai no
+# ramo legado: o legado é o formato mais permissivo que existe, e deixar um
+# formato futuro passar por ele produz "log validado sem problema" com o payload
+# aninhado no lugar errado — o oposto do que `schema_version` existe para dar.
+_VERSOES_CONHECIDAS = frozenset({0, 1, 2})
+
+# O caractere que `decode(errors="replace")` deixa no lugar de byte inválido.
+_SUBSTITUICAO = "�"
+
 
 class LogInvalido(ValueError):
     pass
@@ -149,14 +158,31 @@ def ler_execucao(caminho: Path, *, estrito: bool = False) -> LeituraDeExecucao:
         ativa=(arquivo.parent / "execucao.lock").is_file(),
     )
     try:
-        linhas = arquivo.read_text(encoding="utf-8").splitlines()
+        bruto_do_arquivo = arquivo.read_bytes()
     except OSError as erro:
         _problema(leitura, "arquivo_ilegivel", f"{type(erro).__name__}: {erro}")
         return _finalizar(leitura, estrito)
 
+    # `decode(errors="replace")`, e não `read_text`: `UnicodeDecodeError` herda de
+    # `ValueError`, escapava do `except OSError` acima e derrubava o leitor
+    # inteiro — justamente no log cortado no meio de um caractere multibyte, que
+    # é o caso mais comum de execução interrompida e o motivo de existir um modo
+    # tolerante. Agora o byte inválido vira problema e o resto continua legível.
+    texto_do_arquivo = bruto_do_arquivo.decode("utf-8", errors="replace")
+    if _SUBSTITUICAO in texto_do_arquivo:
+        _problema(
+            leitura,
+            "bytes_invalidos",
+            "byte inválido em UTF-8; as linhas afetadas foram lidas com substituição",
+        )
+    linhas = texto_do_arquivo.splitlines()
+
     for numero, texto in enumerate(linhas, 1):
         if not texto.strip():
-            _problema(leitura, "linha_vazia", "linha vazia no JSONL", numero)
+            # Aviso, não erro: linha em branco é irregularidade cosmética. Como
+            # erro, ela reprovava `execucoes validar` e bloqueava a retenção
+            # daquele diretório para sempre.
+            _problema(leitura, "linha_vazia", "linha vazia no JSONL", numero, severidade="aviso")
             continue
         try:
             bruto = json.loads(texto)
@@ -168,6 +194,15 @@ def ler_execucao(caminho: Path, *, estrito: bool = False) -> LeituraDeExecucao:
             continue
         dados = cast(dict[str, Any], bruto)
         versao = _inteiro(dados.get("schema_version"), 0)
+        if versao not in _VERSOES_CONHECIDAS:
+            _problema(
+                leitura,
+                "versao_desconhecida",
+                f"schema_version {versao} é mais novo que este leitor; a linha não foi "
+                "interpretada. Atualize o orquestrador para ler este log.",
+                numero,
+            )
+            continue
         evento = (
             _evento_v2(dados, linha=numero)
             if versao == 2
@@ -224,12 +259,40 @@ def _validar(leitura: LeituraDeExecucao) -> None:
             spans.add(evento.span_id)
 
     terminais = [evento for evento in leitura.eventos if evento.tipo in _TERMINAIS]
-    if not terminais and not leitura.ativa:
-        _problema(leitura, "terminal_ausente", "execução sem evento terminal")
+    if not terminais:
+        if leitura.ativa:
+            # O lock silenciava a ausência de desfecho por completo, e o log de um
+            # processo morto por queda passava a ser "válido" para sempre. Aviso, e
+            # não erro: execução em andamento é legítima — o que não pode é a
+            # ausência de evidência virar aprovação silenciosa.
+            _problema(
+                leitura,
+                "sem_terminal_com_lock",
+                "execução sem desfecho e com `execucao.lock` presente: ou está em "
+                "andamento, ou o lock ficou órfão de um processo que morreu",
+                severidade="aviso",
+            )
+        else:
+            _problema(leitura, "terminal_ausente", "execução sem evento terminal")
     elif len(terminais) > 1:
         _problema(leitura, "terminal_duplicado", f"{len(terminais)} eventos terminais")
-    elif terminais and terminais[-1] is not leitura.eventos[-1]:
-        _problema(leitura, "evento_apos_terminal", "há evento depois do desfecho")
+    else:
+        # `pulso` fica de fora: o heartbeat roda numa thread própria até `fechar()`,
+        # e um batimento que caísse depois do terminal reprovava execução sadia —
+        # e a retenção então recusava aquele diretório para sempre.
+        posteriores = [
+            evento
+            for evento in leitura.eventos
+            if evento.linha > terminais[-1].linha and evento.tipo != TipoDeEvento.PULSO.value
+        ]
+        if posteriores:
+            _problema(
+                leitura,
+                "evento_apos_terminal",
+                f"{len(posteriores)} evento(s) depois do desfecho, começando em "
+                f"{posteriores[0].tipo}",
+                posteriores[0].linha,
+            )
 
 
 def _finalizar(leitura: LeituraDeExecucao, estrito: bool) -> LeituraDeExecucao:

@@ -75,6 +75,7 @@ nav:
       - O loop de reparo: arquitetura/o-loop-de-reparo.md
       - Fronteiras: arquitetura/fronteiras.md
       - Estrutura: arquitetura/estrutura.md
+      - Pendências: arquitetura/pendencias.md
       - Estados do recurso: arquitetura/estados-do-recurso.md
   - Referência:
       - CLI: referencia/cli.md

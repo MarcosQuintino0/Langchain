@@ -216,12 +216,21 @@ def _versao_do_node(config: Config, ausencias: _Ausencias) -> str | None:
         return None
 
 
-def _impressao_da_skill(config: Config, ausencias: _Ausencias) -> str | None:
+def _versao_do_graphify(config: Config, ausencias: _Ausencias) -> str | None:
+    """A versão do extrator que produziu o grafo desta execução.
+
+    Substitui a impressão digital da skill: o que precisa ser reproduzível é a
+    ferramenta que lê o backend, e ela agora é dependência declarada deste
+    projeto — não um repositório de terceiro cujo conteúdo se congela por hash.
+    """
+    from orquestrador.ferramentas.processo import executar  # noqa: PLC0415
+
     try:
-        return config.impressao_da_skill()
-    except (OSError, ValueError) as erro:
-        ausencias.por_falha("skill.impressao", erro)
+        saida = executar([config.execucao.graphify, "--version"], timeout_s=30)
+    except ErroDeFerramenta as erro:
+        ausencias.por_falha("graphify.versao", erro)
         return None
+    return saida.texto.strip() or None
 
 
 def _e_nome_de_segredo(chave: str) -> bool:
@@ -331,11 +340,10 @@ def coletar(
             "orquestrador": _repositorio(RAIZ_PROJETO, "repositorios.orquestrador", ausencias),
             "backend": _repositorio(config.caminhos.backend, "repositorios.backend", ausencias),
         },
-        "skill": {
-            "caminho": str(config.caminhos.skill),
-            "impressao": _impressao_da_skill(config, ausencias),
-            "impressao_esperada": config.skill.impressao_esperada or None,
-        },
+        # A impressão digital dos `.mjs` saiu com o desacoplamento da skill
+        # (2026-08-10): o orquestrador não invoca mais script de repositório
+        # externo, então não há contrato implícito de terceiro para congelar.
+        "graphify": {"versao": _versao_do_graphify(config, ausencias)},
         "modelos_por_estagio": {
             nome: {
                 "modelo": estagio.modelo,

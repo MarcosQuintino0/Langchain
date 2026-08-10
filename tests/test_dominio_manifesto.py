@@ -79,7 +79,6 @@ def test_campo_desconhecido_no_manifesto_e_recusado(manifesto_minimo):
         Manifesto.model_validate(manifesto_minimo(profundidadee="completa"))
 
 
-
 def test_para_prompt_omite_justificativas_e_para_json_as_preserva():
     """A projeção de prompt tira o naoAplica; a serialização da skill, nunca.
 

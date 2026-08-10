@@ -133,17 +133,6 @@ def test_ambiente_completo_nao_reprova_nada(
     assert veredito_de(itens, "Graphify").veredito is Veredito.OK
 
 
-def test_impressao_da_skill_desligada_e_aviso_com_o_hash_para_colar(
-    projeto: Path, versoes: Callable[..., None]
-):
-    """Vazio é legítimo, mas não é OK: é uma trava desligada, e o doctor diz qual."""
-    versoes()
-    item = veredito_de(diagnosticar(projeto / "config.toml"), "Impressão da skill")
-
-    assert item.veredito is Veredito.AVISO
-    assert "impressao_esperada" in item.conserto
-
-
 # ---------------------------------------------------------------------------
 # Um item estragado de cada vez
 # ---------------------------------------------------------------------------
@@ -191,19 +180,17 @@ def test_projeto_sem_modulos_compartilhados_reprova(projeto: Path, versoes: Call
     assert "preparar-projeto" in item.conserto
 
 
-def test_skill_ausente_reprova_antes_de_tentar_a_impressao(
+def test_skill_ausente_reprova_nomeando_o_script_que_falta(
     projeto: Path, versoes: Callable[..., None]
 ):
     versoes()
     for arquivo in (projeto / "skill" / "scripts").iterdir():
         arquivo.unlink()
 
-    itens = diagnosticar(projeto / "config.toml")
-    item = veredito_de(itens, "Skill qa-api")
+    item = veredito_de(diagnosticar(projeto / "config.toml"), "Skill qa-api")
 
     assert item.veredito is Veredito.FALHOU
     assert "qa-reindex.mjs" in item.detalhe
-    assert not [i for i in itens if i.nome == "Impressão da skill"]
 
 
 # ---------------------------------------------------------------------------

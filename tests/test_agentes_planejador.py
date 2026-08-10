@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from typing import Any
 
 import pytest
@@ -22,6 +23,7 @@ from orquestrador.agentes import planejador
 from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.excecoes import RespostaTruncada
+from orquestrador.observabilidade.rastreamento import Rastreador, contexto_atual
 from orquestrador.observabilidade.telemetria import Telemetria
 
 pytestmark = pytest.mark.unit
@@ -239,6 +241,47 @@ def test_escrita_sem_releitura_volta_para_reparo_com_qaorq_051(config_falso):
     assert parte.cenarios[0].nome == "provado"
 
 
+def test_reparo_que_perde_cobertura_e_descartado(config_falso):
+    """Reparo de qualidade não pode apagar categoria que já estava coberta.
+
+    Medido em 2026-08-10: uma volta pedida por QAORQ-051 devolveu um plano menor
+    e levou CAT-08 e CAT-09 embora de um grupo completo, derrubando o estágio.
+    Cobertura é invariante; qualidade é melhor-esforço.
+    """
+    completo_mas_cego = json.dumps(
+        {
+            "endpoint": "GET /pedidos",
+            "cenarios": [
+                {"cat": "CAT-06", "nome": "a", "entrada": "POST /pedidos", "espera": "400"},
+                {"cat": "CAT-08", "nome": "b", "entrada": "GET /pedidos", "espera": "403"},
+            ],
+        }
+    )
+    reparo_que_perdeu = json.dumps(
+        {
+            "endpoint": "GET /pedidos",
+            "cenarios": [
+                {
+                    "cat": "CAT-06",
+                    "nome": "a",
+                    "entrada": "POST /pedidos",
+                    "espera": "400; GET confirma que nada foi criado",
+                }
+            ],
+        }
+    )
+    modelo = ModeloSequencial(respostas=[completo_mas_cego, reparo_que_perdeu])
+
+    plano = executar(config_falso, modelo, ["CAT-06", "CAT-08"])
+
+    assert len(modelo.capturas) == 2, "o reparo do QAORQ-051 precisa ter sido pedido"
+    parte = plano.do_endpoint("GET /pedidos")
+    assert parte is not None
+    assert {c.cat for c in parte.cenarios} == {"CAT-06", "CAT-08"}, (
+        "o reparo perdeu CAT-08 e mesmo assim foi aceito"
+    )
+
+
 def test_pendencia_heuristica_remanescente_nao_mata_o_estagio(config_falso):
     """Só o QAORQ-050 é fatal: falso positivo de palavra-chave custa aviso, não execução."""
     cego = json.dumps(
@@ -320,6 +363,39 @@ class ModeloQueLeAEntrada(BaseChatModel):
                 ChatGeneration(message=AIMessage(content=plano_json("GET /pedidos", *cats)))
             ]
         )
+
+
+def test_paralelismo_leva_o_span_do_recurso_para_dentro_das_threads(config_falso):
+    """Thread nova nasce com contexto vazio — e o trace perdia o estágio inteiro.
+
+    Medido antes da correção: as chamadas do planejador saíam órfãs na raiz do
+    trace, com `parent_span_id` nulo, enquanto mapeador e executor (que rodam na
+    thread principal) ficavam corretamente aninhados.
+    """
+    contextos_vistos: list[object] = []
+    trava = threading.Lock()
+
+    class ModeloQueObservaOContexto(ModeloQueLeAEntrada):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            with trava:
+                contextos_vistos.append(contexto_atual())
+            return super()._generate(messages, stop, run_manager, **kwargs)
+
+    config_falso.estagios["mapeador"].paralelismo = 3
+
+    class EmissorFalso:
+        trace_id = "a" * 32
+
+        def evento(self, tipo, **campos): ...
+
+    rastreador = Rastreador(EmissorFalso())
+    with rastreador.operacao("recurso", recurso="pedidos") as span_do_recurso:
+        executar(config_falso, ModeloQueObservaOContexto(), ["CAT-01", "CAT-02", "CAT-08"])
+
+    assert len(contextos_vistos) == 3
+    assert all(visto == span_do_recurso for visto in contextos_vistos), (
+        "o span do recurso não atravessou as threads: o trace perde o estágio mais caro"
+    )
 
 
 def test_paralelismo_monta_o_plano_na_ordem_canonica(config_falso):

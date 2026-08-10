@@ -32,8 +32,20 @@ class ResumoDeExecucao:
     duracao_s: float
     eventos: int
     chamadas_llm: int
+    # Requisições que o provedor recusou ou derrubou. Campo próprio, e não somado
+    # em `chamadas_llm`: elas custaram tempo e não produziram artefato, e a
+    # pergunta "quanto desta execução foi indisponibilidade?" só tem resposta se
+    # os dois números existirem separados. Antes elas não apareciam em lugar
+    # nenhum do relatório — uma execução que bateu 30 vezes em 429 antes de
+    # acertar aparecia como uma chamada só.
+    requisicoes_falhas: int
     tools: int
     tokens: int
+    # O custo que o PROVEDOR reportou, quando reporta. É o único número
+    # autoritativo de gasto que existe — o resto é estimativa por token — e era
+    # capturado em `RegistroDeChamada.custo_reportado` sem ninguém somar.
+    # `None` significa "nenhuma requisição reportou custo", que é diferente de 0.
+    custo_reportado: float | None
     problemas: int
 
     def para_json(self) -> dict[str, Any]:
@@ -59,6 +71,11 @@ def _soma_tokens(dados: dict[str, JsonValue]) -> int:
     )
 
 
+def _custo(dados: dict[str, JsonValue]) -> float | None:
+    valor = dados.get("custo_reportado")
+    return float(valor) if isinstance(valor, int | float) and not isinstance(valor, bool) else None
+
+
 def resumir_execucao(caminho: Path) -> ResumoDeExecucao:
     leitura = ler_execucao(caminho)
     inicio = _dados_de_inicio(leitura)
@@ -75,6 +92,7 @@ def resumir_execucao(caminho: Path) -> ResumoDeExecucao:
         for evento in leitura.eventos
         if evento.tipo in {"requisicao_llm_concluida", "chamada_llm"}
     ]
+    custos = [custo for evento in chamadas if (custo := _custo(evento.dados)) is not None]
     dry_run_bruto = inicio.get("dry_run")
     return ResumoDeExecucao(
         run_id=leitura.eventos[0].run_id if leitura.eventos else caminho.name,
@@ -87,8 +105,12 @@ def resumir_execucao(caminho: Path) -> ResumoDeExecucao:
         duracao_s=max((evento.t_s or 0.0 for evento in leitura.eventos), default=0.0),
         eventos=len(leitura.eventos),
         chamadas_llm=len(chamadas),
+        requisicoes_falhas=sum(
+            evento.tipo == "requisicao_llm_falhou" for evento in leitura.eventos
+        ),
         tools=sum(evento.tipo == "tool" for evento in leitura.eventos),
         tokens=sum(_soma_tokens(evento.dados) for evento in chamadas),
+        custo_reportado=round(sum(custos), 6) if custos else None,
         problemas=len(leitura.problemas),
     )
 
@@ -130,6 +152,7 @@ def comparar_execucoes(a: ResumoDeExecucao, b: ResumoDeExecucao) -> dict[str, An
             "duracao_s": round(b.duracao_s - a.duracao_s, 3),
             "eventos": b.eventos - a.eventos,
             "chamadas_llm": b.chamadas_llm - a.chamadas_llm,
+            "requisicoes_falhas": b.requisicoes_falhas - a.requisicoes_falhas,
             "tools": b.tools - a.tools,
             "tokens": b.tokens - a.tokens,
             "problemas": b.problemas - a.problemas,

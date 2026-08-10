@@ -76,3 +76,69 @@ def test_historico_separa_real_de_dry_run(tmp_path: Path):
     assert codigo == 0
     assert historico["real"]["execucoes"] == 1
     assert historico["dry_run"]["execucoes"] == 1
+
+
+def test_requisicao_que_falhou_e_o_custo_do_provedor_aparecem_no_resumo(tmp_path: Path):
+    """Uma execução que bateu em 429 antes de acertar não pode parecer uma chamada só.
+
+    E `custo_reportado` é o único número autoritativo de gasto que existe — era
+    capturado por requisição e nunca somado por ninguém.
+    """
+    caminho = tmp_path / "run-falhas" / "execucao.jsonl"
+    with Registro(caminho, run_id="run-falhas", intervalo_pulso_s=None) as registro:
+        registro.evento(TipoDeEvento.EXECUCAO_INICIADA, dry_run=False)
+        for _ in range(3):
+            registro.evento(
+                TipoDeEvento.REQUISICAO_LLM_FALHOU, estagio="mapeador", status=429, estado="falha"
+            )
+        registro.evento(
+            TipoDeEvento.REQUISICAO_LLM_CONCLUIDA,
+            estagio="mapeador",
+            uso={"entrada": 100, "saida": 10},
+            custo_reportado=0.0025,
+        )
+        registro.evento(TipoDeEvento.EXECUCAO_CONCLUIDA, sucesso=True)
+
+    codigo, texto = _rodar(["mostrar", "run-falhas", "--base", str(tmp_path), "--json"])
+    resumo = json.loads(texto)
+
+    assert codigo == 0
+    assert resumo["chamadas_llm"] == 1
+    assert resumo["requisicoes_falhas"] == 3, "as três recusas do provedor sumiam do relatório"
+    assert resumo["custo_reportado"] == 0.0025
+
+
+def test_limpar_sem_aplicar_nao_apaga_nada(tmp_path: Path):
+    """A garantia mais importante do único comando destrutivo da CLI.
+
+    Ela não tinha teste nenhum: nem a prévia, nem o `--aplicar`.
+    """
+    antiga = tmp_path / "20200101-000000-123-abcdef12"
+    _execucao(tmp_path, antiga.name, tokens=5)
+
+    codigo, texto = _rodar(["limpar", "--base", str(tmp_path), "--antes-de", "1", "--json"])
+    dados = json.loads(texto)
+
+    assert codigo == 0
+    assert dados["modo"] == "previa"
+    assert str(antiga) in dados["candidatos"]
+    assert dados["removidos"] == []
+    assert antiga.is_dir(), "a prévia apagou um diretório — é o contrário do contrato"
+
+
+def test_limpar_com_aplicar_remove_somente_o_candidato(tmp_path: Path):
+    antiga = tmp_path / "20200101-000000-123-abcdef12"
+    _execucao(tmp_path, antiga.name, tokens=5)
+    recente = tmp_path / "run-recente"
+    _execucao(tmp_path, recente.name, tokens=5)
+
+    codigo, texto = _rodar(
+        ["limpar", "--base", str(tmp_path), "--antes-de", "1", "--aplicar", "--json"]
+    )
+    dados = json.loads(texto)
+
+    assert codigo == 0
+    assert dados["modo"] == "aplicado"
+    assert not antiga.exists()
+    assert recente.is_dir(), "execução fora da janela de idade não pode ser tocada"
+    assert str(antiga) in dados["removidos"]

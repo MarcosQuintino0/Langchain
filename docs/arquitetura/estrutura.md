@@ -76,25 +76,25 @@ src/orquestrador/
     tags_cypress.py          parser puro das tags @endpoint/@cat de um spec
     extrator_de_superficie.py  acha os módulos compartilhados e calcula os imports
     rotas_java_spring.py       parser puro das anotações de rota do Spring MVC
+    limpeza_javascript.py      parser puro: o que o `_support/` gerado faz ao apagar massa
     extrator_de_endpoints.py   matriz de suporte + grafo → endpoints do backend
   ferramentas/
     __init__.py
     processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
     retencao_de_execucoes.py  prévia, confinamento, revalidação e remoção explícita
-    graphify.py      wrappers query/affected/reindex
+    graphify.py      extract/query/affected — o extrator é dependência Python deste projeto
     arquivos.py      ler/listar/buscar com confinamento de caminho
     privacidade.py   denylist, .llmignore e redação de segredo antes do envio
     publicacao.py    staging por recurso, diário de propriedade, publicação atômica
-    scripts_qa.py    wrappers dos .mjs da skill
     json_externo.py  extrair_json tolerante de stdout de ferramenta (única impl.)
   gates/
     __init__.py
     codigos.py       catálogo dos códigos de violação QAORQ-
     evidencias.py    verificação determinística do dossiê: evidência, citações, checklist
-    gate_a.py        --so-manifesto + diff grafo × manifesto + dossiê
-    gate_b.py        prettier + eslint + validador + lacuna de cobertura
-    lacunas.py       QAORQ-030: categoria planejada que não virou teste
-    saidas.py        JSON dos .mjs → ResultadoGate/Violacao
+    gate_a.py        diff grafo × manifesto + conferência do dossiê
+    gate_b.py        prettier + eslint + limpeza gerada
+    limpeza.py       QAORQ-031/032/033: a receita de limpeza virou código de verdade
+    saidas.py        JSON de ferramenta externa → ResultadoGate/Violacao
 ```
 
 `analise_estatica/` responde "o que existe neste JavaScript" sem executá-lo, e é a

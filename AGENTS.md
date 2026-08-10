@@ -74,8 +74,8 @@ trabalho do princípio 3. O que a regra proíbe tem lista e tem teste:
 
 **Se um código couber em dois donos, a fronteira não está clara**: extraia a parte
 pura para o dono inferior e deixe só o I/O no de cima. O par de referência é
-`analise_estatica/exports_javascript.py` — entra texto, sai `ExportJs`, sem
-dependência do projeto — e `ferramentas/scripts_qa.py`, que invoca `.mjs` por
+`analise_estatica/limpeza_javascript.py` — entra texto, sai `LimpezaEncontrada`,
+sem dependência do projeto — e `ferramentas/graphify.py`, que invoca o extrator por
 subprocesso e devolve a saída crua para outro módulo interpretar. Use os dois antes
 de inventar um arranjo novo.
 

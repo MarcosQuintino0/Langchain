@@ -1,11 +1,19 @@
 """Gate B — verificação da implementação (determinístico).
 
-Prettier + ESLint + `validar-suite-gerada.mjs <recurso> --json`.
+Duas checagens, depois do desacoplamento da skill (2026-08-10):
 
-O validador reprova por código: `QAAPI-025` (campo do schema sem teste `@campo`),
-`QAAPI-026` (exceção que fecha categoria por desconhecimento), `QAAPI-027`
-(endpoint de escrita sem superfície de entrada declarada, com `--exigir-campos`),
-`QAAPI-032` (profundidade incoerente com o registro de handlers), entre outros.
+1. **Formatadores** (prettier/eslint), quando configurados — são do projeto do
+   cliente, não de skill nenhuma, e nunca reprovam o artefato: instalar
+   toolchain não é trabalho que o executor faça reescrevendo teste.
+2. **Limpeza gerada** (`gates/limpeza.py`) — a receita determinística virou
+   código de verdade, ou o executor só disse que sim?
+
+O que saiu com a skill: a reconciliação de cobertura por categoria e por campo
+(`QAAPI-025`, `QAORQ-030` via `qa-cobertura.mjs`) e as checagens de padrão de
+código. **É a maior perda do desacoplamento** e está registrada como pendência
+em `docs/arquitetura/pendencias.md`: enquanto ela não voltar, o Gate B não
+responde "planejei e não entreguei" — quem responde por cobertura hoje é o
+QAORQ-050/051/052 no planejador, que é sobre o PLANO, não sobre o código.
 """
 
 from __future__ import annotations
@@ -13,14 +21,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from orquestrador.config import Config
+from orquestrador.dominio.dossie import DossieDoRecurso
+from orquestrador.dominio.inventario import Inventario
 from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import ExecutavelAusente
 from orquestrador.ferramentas.processo import executar as rodar_processo
-from orquestrador.ferramentas.scripts_qa import Validador
-from orquestrador.gates import lacunas as gate_lacunas
-from orquestrador.gates.saidas import resultado_do_validador, violacoes_do_eslint
+from orquestrador.gates.limpeza import conferir_limpeza
+from orquestrador.gates.saidas import violacoes_do_eslint
 
 NOME = "gate_b"
 
@@ -36,27 +45,19 @@ def executar(
     dir_schemas: Path,
     manifesto: Manifesto | None = None,
     out_cobertura: Path | None = None,
+    inventario: Inventario | None = None,
+    dossie: DossieDoRecurso | None = None,
 ) -> ResultadoGate:
-    """As quatro checagens do Gate B sobre o **staging** da execução.
+    """As cinco checagens do Gate B sobre o **staging** da execução.
 
     Ver `gate_a.executar` sobre por que `dir_recurso` e `dir_schemas` não têm
     padrão.
     """
+    del dir_schemas, manifesto, out_cobertura, recurso  # ver a docstring: saíram com a skill
     partes = [
         _formatador(config, "prettier", "QAORQ-020", config.execucao.prettier, dir_recurso),
         _formatador(config, "eslint", "QAORQ-021", config.execucao.eslint, dir_recurso),
-        _validador(config, dir_recurso, dir_schemas),
-        # A terceira checagem responde por "planejei e não entreguei", que o
-        # validador da skill não cobre. Ver gates/lacunas.py.
-        gate_lacunas.executar(
-            config,
-            recurso,
-            dir_recurso=dir_recurso,
-            dir_schemas=dir_schemas,
-            manifesto=manifesto,
-            gate=NOME,
-            out=out_cobertura,
-        ),
+        conferir_limpeza(_modulos_de_suporte(dir_recurso), inventario, dossie),
     ]
     combinado = ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
     # Checagem que não rodou não vira delta: `exigir_veredito` interrompe o recurso
@@ -64,11 +65,20 @@ def executar(
     return combinado.exigir_veredito()
 
 
-def _validador(config: Config, dir_recurso: Path, dir_schemas: Path) -> ResultadoGate:
-    saida = Validador(config).executar(
-        dir_recurso, list(config.gate("b").flags), schemas=dir_schemas
-    )
-    return resultado_do_validador(saida, gate=NOME)
+def _modulos_de_suporte(dir_recurso: Path) -> dict[str, str]:
+    """Os `_support/*.js` do staging, como texto. Ausente vira dicionário vazio.
+
+    Dicionário vazio não é aprovação disfarçada: `conferir_limpeza` trata isso
+    como "não há DELETE em lugar nenhum", que é exatamente o que a ausência do
+    `_support/` significa para a limpeza.
+    """
+    raiz = dir_recurso / "_support"
+    if not raiz.is_dir():
+        return {}
+    return {
+        arquivo.name: arquivo.read_text(encoding="utf-8", errors="replace")
+        for arquivo in sorted(raiz.glob("*.js"))
+    }
 
 
 def _formatador(

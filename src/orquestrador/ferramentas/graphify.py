@@ -1,4 +1,13 @@
-"""Wrappers do Graphify e do `qa-reindex.mjs` (Bloco 0 e tools do mapeador).
+"""Wrappers do Graphify (Bloco 0 e tools do mapeador).
+
+O Bloco 0 chama o `graphify` **direto**, e não mais o `qa-reindex.mjs` da skill.
+O `graphify` é um pacote Python (`graphifyy`), declarado como dependência deste
+projeto: ele vive no mesmo ambiente virtual do orquestrador, e não numa pasta
+externa que o cliente teria de instalar à parte. O que o script da skill fazia e
+foi replicado aqui é a linha de comando com `--code-only` e a lista de exclusões;
+o resto dele — verificação de versão travada num manifesto de outra skill,
+exigência de árvore Git limpa, HTML de visualização — era acoplamento sem função
+para este pipeline.
 
 Armadilhas do CLI que estes wrappers absorvem (references/descobrir-backend.md):
 
@@ -12,8 +21,9 @@ Armadilhas do CLI que estes wrappers absorvem (references/descobrir-backend.md):
 * O cabeçalho da resposta traz o nome que o Graphify **resolveu**; quando ele
   difere do pedido, os dependentes são de outra classe. O wrapper avisa.
 * Nunca fazer grep dentro do `graph.json` — dezenas de MB.
-* Nunca chamar `graphify extract` na mão: sem o `--code-only` que o reindex passa,
-  ele faz extração semântica paga por LLM sobre o backend inteiro, sem avisar.
+* `extract` **sem `--code-only`** faz extração semântica paga por LLM sobre o
+  backend inteiro, sem avisar. A flag é obrigatória aqui, e é o motivo de a
+  extração ser custo zero de token.
 """
 
 from __future__ import annotations
@@ -24,7 +34,24 @@ from pathlib import Path
 
 from orquestrador.config import Config
 from orquestrador.excecoes import ErroDeFerramenta
-from orquestrador.ferramentas.processo import SaidaProcesso, executar, executar_node
+from orquestrador.ferramentas.processo import SaidaProcesso, executar
+
+# Segunda camada sobre `--code-only`, herdada do `qa-reindex.mjs`: Dockerfile,
+# `.gitlab-ci.yml` e `TODAS_VIEWS` classificam como CÓDIGO no Graphify, então a
+# flag não os remove e a exclusão explícita continua necessária. Os formatos de
+# documento são redundantes com a flag de propósito — lista de glob erra por
+# digitação em silêncio; a flag afirmativa, não.
+EXCLUSOES: tuple[str, ...] = (
+    "**/*.md",
+    "**/*.txt",
+    "**/*.pdf",
+    "**/*.docx",
+    "**/*.xlsx",
+    ".gitlab-ci.yml",
+    "README.md",
+    "Dockerfile",
+    "**/TODAS_VIEWS",
+)
 
 
 @dataclass(frozen=True)
@@ -47,55 +74,68 @@ class Graphify:
 
     # -- Bloco 0 ------------------------------------------------------------
 
-    def reindex_check(self) -> SaidaProcesso:
-        """`qa-reindex.mjs --check`: valida o mapa em cache, sem reindexar.
+    def mapa_em_cache(self) -> bool:
+        """O `graph.json` existe e é JSON legível com nós dentro.
 
-        Roda com cwd no projeto consumidor: o destino do índice
-        (`.agents/state/qa-api/graphify-out`) é relativo ao diretório atual.
+        Substitui o `--check` do `qa-reindex.mjs`. Aquele script também exigia
+        árvore Git limpa e versão do Graphify travada num manifesto de outra
+        skill; nenhuma das duas coisas protege este pipeline — quem responde por
+        grafo defasado é o `extrator_de_endpoints`, que compara o que o grafo
+        declara com o que existe em disco.
         """
-        return executar_node(
-            self.config.caminhos.script("qa-reindex.mjs"),
-            ["--check"],
-            node=self.config.execucao.node,
-            cwd=self.config.caminhos.projeto_testes,
-            timeout_s=self.config.execucao.timeout_s,
-        )
+        if not self.graph.is_file():
+            return False
+        try:
+            with self.graph.open(encoding="utf-8") as arquivo:
+                # `graph.json` tem dezenas de MB: basta o começo para saber se é
+                # JSON e se tem conteúdo. Ler inteiro só para dizer "existe"
+                # custaria segundos e memória a cada execução.
+                inicio = arquivo.read(4096)
+        except OSError:
+            return False
+        return inicio.lstrip().startswith("{") and '"' in inicio
 
-    def reindex(self, backend: Path | None = None) -> SaidaProcesso:
-        """`qa-reindex.mjs --backend <p>`: (re)gera o mapa. Extração AST local, zero token."""
+    def extrair(self, backend: Path | None = None) -> SaidaProcesso:
+        """`graphify extract . --code-only --out <destino>` na raiz do backend.
+
+        Extração puramente estática (AST), zero token. `--code-only` é o que
+        impede a extração semântica paga; as `EXCLUSOES` cobrem o que o Graphify
+        classifica como código e não é.
+        """
         alvo = Path(backend or self.config.caminhos.backend)
-        return executar_node(
-            self.config.caminhos.script("qa-reindex.mjs"),
-            ["--backend", str(alvo)],
-            node=self.config.execucao.node,
-            cwd=self.config.caminhos.projeto_testes,
-            timeout_s=self.config.execucao.timeout_s,
-        )
+        destino = self.graph.parent
+        destino.mkdir(parents=True, exist_ok=True)
+        argumentos = [
+            self.config.execucao.graphify,
+            "extract",
+            ".",
+            "--code-only",
+            "--out",
+            str(destino),
+        ]
+        for padrao in EXCLUSOES:
+            argumentos += ["--exclude", padrao]
+        return executar(argumentos, cwd=alvo, timeout_s=self.config.execucao.timeout_s)
 
     def preparar(self) -> ResultadoPreparacao:
-        """Bloco 0 completo: check e, se necessário, reindex."""
-        saidas: list[SaidaProcesso] = []
-        check = self.reindex_check()
-        saidas.append(check)
-        if check.codigo == 0 and self.graph.is_file():
+        """Bloco 0 completo: usa o mapa em cache ou extrai um novo."""
+        if self.mapa_em_cache():
             return ResultadoPreparacao(
                 ok=True,
                 regenerou=False,
                 graph=self.graph,
                 detalhe="mapa em cache válido; nada a regenerar",
-                saidas=tuple(saidas),
             )
 
-        reindex = self.reindex()
-        saidas.append(reindex)
-        ok = reindex.codigo == 0 and self.graph.is_file()
+        extracao = self.extrair()
+        ok = extracao.codigo == 0 and self.mapa_em_cache()
         detalhe = (
             "mapa regenerado a partir do backend"
             if ok
-            else f"falha ao regenerar o mapa (código {reindex.codigo}): {reindex.texto[:800]}"
+            else f"falha ao regenerar o mapa (código {extracao.codigo}): {extracao.texto[:800]}"
         )
         return ResultadoPreparacao(
-            ok=ok, regenerou=True, graph=self.graph, detalhe=detalhe, saidas=tuple(saidas)
+            ok=ok, regenerou=True, graph=self.graph, detalhe=detalhe, saidas=(extracao,)
         )
 
     # -- tools do mapeador --------------------------------------------------

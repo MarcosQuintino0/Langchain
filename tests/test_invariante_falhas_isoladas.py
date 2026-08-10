@@ -134,12 +134,12 @@ def test_falta_de_passos_nao_gasta_as_tentativas_de_schema(config_falso):
         )
 
     assert telemetria.chamadas, "a exploração que consumiu requisições precisa ser observável"
-    assert {chamada.detalhe.split(";", 1)[0] for chamada in telemetria.chamadas} == {
-        "schema:1"
-    }, "desistiu na primeira tentativa de schema, sem reparo inútil"
-    assert {chamada.fatia for chamada in telemetria.chamadas} == {
-        "exploracao"
-    }, "nenhuma requisição pode pertencer à fatia de reparo de schema"
+    assert {chamada.detalhe.split(";", 1)[0] for chamada in telemetria.chamadas} == {"schema:1"}, (
+        "desistiu na primeira tentativa de schema, sem reparo inútil"
+    )
+    assert {chamada.fatia for chamada in telemetria.chamadas} == {"exploracao"}, (
+        "nenhuma requisição pode pertencer à fatia de reparo de schema"
+    )
 
 
 def test_falha_de_estagio_e_capturavel_pelo_pipeline():
@@ -372,13 +372,12 @@ def test_bloco0_aprovado_segue_para_os_recursos(pipeline: Pipeline, monkeypatch)
 
 
 def cypress_falso(pipeline: Pipeline, monkeypatch, *, codigo: int, escreve: bool):
-    """Substitui o subprocesso do Cypress e o `qa-cobertura.mjs`.
+    """Substitui o subprocesso do Cypress.
 
-    Devolve um espião com `relatorios` — o que o `qa-cobertura.mjs` recebeu, e é aí
-    que se lê se o Bloco 3 mandou adiante um relatório desta execução, de outra ou
-    nenhum — e `invocacoes`, os argumentos nomeados de cada subprocesso.
+    Devolve um espião com `invocacoes`, os argumentos nomeados de cada subprocesso.
+    O duplo do `qa-cobertura.mjs` saiu com o desacoplamento da skill (2026-08-10):
+    o Bloco 3 não gera mais relatório de cobertura por categoria e por campo.
     """
-    recebidos: list[Path | None] = []
     invocacoes: list[dict] = []
 
     def rodar(argv, **kwargs):
@@ -390,33 +389,19 @@ def cypress_falso(pipeline: Pipeline, monkeypatch, *, codigo: int, escreve: bool
             destino.write_text('{"stats": {}}', encoding="utf-8")
         return SaidaProcesso(argv=argv, codigo=codigo, stdout="", stderr="", duracao_s=0.0)
 
-    class CoberturaFalsa:
-        def __init__(self, _config):
-            pass
-
-        def executar(self, _dir, *, report=None, out=None):
-            recebidos.append(report)
-            return SaidaProcesso(
-                argv=["node"], codigo=0, stdout='{"lacunas": 0}', stderr="", duracao_s=0.0
-            )
-
     monkeypatch.setattr(processo, "executar", rodar)
-    monkeypatch.setattr("orquestrador.aplicacao.pipeline.Cobertura", CoberturaFalsa)
     pipeline.pular_cypress = False
     pipeline.config.execucao.cypress = ["cypress", "run", "{relatorio}"]
-    return SimpleNamespace(relatorios=recebidos, invocacoes=invocacoes)
+    return SimpleNamespace(invocacoes=invocacoes)
 
 
 def test_cypress_com_codigo_diferente_de_zero_reprova_o_recurso(pipeline: Pipeline, monkeypatch):
-    espiao = cypress_falso(pipeline, monkeypatch, codigo=1, escreve=True)
+    cypress_falso(pipeline, monkeypatch, codigo=1, escreve=True)
 
     with pytest.raises(FalhaDaExecucaoDeTestes) as erro:
         pipeline.bloco3(recurso_de(pipeline.config))
 
     assert "código 1" in str(erro.value)
-    # E o relatório de cobertura nem chega a ser gerado a partir de uma suíte que
-    # não passou.
-    assert espiao.relatorios == []
 
 
 def test_relatorio_de_outra_execucao_nao_e_aceito(pipeline: Pipeline, monkeypatch):
@@ -434,13 +419,15 @@ def test_relatorio_de_outra_execucao_nao_e_aceito(pipeline: Pipeline, monkeypatc
 
 
 def test_cypress_bem_sucedido_entrega_o_relatorio_desta_execucao(pipeline: Pipeline, monkeypatch):
-    espiao = cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
+    cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
 
     resultado = pipeline.bloco3(recurso_de(pipeline.config))
 
     assert resultado.estado == "EXECUTADO"
-    assert espiao.relatorios == [pipeline.dir_execucao / "cypress" / "pedidos" / "report.json"]
-    assert resultado.contadores == {"lacunas": 0}
+    assert resultado.relatorio == pipeline.dir_execucao / "cypress" / "pedidos" / "report.json"
+    # Contador nenhum: a reconciliação de cobertura saiu com a skill, e número que
+    # não existe não pode virar zero silencioso.
+    assert resultado.contadores == {}
 
 
 def test_o_cypress_recebe_as_variaveis_do_runner(pipeline: Pipeline, monkeypatch):
@@ -463,15 +450,15 @@ def test_comando_sem_a_marca_do_relatorio_e_erro_de_configuracao(pipeline: Pipel
 
 
 def test_sem_cypress_o_resultado_diz_que_nao_executou(pipeline: Pipeline, monkeypatch):
-    espiao = cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
+    cypress_falso(pipeline, monkeypatch, codigo=0, escreve=True)
     pipeline.pular_cypress = True
 
     resultado = pipeline.bloco3(recurso_de(pipeline.config))
 
     assert resultado.estado == "NAO_EXECUTADO"
     assert resultado.motivo
-    # Nenhum relatório: a cobertura que sai daqui é de forma, não de runtime.
-    assert espiao.relatorios == [None]
+    # Nada rodou: sem relatório não há prova de runtime nenhuma.
+    assert resultado.relatorio is None
 
 
 def test_recurso_que_nao_rodou_cypress_nao_finge_ter_rodado(pipeline: Pipeline, monkeypatch):
@@ -514,13 +501,10 @@ def test_a_flag_continua_reconhecida_pelo_argparse():
 def config_de_dry_run(tmp_path: Path) -> Path:
     """config.toml mínimo que atravessa `validar_caminhos` sem precisar de Node.
 
-    Os `.mjs` são arquivos vazios: a validação confere existência, e nada nesta
-    seção chega a invocá-los.
+    A skill deixou de ser obrigatória em `validar_caminhos` com o desacoplamento
+    (2026-08-10), então o diretório dela é só um caminho — nada nesta seção o lê.
     """
-    scripts = tmp_path / "skill" / "scripts"
-    scripts.mkdir(parents=True, exist_ok=True)
-    for nome in ("validar-suite-gerada.mjs", "qa-cobertura.mjs", "qa-reindex.mjs"):
-        (scripts / nome).write_text("", encoding="utf-8")
+    (tmp_path / "skill").mkdir(parents=True, exist_ok=True)
     arquivo = tmp_path / "config.toml"
     arquivo.write_text(
         f"""

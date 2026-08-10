@@ -251,7 +251,6 @@ def test_o_manifesto_carrega_o_minimo_para_reproduzir(config_com_prompts: Config
     # A raiz do repositório separa "o backend é um checkout" de "o backend está
     # dentro do checkout de outra coisa" — o sandbox do --dry-run é o segundo caso.
     assert manifesto["repositorios"]["backend"]["raiz_do_repositorio"]
-    assert manifesto["skill"]["impressao"]
     assert manifesto["modelos_por_estagio"]["mapeador"]["modelo"] == "fake/mapeador"
     assert manifesto["configuracao"]["caminhos"]["backend"]
 

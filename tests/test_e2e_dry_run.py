@@ -121,9 +121,7 @@ def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path:
     assert {"QAAPI-025", "QAAPI-002"} <= set(delta_b["codigos"])
 
     # Nenhum modelo foi chamado.
-    chamadas = [
-        evento for evento in eventos if evento["tipo"] == "requisicao_llm_concluida"
-    ]
+    chamadas = [evento for evento in eventos if evento["tipo"] == "requisicao_llm_concluida"]
     assert chamadas and all(evento["simulado"] for evento in chamadas)
 
     # Telemetria por estágio no log.

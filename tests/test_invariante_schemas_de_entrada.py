@@ -170,8 +170,7 @@ def test_o_evento_artefatos_registra_o_schema(pipeline, recurso, area, monkeypat
         if evento["tipo"] == "artefatos" and evento["dados"]["estagio"] == "mapeador"
     )
     assert any(
-        "entidade.schema.json" in arquivo["caminho"]
-        for arquivo in artefatos["dados"]["arquivos"]
+        "entidade.schema.json" in arquivo["caminho"] for arquivo in artefatos["dados"]["arquivos"]
     )
 
 

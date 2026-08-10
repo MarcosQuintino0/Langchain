@@ -222,39 +222,7 @@ def _diagnosticar_skill(config: Config) -> list[ItemDeDiagnostico]:
                 "scripts/) e se o checkout dela está completo.",
             )
         ]
-    return [presenca, _diagnosticar_impressao(config)]
-
-
-def _diagnosticar_impressao(config: Config) -> ItemDeDiagnostico:
-    """A trava de contrato com a skill: hash dos `.mjs` que invocamos."""
-    try:
-        atual = config.impressao_da_skill()
-    except OSError as erro:
-        return ItemDeDiagnostico(
-            "Impressão da skill",
-            Veredito.FALHOU,
-            f"não consegui ler os scripts: {erro}",
-            "confira permissão de leitura em [caminhos].skill.",
-        )
-    if not config.skill.impressao_esperada:
-        return ItemDeDiagnostico(
-            "Impressão da skill",
-            Veredito.AVISO,
-            f"verificação desligada; a impressão atual é {atual}",
-            "confira o contrato da skill uma vez e cole "
-            f'[skill].impressao_esperada = "{atual}" na configuração. Vazio é o certo '
-            "só enquanto você edita a skill e o consumidor ao mesmo tempo.",
-        )
-    if atual != config.skill.impressao_esperada:
-        return ItemDeDiagnostico(
-            "Impressão da skill",
-            Veredito.FALHOU,
-            f"esperada {config.skill.impressao_esperada}, atual {atual}",
-            "a skill mudou desde a última conferência. Reveja o contrato — argumentos, "
-            "códigos de saída, forma do JSON e os códigos QAAPI- — e só então atualize "
-            "[skill].impressao_esperada.",
-        )
-    return ItemDeDiagnostico("Impressão da skill", Veredito.OK, atual)
+    return [presenca]
 
 
 def _saida_de_versao(executavel: str, config: Config) -> str | ItemDeDiagnostico:

@@ -1,18 +1,19 @@
 """Gate A — verificação do plano (determinístico).
 
-Duas checagens:
+Duas checagens, ambas Python puro:
 
-1. `validar-suite-gerada.mjs <recurso> --so-manifesto --json` — a contabilidade das
-   12 categorias e as justificativas de `naoAplica`.
-2. **Diff grafo × manifesto** — compara os endpoints que o backend expõe com os que
-   o `cobertura.json` declara.
+1. **Diff grafo × manifesto** — compara os endpoints que o backend expõe com os
+   que o `cobertura.json` declara.
+2. **Conferência do dossiê** — evidência que aponta código real, endpoint citado
+   que existe no gabarito, checklist negativa respondida (`gates/evidencias.py`).
 
-Por que a segunda checagem existe: o validador da skill enxerga apenas o projeto de
-testes, nunca o backend — limite deliberado, documentado em
-`skills/qa-api/scripts/cobertura/handlers.mjs:15`. Ele prova "entreguei o que
-planejei", nunca "planejei tudo que existe". O diff é o que fecha esse elo, e é a
-única checagem do projeto cujo denominador não passa por LLM nenhum: o manifesto e
+O diff é a checagem cujo denominador **não passa por LLM nenhum**: o manifesto e
 o inventário saem do mapeador, mas os endpoints do diff saem do fonte do backend.
+É ele que responde "planejei tudo que existe" — a pergunta que o validador da
+skill, que só enxergava o projeto de testes, nunca conseguiu responder.
+
+A contabilidade das 12 categorias vinha do `validar-suite-gerada.mjs` e saiu com
+o desacoplamento da skill (2026-08-10). Ver `docs/arquitetura/pendencias.md`.
 """
 
 from __future__ import annotations
@@ -32,9 +33,7 @@ from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import GrafoNaoPreparado
-from orquestrador.ferramentas.scripts_qa import Validador
 from orquestrador.gates.evidencias import conferir_dossie
-from orquestrador.gates.saidas import resultado_do_validador
 
 NOME = "gate_a"
 
@@ -51,8 +50,8 @@ def executar(
     config: Config,
     recurso: Recurso,
     *,
-    dir_recurso: Path,
-    dir_schemas: Path,
+    dir_recurso: Path,  # noqa: ARG001 — some com a skill; mantido para não quebrar chamadores
+    dir_schemas: Path,  # noqa: ARG001 — idem
     inventario: Inventario | None = None,
     manifesto: Manifesto | None = None,
     dossie: DossieDoRecurso | None = None,
@@ -65,12 +64,11 @@ def executar(
     publicado enquanto o loop de reparo trabalha em outro lugar — validar um
     artefato e publicar outro é o defeito que o staging existe para fechar.
     """
-    flags = list(config.gate("a").flags)
-    if "--so-manifesto" not in flags:
-        flags.insert(0, "--so-manifesto")
-
-    saida = Validador(config).executar(dir_recurso, flags, schemas=dir_schemas)
-    manifesto_ok = resultado_do_validador(saida, gate=NOME)
+    # A contabilidade das 12 categorias era do `validar-suite-gerada.mjs`, e saiu
+    # junto com a skill em 2026-08-10. O que sobrou aqui é Python puro: o diff
+    # contra o backend (que nenhum LLM produz) e a conferência do dossiê. A
+    # contabilidade volta quando os gates novos forem desenhados — ver
+    # `docs/arquitetura/pendencias.md`.
     diff = diff_grafo_manifesto(
         graph=config.caminhos.graph_abs,
         backend=config.caminhos.backend,
@@ -78,7 +76,7 @@ def executar(
         manifesto=manifesto,
         recurso=recurso,
     )
-    partes = [manifesto_ok, diff]
+    partes = [diff]
     if manifesto is not None:
         # O dossiê só é conferível contra um gabarito: sem manifesto em memória o
         # diff acima já vira erro de ferramenta, e empilhar outro não acrescenta.
@@ -138,7 +136,22 @@ def diff_grafo_manifesto(
         return ResultadoGate.erro_da_ferramenta(str(erro), gate=NOME)
 
     if not backend_lido.endpoints:
-        return ResultadoGate.erro_da_ferramenta(_sem_denominador(backend_lido, backend), gate=NOME)
+        # Backend fora da matriz de suporte (hoje só Java/Spring) deixou de
+        # interromper o recurso em 2026-08-10: o produto precisa rodar em backend
+        # de qualquer linguagem, e a IA explora qualquer um pelas tools. O que se
+        # perde é a PROVA de que nenhum endpoint foi esquecido — e é por isso que
+        # isto sai como aviso destacado em vez de silêncio: ausência de
+        # verificação não pode passar por verificação bem-sucedida.
+        return ResultadoGate.aprovado_por(
+            avisos=[
+                Violacao(
+                    codigo=CODIGO_INCERTEZA,
+                    arquivo=f"{recurso.nome}/_support/cobertura.json",
+                    mensagem=_sem_denominador(backend_lido, backend),
+                )
+            ],
+            gate=NOME,
+        )
 
     arquivo = f"{recurso.nome}/_support/cobertura.json"
     do_backend = {
@@ -159,15 +172,16 @@ def diff_grafo_manifesto(
 
 def _sem_denominador(backend_lido: EndpointsDoBackend, backend: Path) -> str:
     return (
-        "diff grafo × manifesto sem denominador: nenhum adaptador da matriz de suporte "
-        f"encontrou endpoint no backend em {backend}.\n"
+        "ATENÇÃO: o Gate A NÃO conseguiu provar que o gabarito cobre todos os "
+        "endpoints deste backend — nenhum adaptador da matriz de suporte encontrou "
+        f"endpoint em {backend}. A geração segue, mas sem essa prova.\n"
         f"Matriz de hoje: {matriz_em_texto()}.\n"
         f"O grafo declara {backend_lido.arquivos_no_grafo} arquivo(s); "
         f"{backend_lido.arquivos_analisados} foram analisados, "
         f"{backend_lido.arquivos_de_teste} são fonte de teste e o resto ficou de fora "
         f"por extensão ({backend_lido.resumo_do_ignorado()}).\n"
-        "Isto não é aprovação nem reprovação: sem saber o que o backend expõe, o Gate A "
-        'volta a provar só "entreguei o que planejei". O que fazer: implemente o '
+        "O recurso segue sem esta prova, por decisão de produto: backend fora da "
+        "matriz não pode impedir a geração. O que fazer para recuperá-la: implemente o "
         "adaptador da linguagem/framework deste backend em "
         "`analise_estatica/extrator_de_endpoints.py` (a matriz fica lá, declarada), ou "
         "confira se `[caminhos].backend` e o `graph.json` do Bloco 0 apontam para o "

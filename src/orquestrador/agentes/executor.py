@@ -206,9 +206,9 @@ def _gerar_fatiado(
         "Gere api.js e, quando a arquitetura dos arquivos pedir, factories.js, "
         "helpers.js e asserts.js. O plano completo abaixo é o contexto do que os "
         "specs vão consumir. Os specs serão gerados em chamadas próprias.\n\n"
-        "### Plano de cenários do recurso\n\n" + plano.render() + _contexto_do_suporte(
-            dossie, inventario
-        ),
+        "### Plano de cenários do recurso\n\n"
+        + plano.render()
+        + _contexto_do_suporte(dossie, inventario),
         tentativa=tentativa,
         aceitos=lambda caminho: caminho.startswith(PREFIXO_SUPPORT),
         rotulo="_support/",

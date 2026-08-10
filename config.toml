@@ -50,24 +50,13 @@ headers_env = "OTEL_EXPORTER_OTLP_HEADERS"
 incluir_identificadores = false
 
 # ---------------------------------------------------------------------------
-# Compatibilidade com a skill
+# Skill qa-api (LEGADO — não é mais usada em runtime)
 # ---------------------------------------------------------------------------
-# A skill `qa-api` é outro repositório, e a integração com ela é um contrato
-# IMPLÍCITO: formato dos argumentos, código de saída, forma do JSON e semântica
-# dos códigos QAAPI-. Nada disso está declarado em lugar nenhum.
-#
-# Pior: os prompts em `prompts/` são condensação MANUAL das `references/*.md`
-# dela. Se a skill mudar uma regra, nada avisa este orquestrador — são duas
-# fontes de verdade, uma copiando a outra, sem detecção de divergência.
-#
-# A impressão é o hash do conteúdo dos `.mjs` que invocamos. Mudou, o pipeline
-# recusa rodar e diz o hash novo, para você conferir o contrato antes de aceitar.
-# É a mesma proteção que o `qa-reindex.mjs` faz com a versão do Graphify.
-#
-# Deixe vazio para desligar — é o certo para quem edita a skill e o consumidor
-# ao mesmo tempo, onde o hash mudaria a cada salvamento.
-[skill]
-impressao_esperada = "6f004c54afd5b6e3"
+# Em 2026-08-10 o orquestrador foi desacoplado da skill: o Bloco 0 chama o
+# graphify direto (dependência Python deste projeto) e os gates que rodavam
+# .mjs saíram. Nada aqui é lido para executar; o caminho fica declarado só
+# enquanto o doctor o usa como diagnóstico informativo.
+# O que se perdeu com a troca está em docs/arquitetura/pendencias.md.
 
 [openrouter]
 base_url = "https://openrouter.ai/api/v1"
@@ -88,7 +77,17 @@ max_retries = 2
 # alternativas. Baidu e SiliconFlow anunciam preço de cache e não entregam;
 # DeepInfra serve a variante quantizada fp4. Ao trocar de provedor ou de modelo,
 # confira a coluna "do cache" do relatório: ela é que diz se o pin ainda paga.
-provedores_permitidos = ["together"]
+#
+# 2026-08-10: saiu da Together. O uptime dela caiu para 87,6% (uma requisição em
+# oito) e seis execuções seguidas morreram em 429 do pool compartilhado — e cada
+# falha do mapeador descarta a exploração inteira, medido em 134 mil tokens
+# jogados fora numa execução só. Baidu entra com 43% de desconto na tabela
+# ($0,0798/$0,1596), fp8 como a Together, 99,7% de uptime e cache anunciado a
+# $0,016. **Medido em 2026-08-10 nesta carga: 69% de cache real no mapeador**, o
+# que REVOGA o "não entregam" acima para o Baidu — a medição antiga é anterior ao
+# desconto e ao endpoint atual. Alternativas se ele degradar: gmicloud (fp8,
+# 99,9% de uptime); deepinfra é mais barata ainda, mas serve fp4.
+provedores_permitidos = ["baidu"]
 
 # ---------------------------------------------------------------------------
 # Modelos por estágio
@@ -142,6 +141,26 @@ modelo = "deepseek/deepseek-v4-flash-0731"
 temperatura = 0.0
 modo_estruturado = "prompt"
 max_tentativas_schema = 3
+# 120.000 de teto por resposta, contra os 65.536 que o provedor aplica quando
+# ninguém pede nada. O modelo aceita até 131.072 nesta rota.
+#
+# Isto NÃO é o freio anti-loop que o planejador tem — é o contrário dele. Aqui o
+# teto foi AUMENTADO para testar a hipótese de que a espiral medida em 2026-08-10
+# (65.536 de saída, 100% pensamento, nenhum byte de resposta) foi falta de espaço
+# para deliberar, e não deliberação degenerada. A evidência contrária está no
+# planejador do mesmo dia: uma chamada espiralou aos 65.536 e a repetição, com
+# entrada idêntica, fechou em 5.638 tokens — 4 mil deles de raciocínio. Se a
+# hipótese não se confirmar, o custo do loop dobra junto com o teto, e o caminho
+# passa a ser `raciocinio = false` como no planejador.
+max_tokens = 120000
+# 2026-08-10, medição em andamento: com o raciocínio ligado o estágio gastou
+# 112.929 tokens de saída — 96% deles pensamento — e não escreveu um byte de
+# código em 23 minutos. Desligado, o planejador saiu de 61 min para 4. O que
+# antes desaconselhava fazer isto aqui (o executor devolveu `{"arquivos": []}`
+# num teste antigo) mudou de contexto: ele agora recebe o plano com os cenários
+# prontos, e a limpeza gerada passou a ser conferida por script (QAORQ-031/032/033),
+# então "saiu ruim" virou reprovação de gate em vez de esperança.
+raciocinio = false
 
 [estagios.auditor]
 modelo = "deepseek/deepseek-v4-flash-0731"

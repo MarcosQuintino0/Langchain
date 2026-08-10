@@ -87,3 +87,107 @@ def test_detecta_run_misturado_sequencia_e_tipo_desconhecido(tmp_path: Path):
     codigos = {problema.codigo for problema in ler_execucao(execucao).problemas}
 
     assert {"run_id_misturado", "sequencia_invalida", "tipo_desconhecido"} <= codigos
+
+
+def test_byte_invalido_nao_derruba_o_leitor(tmp_path: Path):
+    """Log cortado no meio de um caractere multibyte é O caso do modo tolerante.
+
+    `UnicodeDecodeError` herda de `ValueError` e escapava do `except OSError`:
+    um byte ruim derrubava a leitura inteira, e um arquivo assim impedia validar
+    todos os outros.
+    """
+    execucao = tmp_path / "run-bytes"
+    execucao.mkdir()
+    valida = json.dumps(
+        {
+            "ts": "2026-01-01T00:00:00Z",
+            "schema_version": 1,
+            "tipo": "execucao_concluida",
+            "sucesso": True,
+        }
+    )
+    (execucao / "execucao.jsonl").write_bytes(valida.encode("utf-8") + b"\n\xff\xfe\n")
+
+    leitura = ler_execucao(execucao)
+
+    codigos = {problema.codigo for problema in leitura.problemas}
+    assert "bytes_invalidos" in codigos
+    assert leitura.terminal == "execucao_concluida", "o que era legível foi conservado"
+
+
+def test_versao_futura_nao_e_lida_pelo_ramo_legado(tmp_path: Path):
+    """Versão desconhecida vira problema, nunca "validado sem problema".
+
+    O legado é o ramo mais permissivo que existe; deixar um formato futuro cair
+    nele produzia log aprovado com o payload aninhado no lugar errado — e a
+    retenção decide APAGAR a partir dessa leitura.
+    """
+    execucao = tmp_path / "run-v3"
+    execucao.mkdir()
+    (execucao / "execucao.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-01-01T00:00:00Z",
+                "schema_version": 3,
+                "tipo": "execucao_concluida",
+                "run_id": "run-v3",
+                "dados": {"sucesso": True},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    leitura = ler_execucao(execucao)
+
+    assert "versao_desconhecida" in {problema.codigo for problema in leitura.problemas}
+    assert not leitura.eventos, "linha de versão desconhecida não vira evento inventado"
+    with pytest.raises(LogInvalido, match="versao_desconhecida"):
+        ler_execucao(execucao, estrito=True)
+
+
+def test_lock_sem_terminal_avisa_em_vez_de_aprovar_em_silencio(tmp_path: Path):
+    """Processo morto deixa o lock; a execução truncada não pode virar "válida"."""
+    execucao = tmp_path / "run-orfa"
+    caminho = execucao / "execucao.jsonl"
+    with Registro(caminho, run_id="run-orfa", intervalo_pulso_s=None) as registro:
+        registro.evento(TipoDeEvento.BLOCO0, ok=True)
+    (execucao / "execucao.lock").write_text("999999\n", encoding="utf-8")
+
+    leitura = ler_execucao(execucao, estrito=True)
+
+    assert [(p.codigo, p.severidade) for p in leitura.problemas] == [
+        ("sem_terminal_com_lock", "aviso")
+    ]
+    assert leitura.terminal is None
+
+
+def test_pulso_depois_do_terminal_nao_reprova_execucao_sadia(tmp_path: Path):
+    """O heartbeat roda até `fechar()`; um batimento tardio é normal, não defeito.
+
+    Como erro, ele reprovava a execução e a retenção passava a recusar aquele
+    diretório para sempre.
+    """
+    execucao = tmp_path / "run-pulso"
+    caminho = execucao / "execucao.jsonl"
+    with Registro(caminho, run_id="run-pulso", intervalo_pulso_s=None) as registro:
+        registro.evento(TipoDeEvento.EXECUCAO_INICIADA)
+        registro.evento(TipoDeEvento.EXECUCAO_CONCLUIDA, sucesso=True)
+        registro.evento(TipoDeEvento.PULSO, pid=1)
+
+    leitura = ler_execucao(execucao, estrito=True)
+
+    assert not leitura.problemas
+
+
+def test_evento_util_depois_do_terminal_continua_reprovando(tmp_path: Path):
+    """A tolerância é do `pulso`, e só dele."""
+    execucao = tmp_path / "run-depois"
+    caminho = execucao / "execucao.jsonl"
+    with Registro(caminho, run_id="run-depois", intervalo_pulso_s=None) as registro:
+        registro.evento(TipoDeEvento.EXECUCAO_CONCLUIDA, sucesso=True)
+        registro.evento(TipoDeEvento.GATE, aprovado=False)
+
+    codigos = [problema.codigo for problema in ler_execucao(execucao).problemas]
+
+    assert codigos == ["evento_apos_terminal"]

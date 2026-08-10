@@ -64,7 +64,11 @@ def test_exporta_traces_e_metricas_sem_identificadores_ou_conteudo(tmp_path: Pat
 
     urls = {url for url, _dados, _headers, _timeout in chamadas}
     assert urls == {"http://collector:4318/v1/traces", "http://collector:4318/v1/metrics"}
-    remoto = json.dumps([dados for _url, dados, _headers, _timeout in chamadas])
+    # `ensure_ascii=False` é o ponto do teste, não estilo: com o padrão da
+    # biblioteca, "conteúdo" sai escapado como "conteúdo" e a asserção
+    # abaixo passa MESMO se o exportador vazar o texto inteiro. A asserção que
+    # protege a invariante de privacidade não pode ser vaziamente verdadeira.
+    remoto = json.dumps([dados for _url, dados, _headers, _timeout in chamadas], ensure_ascii=False)
     for proibido in ("run-secreto", "pedidos", "POST /pedidos", "modelo-interno", "req-secreto"):
         assert proibido not in remoto
     assert "conteúdo" not in remoto
