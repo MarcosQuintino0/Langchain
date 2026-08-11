@@ -81,6 +81,7 @@ src/orquestrador/
     rotas_java_spring.py       parser puro das anotações de rota do Spring MVC
     limpeza_javascript.py      parser puro: o que o `_support/` gerado faz ao apagar massa
     extrator_de_endpoints.py   matriz de suporte + grafo → endpoints do backend
+    ci_do_projeto.py         que integração contínua o projeto já usa, e o que cabe gerar para ela
   ferramentas/
     __init__.py
     processo.py      subprocess (lista de argumentos, utf-8, os dois fluxos)
@@ -90,6 +91,7 @@ src/orquestrador/
     privacidade.py   denylist, .llmignore e redação de segredo antes do envio
     publicacao.py    staging por recurso, diário de propriedade, publicação atômica
     json_externo.py  extrair_json tolerante de stdout de ferramenta (única impl.)
+    pipeline_ci.py   escreve o .yml da suíte quando o projeto já tem CI, e nunca sobrescreve
   gates/
     __init__.py
     codigos.py       catálogo dos códigos de violação QAORQ-

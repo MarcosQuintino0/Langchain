@@ -34,6 +34,7 @@ from langchain_core.language_models import BaseChatModel
 from orquestrador.agentes import executor as agente_executor
 from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.agentes import planejador as agente_planejador
+from orquestrador.analise_estatica.ci_do_projeto import detectar
 from orquestrador.aplicacao.ciclo_de_reparo import CicloDeReparo
 from orquestrador.aplicacao.persistencia import PersistenciaDeArtefatos
 from orquestrador.aplicacao.reaproveitamento import DecisoesAnteriores, carregar
@@ -45,7 +46,11 @@ from orquestrador.dominio.inventario import Inventario
 from orquestrador.dominio.limpeza import render_ausencias, render_limpeza
 from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.plano import PlanoDeTestes
-from orquestrador.dominio.propriedade import DivergenciaDeSchema, EntradaDoDiario
+from orquestrador.dominio.propriedade import (
+    Classificacao,
+    DivergenciaDeSchema,
+    EntradaDoDiario,
+)
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
 from orquestrador.dominio.veredito import Delta, EstadoDoRecurso, ResultadoGate
@@ -63,11 +68,17 @@ from orquestrador.excecoes import (
 )
 from orquestrador.ferramentas import processo
 from orquestrador.ferramentas.graphify import Graphify, ResultadoPreparacao
+from orquestrador.ferramentas.pipeline_ci import (
+    PipelineGerada,
+    escritas_no_projeto,
+    gerar,
+)
 from orquestrador.ferramentas.publicacao import (
     NOME_DO_DIARIO,
     AreaDeStaging,
     Diario,
     criar_area,
+    hash_do_arquivo,
 )
 from orquestrador.gates import gate_a, gate_b
 from orquestrador.llm.cliente import criar_modelo
@@ -221,6 +232,9 @@ class Pipeline:
         # no retorno de `rodar`, para que quem já lê a lista de resultados continue
         # lendo a lista de resultados — inclusive a parcial.
         self.interrupcao: InterrupcaoDaExecucao | None = None
+        # Preenchida no fim de `rodar`: é do projeto, não do recurso, e o relatório
+        # final precisa dizer o que foi escrito e o que o dono ainda tem de fazer.
+        self.pipelines_de_ci: list[PipelineGerada] = []
         # As duas colaborações que este objeto coordena, e não implementa: o loop
         # de reparo e as escritas em disco. Ver a docstring de `aplicacao/`.
         self.persistencia = PersistenciaDeArtefatos(
@@ -715,7 +729,57 @@ class Pipeline:
                     recursos_nao_executados=restantes,
                 )
                 break
+        self.pipelines_de_ci = self._gerar_pipeline_de_ci(resultados)
         return resultados
+
+    def _gerar_pipeline_de_ci(self, resultados: list[ResultadoDoRecurso]) -> list[PipelineGerada]:
+        """A pipeline da suíte, depois de publicar — e só se o projeto já tiver CI.
+
+        Vem no fim porque o `--spec` precisa apontar para o que existe de verdade:
+        pipeline gerada antes da publicação apontaria para recurso que o gate
+        ainda podia reprovar, e verde apontando para nada é o pior desfecho de
+        todos.
+        """
+        publicados = [resultado.recurso for resultado in resultados if resultado.publicado]
+        if not publicados:
+            return []
+        ci = detectar(self.config.caminhos.projeto_testes)
+        if not ci.tem_ci:
+            self.registro.aviso(
+                "nenhuma integração contínua detectada no projeto: pipeline não gerada. "
+                "Quem não tem CI não pediu uma, e um .yml depositado num repositório "
+                "que nunca rodou nada é palpite, não entrega."
+            )
+            return []
+
+        base = self.config.caminhos.dir_recursos.strip("/")
+        gerados = gerar(
+            ci,
+            specs=[f"{base}/{nome}/**/*.cy.js" for nome in publicados],
+            dir_execucao=self.dir_execucao,
+        )
+        no_projeto = escritas_no_projeto(gerados)
+        if no_projeto:
+            self.diario.registrar(
+                [
+                    EntradaDoDiario(
+                        destino=caminho,
+                        classificacao=Classificacao.CRIADO,
+                        hash_novo=hash_do_arquivo(caminho),
+                        execucao=self.dir_execucao.name,
+                    )
+                    for caminho in no_projeto
+                ]
+            )
+        for gerada in gerados:
+            self.registro.ok(f"pipeline · {gerada.render()}")
+        self.registro.evento(
+            TipoDeEvento.ARTEFATOS,
+            estagio="pipeline_ci",
+            arquivos=medir_arquivos([g.escrita for g in gerados if g.escrita is not None]),
+            plataformas=[g.plataforma.chave for g in gerados],
+        )
+        return gerados
 
     def _rodar_recurso(self, recurso: Recurso) -> ResultadoDoRecurso:
         resultado = ResultadoDoRecurso(recurso=recurso.nome)
