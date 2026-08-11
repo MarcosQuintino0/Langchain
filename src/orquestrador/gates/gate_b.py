@@ -29,6 +29,7 @@ from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import ExecutavelAusente
 from orquestrador.ferramentas.processo import executar as rodar_processo
 from orquestrador.gates.limpeza import conferir_limpeza
+from orquestrador.gates.padrao_cypress import conferir_padrao
 from orquestrador.gates.saidas import violacoes_do_eslint
 
 NOME = "gate_b"
@@ -58,11 +59,29 @@ def executar(
         _formatador(config, "prettier", "QAORQ-020", config.execucao.prettier, dir_recurso),
         _formatador(config, "eslint", "QAORQ-021", config.execucao.eslint, dir_recurso),
         conferir_limpeza(_modulos_de_suporte(dir_recurso), inventario, dossie),
+        conferir_padrao(_codigo_do_recurso(dir_recurso)),
     ]
     combinado = ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
     # Checagem que não rodou não vira delta: `exigir_veredito` interrompe o recurso
     # em vez de devolver ao executor uma lista que ele não tem como satisfazer.
     return combinado.exigir_veredito()
+
+
+def _codigo_do_recurso(dir_recurso: Path) -> dict[str, str]:
+    """Todo o JavaScript do recurso — specs e `_support/` —, por caminho relativo.
+
+    A norma de código vale nos dois: `_support/asserts.js` é justamente onde a
+    mensagem de asserção mais importa (quem lê o spec não vê aquela linha) e foi
+    onde ela mais faltou na suíte publicada — 0 de 20.
+    """
+    if not dir_recurso.is_dir():
+        return {}
+    return {
+        arquivo.relative_to(dir_recurso).as_posix(): arquivo.read_text(
+            encoding="utf-8", errors="replace"
+        )
+        for arquivo in sorted(dir_recurso.rglob("*.js"))
+    }
 
 
 def _modulos_de_suporte(dir_recurso: Path) -> dict[str, str]:

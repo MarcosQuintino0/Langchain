@@ -510,8 +510,14 @@ automaticamente.
 | `QAORQ-070` | `it` fora de `context`, `context` que não começa com "quando", quarto nível de aninhamento |
 | `QAORQ-071` | título com verbo proibido, acima de 80 caracteres, repetido no mesmo `context`, citando `CAT-xx`, ou cujo resultado é só um número |
 | `QAORQ-072` | `expect` sem mensagem |
-| `QAORQ-073` | spec falando HTTP direto, importando de camada proibida, lendo `.status` fora de um `expect`, ou declarando `Cypress.Commands.add` |
-| `QAORQ-074` | espera de tempo fixo, ou condicional decidindo o que o teste verifica |
-| `QAORQ-075` | URL, credencial, token ou senha literal no código, ou arquivo `.env` criado |
-| `QAORQ-076` | asserção que só prova existência |
+| `QAORQ-073` | `cy.request` dentro do recurso, `Cypress.Commands.add`, ou `.status` lido num statement sem asserção |
+| `QAORQ-074` | `cy.wait` com número, ou `if`/`else` dentro do corpo de um teste |
+| `QAORQ-075` | credencial literal: `Bearer <valor>` ou JWT escrito no código |
+| `QAORQ-076` | teste cujas asserções só provam existência ou formato |
 | `QAORQ-077` | identificador de uma letra |
+
+O que **não** tem fiscal, e por isso vale como julgamento: se o import do spec veio
+de camada permitida (depende da superfície de cada projeto), se a mensagem da
+asserção realmente explica, e se o nome do teste descreve comportamento em vez de
+mecanismo. Regra prometida e não cobrada ensina a não levar a sério o que está
+escrito — se você ler uma ameaça de gate que não está na tabela acima, é engano.

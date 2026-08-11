@@ -75,6 +75,7 @@ src/orquestrador/
     __init__.py
     exports_javascript.py    parser puro dos `export` de um módulo JS
     tags_cypress.py          parser puro das tags @endpoint/@cat de um spec
+    estrutura_de_suite.py    parser puro da árvore describe/context/it, com literais e chamadas
     extrator_de_superficie.py  acha os módulos compartilhados e calcula os imports
     rotas_java_spring.py       parser puro das anotações de rota do Spring MVC
     limpeza_javascript.py      parser puro: o que o `_support/` gerado faz ao apagar massa
@@ -93,8 +94,9 @@ src/orquestrador/
     codigos.py       catálogo dos códigos de violação QAORQ-
     evidencias.py    verificação determinística do dossiê: evidência, citações, checklist
     gate_a.py        diff grafo × manifesto + conferência do dossiê
-    gate_b.py        prettier + eslint + limpeza gerada
+    gate_b.py        prettier + eslint + limpeza gerada + padrão de código
     limpeza.py       QAORQ-031/032/033: a receita de limpeza virou código de verdade
+    padrao_cypress.py  QAORQ-070..077: o pedaço da norma de código que um script prova
     saidas.py        JSON de ferramenta externa → ResultadoGate/Violacao
 ```
 

@@ -32,6 +32,14 @@ CODIGOS_DO_ORQUESTRADOR: dict[str, str] = {
     "QAORQ-061": "o dossiê cita endpoint que não está no gabarito",
     "QAORQ-062": "a checklist negativa do dossiê não respondeu todos os aspectos",
     "QAORQ-063": "o mapeador não emitiu o dossiê do recurso",
+    "QAORQ-070": "estrutura da suíte fora do padrão describe → context → it",
+    "QAORQ-071": "título de teste fora do padrão de nomes",
+    "QAORQ-072": "`expect` sem mensagem explicativa",
+    "QAORQ-073": "o spec fura as camadas: HTTP direto, import proibido ou comando global",
+    "QAORQ-074": "espera de tempo fixo ou condicional decidindo o que o teste verifica",
+    "QAORQ-075": "URL, credencial ou segredo literal no código do teste",
+    "QAORQ-076": "asserção que só prova existência, e passaria com o backend devolvendo lixo",
+    "QAORQ-077": "identificador de uma letra",
 }
 
 
