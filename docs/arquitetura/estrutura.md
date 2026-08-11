@@ -38,7 +38,7 @@ src/orquestrador/
     dossie.py        o que o mapeador leu além do gabarito: regras, erros, consultas e incertezas
     limpeza.py       veredito determinístico de limpeza e ausências derivadas do inventário
     veredito.py      Violacao, ResultadoGate, Delta, EstadoDoRecurso
-    artefatos.py     SaidaMapeador, SaidaExecutor e o confinamento de forma de caminho
+    artefatos.py     SaidaMapeador, SaidaExecutor, o nome do spec de cada operação e o confinamento de forma de caminho
     propriedade.py   diário de propriedade, classificação e divergência de schema
     superficie.py    o que o projeto de testes do consumidor já oferece ao executor
     auditoria.py     o veredito do auditor semântico

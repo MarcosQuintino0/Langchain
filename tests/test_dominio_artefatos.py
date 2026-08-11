@@ -15,6 +15,7 @@ from orquestrador.dominio.artefatos import (
     SaidaExecutor,
     SaidaMapeador,
     caminho_de_schema,
+    nomes_dos_specs,
 )
 from orquestrador.dominio.endpoint import normalizar_endpoint
 from orquestrador.dominio.inventario import Inventario
@@ -131,3 +132,56 @@ def test_saida_do_executor_nao_repete_caminho():
 
 def test_normalizar_endpoint_colapsa_espacos():
     assert normalizar_endpoint("  POST   /pedidos/:id  ") == "POST /pedidos/:id"
+
+
+# ---------------------------------------------------------------------------
+# O nome do spec de cada operação
+# ---------------------------------------------------------------------------
+
+
+def test_o_crud_completo_vira_um_verbo_por_arquivo():
+    nomes = nomes_dos_specs(
+        [
+            "POST /api/v1/customers",
+            "GET /api/v1/customers",
+            "GET /api/v1/customers/{id}",
+            "PUT /api/v1/customers/{id}",
+            "PATCH /api/v1/customers/{id}",
+            "DELETE /api/v1/customers/{id}",
+        ]
+    )
+
+    # O prefixo comum (`api/v1`) sai: ele não distingue nada quando todos o têm.
+    assert nomes == {
+        "POST /api/v1/customers": "criar-customers.cy.js",
+        "GET /api/v1/customers": "listar-customers.cy.js",
+        "GET /api/v1/customers/{id}": "consultar-customers.cy.js",
+        # PUT e PATCH precisam de verbos diferentes ou colidiriam no mesmo arquivo.
+        "PUT /api/v1/customers/{id}": "substituir-customers.cy.js",
+        "PATCH /api/v1/customers/{id}": "alterar-customers.cy.js",
+        "DELETE /api/v1/customers/{id}": "excluir-customers.cy.js",
+    }
+
+
+def test_get_de_colecao_e_de_item_nao_sao_o_mesmo_verbo():
+    nomes = nomes_dos_specs(["GET /pedidos", "GET /pedidos/{id}"])
+    assert nomes["GET /pedidos"] == "listar-pedidos.cy.js"
+    assert nomes["GET /pedidos/{id}"] == "consultar-pedidos.cy.js"
+
+
+def test_o_prefixo_comum_nunca_engole_o_ultimo_segmento():
+    # Endpoint único: não há prefixo comum a descontar, e o nome precisa manter o
+    # substantivo — senão sobraria só o verbo.
+    assert nomes_dos_specs(["GET /pedidos"]) == {"GET /pedidos": "listar-pedidos.cy.js"}
+
+
+def test_sub_recurso_entra_no_nome():
+    nomes = nomes_dos_specs(["POST /clientes", "GET /clientes/{id}/enderecos"])
+    assert nomes["GET /clientes/{id}/enderecos"] == "listar-clientes-enderecos.cy.js"
+
+
+def test_colisao_e_desempatada_em_vez_de_sobrescrever():
+    # Dois endpoints com o mesmo método e os mesmos segmentos estáticos: raro, mas
+    # dois arquivos com o mesmo nome fariam uma fatia apagar a outra em silêncio.
+    nomes = nomes_dos_specs(["GET /a/{x}", "GET /a/{y}"])
+    assert len(set(nomes.values())) == 2

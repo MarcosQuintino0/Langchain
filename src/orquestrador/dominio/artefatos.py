@@ -12,6 +12,7 @@ caminho que o outro pega."""
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -21,6 +22,24 @@ from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.recurso import NomeDeRecurso
 
 SUFIXO_SCHEMA = ".schema.json"
+SUFIXO_SPEC = ".cy.js"
+
+# O verbo de cada método. PUT e PATCH não compartilham verbo de propósito: os dois
+# caem no mesmo recurso e o nome do arquivo colidiria — e "substituir" contra
+# "alterar" é a diferença real entre eles, não um desempate inventado.
+_VERBO_POR_METODO: dict[str, str] = {
+    "POST": "criar",
+    "PUT": "substituir",
+    "PATCH": "alterar",
+    "DELETE": "excluir",
+    "HEAD": "consultar",
+    "OPTIONS": "consultar",
+}
+
+# `{id}`, `:id` e `<id>` — as três grafias de parâmetro de rota que aparecem nos
+# frameworks que o extrator lê.
+_PARAMETRO = re.compile(r"^(\{.*\}|:.+|<.+>)$")
+_NAO_SLUG = re.compile(r"[^a-z0-9]+")
 
 
 def _caminho_confinado(valor: str, *, base: str) -> str:
@@ -54,6 +73,85 @@ def caminho_de_schema(referencia: str, recurso: str) -> str:
     if "/" in nome:
         return f"{nome}{SUFIXO_SCHEMA}"
     return f"{recurso}/{nome}{SUFIXO_SCHEMA}"
+
+
+def _slug(valor: str) -> str:
+    return _NAO_SLUG.sub("-", valor.lower()).strip("-") or "spec"
+
+
+def nomes_dos_specs(endpoints: Sequence[str]) -> dict[str, str]:
+    """O arquivo de spec de cada endpoint do recurso — um por operação.
+
+    **Quem nomeia é o código, não o modelo**, e é essa decisão que sustenta o
+    fatiamento: o filtro de uma fatia só consegue descartar o que caiu fora dela se
+    souber de antemão qual arquivo aquela chamada podia escrever, e o reparo só
+    acha o dono de uma violação se o nome for derivável do endpoint. Nome escolhido
+    pelo modelo faria duas chamadas colidirem no mesmo caminho sem ninguém notar.
+
+    O prefixo comum a todos os endpoints do recurso sai do nome — `/api/v1/` não
+    distingue nada quando todos o têm —, o método vira verbo em português, e `GET`
+    se divide em `listar` e `consultar` conforme a rota termine ou não em parâmetro.
+    É essa divisão que faz alguém achar de primeira o arquivo que procura.
+
+    Para endpoint de ação o nome sai feio (`criar-customers-activate.cy.js`), e é o
+    preço de ser derivável. Quem carrega o título legível é o `describe` lá dentro.
+    """
+    lidos: list[tuple[str, str, list[str], bool]] = []
+    for endpoint in endpoints:
+        metodo, _, rota = endpoint.partition(" ")
+        segmentos = [parte for parte in rota.split("/") if parte]
+        estaticos = [parte for parte in segmentos if not _PARAMETRO.match(parte)]
+        termina_em_parametro = bool(segmentos) and _PARAMETRO.match(segmentos[-1]) is not None
+        lidos.append((endpoint, metodo.upper(), estaticos, termina_em_parametro))
+
+    # O prefixo comum nunca engole o último segmento estático: sem essa guarda, um
+    # recurso de endpoint único ficaria sem nenhum substantivo no nome.
+    comum = 0
+    if len(lidos) > 1 and all(estaticos for _, _, estaticos, _ in lidos):
+        referencia = lidos[0][2]
+        while comum < len(referencia) and all(
+            comum < len(estaticos) - 1 and estaticos[comum] == referencia[comum]
+            for _, _, estaticos, _ in lidos
+        ):
+            comum += 1
+
+    nomes: dict[str, str] = {}
+    for endpoint, metodo, estaticos, termina_em_parametro in lidos:
+        if metodo == "GET":
+            verbo = "consultar" if termina_em_parametro else "listar"
+        else:
+            verbo = _VERBO_POR_METODO.get(metodo, metodo.lower())
+        restantes = estaticos[comum:] or estaticos[-1:] or [metodo.lower()]
+        nomes[endpoint] = _slug("-".join([verbo, *restantes]))
+
+    return {
+        endpoint: f"{nome}{SUFIXO_SPEC}" for endpoint, nome in _desempatar(nomes, lidos).items()
+    }
+
+
+def _desempatar(
+    nomes: dict[str, str], lidos: Sequence[tuple[str, str, list[str], bool]]
+) -> dict[str, str]:
+    """Garante nome único, primeiro pelo método e depois por índice.
+
+    Colisão é rara (exige dois endpoints com o mesmo método e os mesmos segmentos
+    estáticos), mas o custo dela não é: dois arquivos com o mesmo nome viram uma
+    fatia sobrescrevendo a outra em silêncio. A ordem é a dos endpoints ordenados,
+    e não a de chegada, para que o nome não dependa de como o plano foi montado.
+    """
+    metodo_de = {endpoint: metodo for endpoint, metodo, _, _ in lidos}
+    for rodada in range(2):
+        donos: dict[str, list[str]] = {}
+        for endpoint, nome in nomes.items():
+            donos.setdefault(nome, []).append(endpoint)
+        colididos = {nome: sorted(lista) for nome, lista in donos.items() if len(lista) > 1}
+        if not colididos:
+            break
+        for nome, lista in colididos.items():
+            for indice, endpoint in enumerate(lista, start=1):
+                sufixo = metodo_de[endpoint].lower() if rodada == 0 else str(indice)
+                nomes[endpoint] = f"{nome}-{sufixo}"
+    return nomes
 
 
 class ArquivoSchema(BaseModel):

@@ -69,7 +69,7 @@ def test_dry_run_completo_com_reparo_no_gate_a(config_toml: Path, tmp_path: Path
     O Gate B entrava aqui também, reprovando por `QAAPI-025` e `QAAPI-002` — dois
     códigos do `validar-suite-gerada.mjs`. Ele saiu com o desacoplamento e, com os
     roteiros de hoje, o Gate B aprova de primeira. Ver
-    `test_gate_b_ainda_nao_cobra_o_spec_base`, que é onde essa perda está
+    `test_gate_b_ainda_nao_cobra_o_que_o_plano_mandou`, que é onde essa perda está
     registrada como perda, e não como silêncio.
     """
     codigo = modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)])
@@ -154,30 +154,38 @@ def test_artefatos_ficam_em_disco(config_toml: Path, tmp_path: Path):
     for entrada in manifesto["endpoints"]:
         assert len(set(entrada["cats"]) | set(entrada["naoAplica"])) == 12
 
-    for spec in ("crud.cy.js", "validacoes.cy.js"):
+    # Um spec por operação, com o nome derivado do endpoint por código.
+    for spec in ("listar-pedidos.cy.js", "criar-pedidos.cy.js"):
         assert (recurso / spec).is_file()
     for artefato in ("inventario.json", "plano.json", "dossie.json", "dossie.md"):
         assert (execucao / "artefatos" / "pedidos" / artefato).is_file()
 
 
 @e2e
-def test_gate_b_ainda_nao_cobra_o_spec_base(config_toml: Path, tmp_path: Path):
+def test_gate_b_ainda_nao_cobra_o_que_o_plano_mandou(config_toml: Path, tmp_path: Path):
     """A perda do desacoplamento, escrita como teste em vez de como comentário.
 
-    O roteiro do executor não escreve `seguranca.cy.js`. Enquanto o
-    `validar-suite-gerada.mjs` rodava, isso era `QAAPI-002` e o Gate B reprovava;
-    hoje passa. Está em `docs/arquitetura/pendencias.md`.
+    O roteiro do executor transcreve só uma parte dos cenários do plano. Enquanto o
+    `qa-cobertura.mjs` rodava, a diferença era `QAAPI-025`/`QAORQ-030` e o Gate B
+    reprovava; hoje passa. Está em `docs/arquitetura/pendencias.md`.
 
-    Este teste afirma a ausência de propósito. Quando o gate novo for escrito, ele
-    quebra — e quem o escrever é obrigado a vir aqui trocar a asserção pela
-    exigência, que é exatamente o momento em que a pendência deixa de existir. Uma
-    linha de comentário não teria feito isso: ninguém a lê no dia certo.
+    Este teste afirma a ausência de propósito. Quando o gate de cobertura for
+    escrito, ele quebra — e quem o escrever é obrigado a vir aqui trocar a asserção
+    pela exigência, que é exatamente o momento em que a pendência deixa de existir.
+    Uma linha de comentário não teria feito isso: ninguém a lê no dia certo.
     """
     assert modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]) == 0
     execucao = ultima_execucao(tmp_path / "execucoes")
     recurso = execucao / "sandbox" / "projeto-testes" / "cypress" / "e2e" / "apis" / "pedidos"
 
-    assert not (recurso / "seguranca.cy.js").is_file()
+    plano = json.loads((execucao / "artefatos" / "pedidos" / "plano.json").read_text("utf-8"))
+    planejados = sum(len(parte["cenarios"]) for parte in plano["endpoints"])
+    transcritos = sum(spec.read_text("utf-8").count("@cat ") for spec in recurso.glob("*.cy.js"))
+
+    assert transcritos < planejados, (
+        "o roteiro deixa cenários por transcrever de propósito; se isso deixou de "
+        "ser verdade, o teste perdeu o objeto e precisa ser reescrito"
+    )
 
 
 @pytest.mark.unit

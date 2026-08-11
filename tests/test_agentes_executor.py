@@ -67,35 +67,50 @@ def resposta(*arquivos: tuple[str, str]) -> str:
 
 
 def manifesto_minimo_de_pedidos() -> Manifesto:
+    def entrada(endpoint: str, cats: tuple[str, ...]) -> dict[str, Any]:
+        return {
+            "endpoint": endpoint,
+            "cats": list(cats),
+            "naoAplica": {
+                f"CAT-{i:02d}": "não há o que testar aqui, comprovadamente"
+                for i in range(1, 13)
+                if f"CAT-{i:02d}" not in cats
+            },
+        }
+
     return Manifesto.model_validate(
         {
             "recurso": "pedidos",
             "endpoints": [
-                {
-                    "endpoint": "GET /pedidos",
-                    "cats": ["CAT-01", "CAT-02", "CAT-08"],
-                    "naoAplica": {
-                        f"CAT-{i:02d}": "não há o que testar aqui, comprovadamente"
-                        for i in range(1, 13)
-                        if f"CAT-{i:02d}" not in ("CAT-01", "CAT-02", "CAT-08")
-                    },
-                }
+                entrada("GET /pedidos", ("CAT-01", "CAT-10")),
+                entrada("POST /pedidos", ("CAT-01", "CAT-02")),
             ],
         }
     )
 
 
 def plano_de_pedidos() -> PlanoDeTestes:
-    def caso(cat: str) -> Cenario:
-        return Cenario(cat=cat, nome=f"caso-{cat}", entrada="GET /pedidos", espera="200")
+    """Dois endpoints, de propósito: é o que deixa ver o spec por operação.
+
+    Com um endpoint só, "uma chamada por operação" e "uma chamada por categoria"
+    dariam o mesmo número, e o teste passaria dos dois jeitos.
+    """
+
+    def caso(cat: str, endpoint: str) -> Cenario:
+        marca = endpoint.split(" ", 1)[0].lower()
+        return Cenario(cat=cat, nome=f"caso-{cat}-{marca}", entrada=endpoint, espera="200")
 
     return PlanoDeTestes(
         recurso="pedidos",
         endpoints=[
             PlanoDoEndpoint(
                 endpoint="GET /pedidos",
-                cenarios=[caso("CAT-01"), caso("CAT-02"), caso("CAT-08")],
-            )
+                cenarios=[caso("CAT-01", "GET /pedidos"), caso("CAT-10", "GET /pedidos")],
+            ),
+            PlanoDoEndpoint(
+                endpoint="POST /pedidos",
+                cenarios=[caso("CAT-01", "POST /pedidos"), caso("CAT-02", "POST /pedidos")],
+            ),
         ],
     )
 
@@ -129,41 +144,68 @@ def test_a_norma_de_codigo_chega_inteira_na_instrucao(config_falso):
     assert "Todo `it` mora dentro de um `context`" in instrucao
 
 
-def test_geracao_com_plano_e_uma_chamada_por_fatia(config_falso):
+def test_geracao_com_plano_e_uma_chamada_por_operacao(config_falso):
     modelo = ModeloSequencial(
         respostas=[
             resposta(("_support/api.js", "// api")),
-            resposta(("crud.cy.js", "it('a')")),
-            resposta(("validacoes.cy.js", "it('b')")),
-            resposta(("seguranca.cy.js", "it('c')")),
+            resposta(("listar-pedidos.cy.js", "it('a')")),
+            resposta(("criar-pedidos.cy.js", "it('b')")),
         ]
     )
 
     saida = executar(config_falso, modelo, plano=plano_de_pedidos())
 
-    assert len(modelo.capturas) == 4, "uma chamada para _support e uma por spec"
+    assert len(modelo.capturas) == 3, "uma chamada para _support e uma por operação"
     assert sorted(a.caminho for a in saida.arquivos) == [
         "_support/api.js",
-        "crud.cy.js",
-        "seguranca.cy.js",
-        "validacoes.cy.js",
+        "criar-pedidos.cy.js",
+        "listar-pedidos.cy.js",
     ]
-    # A fatia de cada spec recebe SÓ os cenários das categorias dele.
-    entrada_validacoes = "\n".join(
+    # A fatia de cada operação leva TODAS as categorias daquele endpoint e nenhuma
+    # de outro — é exatamente a troca em relação ao fatiamento por categoria, que
+    # espalhava as categorias de um mesmo endpoint por três arquivos.
+    entrada_criar = "\n".join(
         str(m.content) for m in modelo.capturas[2] if isinstance(m, HumanMessage)
     )
-    assert "caso-CAT-02" in entrada_validacoes
-    assert "caso-CAT-01" not in entrada_validacoes, "cenário de CRUD vazou para validações"
+    assert "caso-CAT-01-post" in entrada_criar
+    assert "caso-CAT-02-post" in entrada_criar, "as categorias do endpoint ficam juntas"
+    assert "caso-CAT-10-get" not in entrada_criar, "cenário de outra operação vazou"
+
+
+def test_o_nome_do_spec_vem_do_endpoint_e_nao_do_modelo(config_falso):
+    """O modelo pode devolver o caminho que quiser: quem decide o arquivo é o código.
+
+    Sem isso o filtro da fatia não teria contra o que comparar, e duas chamadas
+    poderiam reivindicar o mesmo caminho sem ninguém notar no merge.
+    """
+    modelo = ModeloSequencial(
+        respostas=[
+            resposta(("_support/api.js", "// api")),
+            resposta(("pedidos-listagem.cy.js", "it('nome que o modelo inventou')")),
+            resposta(("criar-pedidos.cy.js", "it('b')")),
+        ]
+    )
+
+    saida = executar(config_falso, modelo, plano=plano_de_pedidos())
+
+    caminhos = {a.caminho for a in saida.arquivos}
+    assert "pedidos-listagem.cy.js" not in caminhos, "nome fora da fatia é descartado"
+    assert caminhos == {"_support/api.js", "criar-pedidos.cy.js"}
 
 
 def test_filtro_descarta_arquivo_fora_da_fatia(config_falso):
     """Chamada que 'aproveita' para reescrever outro arquivo não contamina o merge."""
     modelo = ModeloSequencial(
         respostas=[
-            resposta(("_support/api.js", "// api"), ("crud.cy.js", "// INTRUSO na fatia support")),
-            resposta(("crud.cy.js", "it('a')"), ("_support/api.js", "// INTRUSO na fatia crud")),
-            resposta(("validacoes.cy.js", "it('b')")),
-            resposta(("seguranca.cy.js", "it('c')")),
+            resposta(
+                ("_support/api.js", "// api"),
+                ("listar-pedidos.cy.js", "// INTRUSO na fatia support"),
+            ),
+            resposta(
+                ("listar-pedidos.cy.js", "it('a')"),
+                ("_support/api.js", "// INTRUSO na fatia do spec"),
+            ),
+            resposta(("criar-pedidos.cy.js", "it('b')")),
         ]
     )
 
@@ -171,7 +213,7 @@ def test_filtro_descarta_arquivo_fora_da_fatia(config_falso):
 
     conteudos = {a.caminho: a.conteudo for a in saida.arquivos}
     assert conteudos["_support/api.js"] == "// api"
-    assert conteudos["crud.cy.js"] == "it('a')"
+    assert conteudos["listar-pedidos.cy.js"] == "it('a')"
 
 
 def test_reparo_e_uma_chamada_que_nomeia_os_arquivos_das_violacoes(config_falso):

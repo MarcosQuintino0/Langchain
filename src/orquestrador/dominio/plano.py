@@ -28,12 +28,16 @@ from orquestrador.dominio.manifesto import Cat, Manifesto
 from orquestrador.dominio.recurso import NomeDeRecurso
 
 # A partição das 12 categorias em grupos. Nasceu como arquitetura dos arquivos do
-# executor (um spec por grupo) e virou também a unidade de pedido do planejador:
+# executor (um spec por grupo) e hoje é **só** a unidade de pedido do planejador:
 # planejar um grupo por chamada é o que mantém a resposta pedida pequena — medido
 # em 2026-08-10, o endpoint de listagem inteiro numa chamada estourou o teto de
-# saída do provedor (65.536 tokens, resposta cortada). Vive aqui, e não no
-# executor, porque os dois estágios precisam da MESMA partição: fatia de plano que
-# não bate com fatia de spec faria cenário trocar de arquivo entre os dois.
+# saída do provedor (65.536 tokens, resposta cortada).
+#
+# O executor deixou de fatiar por aqui: o spec passou a ser por operação, e o
+# arquivo de um cenário é decidido pelo ENDPOINT dele. As duas partições podiam
+# divergir porque o plano já é indexado por endpoint — vários grupos caem no mesmo
+# arquivo, e o destino de cada cenário continua determinístico. O que não pode
+# mudar é isto: o grupo é uma decisão de tamanho de resposta, não de arquivo.
 CATS_VALIDACOES: tuple[str, ...] = ("CAT-02", "CAT-03", "CAT-04", "CAT-05")
 CATS_SEGURANCA: tuple[str, ...] = ("CAT-06", "CAT-08", "CAT-09")
 CATS_CRUD: tuple[str, ...] = ("CAT-01", "CAT-07", "CAT-10", "CAT-11", "CAT-12")
@@ -93,6 +97,14 @@ class PlanoDoEndpoint(BaseModel):
     def cats_cobertas(self) -> set[str]:
         return {cenario.cat for cenario in self.cenarios}
 
+    def regras_citadas(self) -> list[str]:
+        """Ids de regra citados pelos cenários deste endpoint, na ordem do plano."""
+        vistos: dict[str, None] = {}
+        for cenario in self.cenarios:
+            if cenario.regra:
+                vistos.setdefault(cenario.regra, None)
+        return list(vistos)
+
     def render(self) -> str:
         linhas = [f"### {self.endpoint}", ""]
         linhas += [cenario.render() for cenario in self.cenarios]
@@ -112,6 +124,15 @@ class PlanoDeTestes(BaseModel):
             if parte.endpoint == endpoint:
                 return parte
         return None
+
+    def endpoints_das_cats(self, cats: set[str]) -> list[str]:
+        """Endpoints cujo plano tem ao menos um cenário de alguma dessas categorias.
+
+        É o que traduz uma violação de cobertura ("falta CAT-04") no arquivo que
+        deveria tê-la: com o spec por operação, quem sabe onde aquele teste mora é
+        o plano, porque foi ele que decidiu qual endpoint cobre qual categoria.
+        """
+        return [parte.endpoint for parte in self.endpoints if parte.cats_cobertas() & cats]
 
     def cenarios_das_cats(self, cats: tuple[str, ...]) -> str:
         """As linhas do plano cujas categorias caem em `cats`, agrupadas por endpoint.

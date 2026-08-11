@@ -1,5 +1,5 @@
 {
-  "descricao": "Primeira tentativa do executor: falta o spec-base seguranca.cy.js e falta o teste @campo situacao de CAT-03. O Gate B reprova com QAAPI-002 e QAAPI-025.",
+  "descricao": "Primeira tentativa do executor no layout por operação: um spec por endpoint (listar-pedidos, criar-pedidos) mais o _support. O passo único é reusado em todas as fatias, e o filtro de cada chamada seleciona o arquivo dela.",
   "passos": [
     {
       "tipo": "final",
@@ -11,12 +11,16 @@
             "conteudo": "/**\n * Operações HTTP do recurso pedidos.\n */\nimport { apiRequest } from \"../../../../support/api/client.js\";\n\nexport function listarPedidos() {\n  return apiRequest({ method: \"GET\", url: \"/pedidos\" });\n}\n\nexport function criarPedido(corpo) {\n  return apiRequest({ method: \"POST\", url: \"/pedidos\", body: corpo });\n}\n"
           },
           {
-            "caminho": "crud.cy.js",
-            "conteudo": "/**\n * Pedidos — fluxo principal de listagem e criação.\n */\nimport { criarPedido, listarPedidos } from \"./_support/api.js\";\n\ndescribe(\"pedidos — fluxo principal\", () => {\n  // @endpoint GET /pedidos @cat CAT-01 @alvo listagem-devolve-colecao\n  it(\"lista pedidos e devolve a coleção\", () => {\n    listarPedidos().then((resposta) => {\n      expect(resposta.status, \"status da listagem de pedidos\").to.eq(200);\n      expect(resposta.body, \"corpo da listagem de pedidos\").to.be.an(\"array\");\n    });\n  });\n\n  // @endpoint POST /pedidos @cat CAT-01 @alvo criacao-persistida\n  it(\"cria um pedido e devolve o registro criado\", () => {\n    criarPedido({ situacao: \"ABERTO\" }).then((resposta) => {\n      expect(resposta.status, \"status da criação de pedido\").to.eq(201);\n      expect(resposta.body.situacao, \"situação do pedido criado\").to.eq(\"ABERTO\");\n    });\n  });\n});\n"
+            "caminho": "_support/asserts.js",
+            "conteudo": "/**\n * Verificações que se repetem entre os specs de pedidos.\n */\nexport function validarPedidoCriado(criacao, enviado) {\n  expect(criacao.status, \"pedido com dados válidos deve ser criado\").to.eq(201);\n  expect(criacao.body.situacao, \"o pedido deve nascer na situação enviada\").to.eq(\n    enviado.situacao,\n  );\n}\n\nexport function validarCriacaoRecusada(resposta, motivo) {\n  expect(resposta.status, `criação de pedido deve ser recusada: ${motivo}`).to.eq(422);\n}\n"
           },
           {
-            "caminho": "validacoes.cy.js",
-            "conteudo": "/**\n * Pedidos — validações da superfície de entrada da criação.\n */\nimport { criarPedido } from \"./_support/api.js\";\n\ndescribe(\"pedidos — validações\", () => {\n  // @endpoint POST /pedidos @cat CAT-02 @campo situacao @alvo situacao-ausente\n  it(\"recusa a criação quando situacao é omitida\", () => {\n    criarPedido({}).then((resposta) => {\n      expect(resposta.status, \"status ao omitir situacao\").to.eq(400);\n    });\n  });\n\n  // @endpoint POST /pedidos @cat CAT-05 @alvo corpo-escalar\n  it(\"recusa corpo escalar na criação\", () => {\n    criarPedido(\"texto\").then((resposta) => {\n      expect(resposta.status, \"status ao enviar corpo escalar\").to.eq(400);\n    });\n  });\n});\n"
+            "caminho": "listar-pedidos.cy.js",
+            "conteudo": "import { listarPedidos } from \"./_support/api.js\";\n\ndescribe(\"Listar pedidos\", () => {\n  context(\"quando existem pedidos cadastrados\", () => {\n    // @endpoint GET /pedidos  @cat CAT-01\n    it(\"devolve a coleção de pedidos\", () => {\n      listarPedidos().then((consulta) => {\n        expect(consulta.status, \"a listagem de pedidos deve responder com sucesso\").to.eq(200);\n        expect(consulta.body, \"a listagem deve devolver uma coleção\").to.be.an(\"array\");\n      });\n    });\n  });\n});\n"
+          },
+          {
+            "caminho": "criar-pedidos.cy.js",
+            "conteudo": "import { criarPedido } from \"./_support/api.js\";\nimport { validarPedidoCriado } from \"./_support/asserts.js\";\n\ndescribe(\"Criar pedido\", () => {\n  context(\"quando os dados estão corretos\", () => {\n    // @endpoint POST /pedidos  @cat CAT-01\n    it(\"cria o pedido e devolve o registro criado\", () => {\n      const enviado = { situacao: \"ABERTO\" };\n\n      criarPedido(enviado).then((criacao) => {\n        validarPedidoCriado(criacao, enviado);\n      });\n    });\n  });\n});\n"
           }
         ]
       }

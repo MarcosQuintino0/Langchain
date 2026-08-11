@@ -2,17 +2,24 @@
 
 Não é um agente ReAct: são chamadas de LLM com entrada estruturada. Recebe o
 `cobertura.json` de **um recurso**, o plano de cenários do planejador, e emite os
-arquivos `.cy.js` — **um grupo de arquivos por chamada**, nunca a suíte inteira
-numa resposta.
+arquivos `.cy.js` — **um arquivo por chamada**, nunca a suíte inteira numa
+resposta.
 
 Por que fatiado: o tamanho da resposta pedida é o que separa pensamento saudável
 de espiral. Medido com o mesmo modelo e o mesmo recurso: a suíte inteira numa
 chamada travou 4 de 7 vezes (65.536 tokens de raciocínio, resposta nunca
-começada) e, quando saiu, veio resumida (22 testes); em quatro chamadas — o
-`_support/` e depois um spec por vez, cada um com a fatia do plano que lhe cabe —
-foram 139 testes, zero travamentos, raciocínio sempre com folga. O trabalho é
-mecânico se o plano for bom, e o Gate B pega os erros de forma determinística —
-por isso o modelo deste estágio pode ser mais barato que o do mapeador.
+começada) e, quando saiu, veio resumida (22 testes); fatiada — o `_support/` e
+depois um spec por vez — foram 139 testes, zero travamentos, raciocínio sempre
+com folga. O trabalho é mecânico se o plano for bom, e o Gate B pega os erros de
+forma determinística — por isso o modelo deste estágio pode ser mais barato que o
+do mapeador.
+
+**A fatia é a operação**, não o grupo de categorias. O arquivo passou a ser um por
+endpoint porque é assim que alguém procura um defeito ("criar cliente quebrou"),
+e a fatia acompanhou o arquivo: cada chamada escreve um spec inteiro, com todas
+as categorias daquele endpoint. O nome do arquivo é derivado do endpoint por
+`nomes_dos_specs` — quem nomeia é o código, e é isso que faz o filtro de fatia
+valer e o reparo achar o dono de uma violação.
 
 O reparo regenera **apenas os arquivos que as violações apontam**: reescrever a
 suíte inteira por causa de um `expect` sem mensagem é reabrir a porta da resposta
@@ -29,17 +36,12 @@ from langchain_core.language_models import BaseChatModel
 
 from orquestrador.agentes.guarda_de_orcamento import exigir_folga
 from orquestrador.config import Config
-from orquestrador.dominio.artefatos import ArquivoGerado, SaidaExecutor
+from orquestrador.dominio.artefatos import ArquivoGerado, SaidaExecutor, nomes_dos_specs
 from orquestrador.dominio.dossie import DossieDoRecurso
 from orquestrador.dominio.inventario import Inventario
 from orquestrador.dominio.limpeza import render_ausencias, render_limpeza
 from orquestrador.dominio.manifesto import Manifesto
-from orquestrador.dominio.plano import (
-    CATS_CRUD,
-    CATS_SEGURANCA,
-    CATS_VALIDACOES,
-    PlanoDeTestes,
-)
+from orquestrador.dominio.plano import PlanoDeTestes
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
 from orquestrador.dominio.veredito import Delta
@@ -63,21 +65,10 @@ ESTAGIO = "executor"
 # que o `executor.md` injeta e que o auditor consumirá pelo mesmo nome.
 NORMA_DE_CODIGO = "padrao-de-codigo-cypress"
 
-# A partição das 12 categorias entre os specs-base espelha a "Arquitetura dos
-# arquivos" do prompt: validações levam entrada/forma; segurança leva identidade;
-# o CRUD leva o resto. A definição mora em `dominio/plano.py` porque o planejador
-# fatia as chamadas pela MESMA partição — divergência faria cenário trocar de
-# arquivo entre o plano e o spec.
-
 # O código da categoria dentro da mensagem de uma violação QAORQ-030.
 _CAT_NA_MENSAGEM = re.compile(r"CAT-(?:0[1-9]|1[0-2])")
 
 PREFIXO_SUPPORT = "_support/"
-SPECS_BASE: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("crud.cy.js", CATS_CRUD),
-    ("validacoes.cy.js", CATS_VALIDACOES),
-    ("seguranca.cy.js", CATS_SEGURANCA),
-)
 
 
 def instrucao_do_estagio(
@@ -235,32 +226,30 @@ def _gerar_fatiado(
         or "(nenhum arquivo de _support foi gerado nesta tentativa)"
     )
 
-    # Fatias 2..n — um spec por chamada, com a fatia do plano e o _support à vista.
-    for nome, cats in SPECS_BASE:
-        fatia_do_plano = plano.cenarios_das_cats(cats)
-        if not fatia_do_plano.strip():
-            # Recurso sem cenários nessas categorias não tem esse spec — a
-            # arquitetura dos arquivos manda omitir, não criar arquivo vazio.
-            continue
+    # Fatias 2..n — um spec por OPERAÇÃO. O nome do arquivo é derivado do endpoint
+    # por código, e não escolhido pelo modelo: é o que faz o filtro `aceitos` valer
+    # (duas fatias jamais disputam o mesmo caminho) e o que deixa o reparo achar o
+    # dono de uma violação de cobertura.
+    nomes = nomes_dos_specs([parte.endpoint for parte in plano.endpoints])
+    for parte in plano.endpoints:
+        nome = nomes[parte.endpoint]
         gerados = _fatia(
             gerador,
             instrucao,
             recurso,
             base + f"\n## Fatia desta chamada: SOMENTE `{nome}`\n\n"
-            "Transcreva os cenários do plano abaixo em `it`s — cada linha do plano "
-            "vira um caso, na ordem, com a tag da categoria. Os arquivos "
-            "`_support/` JÁ EXISTEM com o conteúdo mostrado; importe deles.\n\n"
-            f"### Plano desta fatia\n\n{fatia_do_plano}"
-            + _regras_da_fatia(dossie, plano, cats)
+            f"Este arquivo cobre a operação `{parte.endpoint}`, e só ela. Transcreva "
+            "os cenários do plano abaixo em `it`s — cada linha vira um caso, na "
+            "ordem, com a tag da categoria — agrupados em `context` por "
+            "circunstância, como manda a norma. Os arquivos `_support/` JÁ EXISTEM "
+            "com o conteúdo mostrado; importe deles.\n\n"
+            f"### Plano desta fatia\n\n{parte.render()}"
+            + _regras_da_fatia(dossie, parte.regras_citadas())
             + f"\n\n### _support já gerado\n\n{suporte_texto}",
             tentativa=tentativa,
             aceitos=lambda caminho, nome=nome: caminho == nome,
             rotulo=nome,
-            endpoint=",".join(
-                parte.endpoint
-                for parte in plano.endpoints
-                if any(cenario.cat in cats for cenario in parte.cenarios)
-            ),
+            endpoint=parte.endpoint,
         )
         arquivos += gerados
 
@@ -288,18 +277,16 @@ def _contexto_do_suporte(dossie: DossieDoRecurso | None, inventario: Inventario 
     return "\n\n" + "\n\n".join(partes)
 
 
-def _regras_da_fatia(
-    dossie: DossieDoRecurso | None, plano: PlanoDeTestes, cats: tuple[str, ...]
-) -> str:
+def _regras_da_fatia(dossie: DossieDoRecurso | None, ids: list[str]) -> str:
     """As regras do dossiê que os cenários desta fatia citam — e só elas.
 
     A fatia diz o que transcrever; a regra diz o que o `espera` está provando e
-    com que evidência. Reenviar o dossiê inteiro em cada fatia pagaria o custo
-    três vezes; regra não citada por cenário nenhum não entra.
+    com que evidência. Reenviar o dossiê inteiro em cada fatia pagaria o custo uma
+    vez por operação; regra não citada por cenário nenhum não entra.
     """
-    if dossie is None:
+    if dossie is None or not ids:
         return ""
-    citadas = dossie.regras_por_id(plano.regras_citadas(cats))
+    citadas = dossie.regras_por_id(ids)
     if not citadas:
         return ""
     return "\n\n### Regras do dossiê citadas por esta fatia\n\n" + "\n\n".join(
@@ -364,16 +351,19 @@ def _reparar(
     # QAORQ-030 aponta o MANIFESTO (onde a categoria é declarada), não o spec que
     # deveria ter o teste — medido: sem esta tradução, o reparo nunca mirava o
     # arquivo certo e as três tentativas passavam sem escrever o `it` cobrado.
-    # Quem sabe qual spec é dono de cada categoria é a partição de SPECS_BASE.
+    # Com o spec por operação quem sabe onde o teste mora é o PLANO: foi ele que
+    # decidiu qual endpoint cobre qual categoria, e o endpoint decide o arquivo.
+    # É mais preciso do que a tabela que existia aqui, que implicava um spec
+    # inteiro — e todos os endpoints dele — por causa de uma categoria só.
     cats_faltantes: set[str] = set()
     for violacao in delta.violacoes:
         if violacao.codigo != "QAORQ-030":
             continue
         for casamento in _CAT_NA_MENSAGEM.finditer(violacao.mensagem):
             cats_faltantes.add(casamento.group(0))
-    for nome_spec, cats in SPECS_BASE:
-        if cats_faltantes & set(cats):
-            implicados.add(nome_spec)
+    if plano is not None and cats_faltantes:
+        nomes = nomes_dos_specs([parte.endpoint for parte in plano.endpoints])
+        implicados.update(nomes[endpoint] for endpoint in plano.endpoints_das_cats(cats_faltantes))
 
     ordenados = sorted(implicados)
     if ordenados:
