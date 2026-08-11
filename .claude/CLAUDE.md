@@ -22,6 +22,35 @@ silêncio.
   nada de lá. Não a invoque, não a edite, não copie trecho dela para cá — nem para
   consultar como algo era feito. O regime dela está no `AGENTS.md`.
 
+## Quando o usuário pedir "rode a suíte inteira"
+
+O procedimento — comandos, backend, recursos, e a tabela de onde tirar cada
+número — está em **"A suíte completa com o modelo real"**, no `AGENTS.md`. Não
+está repetido aqui de propósito: são instruções que mudam junto com a CLI, e duas
+cópias divergem sem avisar. O que segue é só o que é seu, como agente.
+
+**Nunca dispare essa execução por iniciativa própria.** Ela gasta dinheiro do
+usuário e leva dezenas de minutos. "Rodar a suíte" numa frase sobre testes
+costuma significar `python -m pytest`; a suíte paga é a que tem `--recurso` e
+chama o provedor. Na dúvida entre as duas, pergunte.
+
+**Rode em segundo plano** e diga ao usuário como acompanhar o log ao vivo:
+
+```powershell
+Get-Content -Wait .execucoes\<run_id>\execucao.jsonl
+```
+
+**O relatório é o entregável, não a execução.** Terminar a suíte e responder "deu
+certo" é não ter feito a tarefa: o motivo de gastar é comparar com a execução
+anterior. Traga sempre dólares, tokens, tempo e tentativas por gate, e compare
+com o run anterior pelo `execucoes comparar`. Se algum número não existir, diga
+qual e por quê — não preencha lacuna com estimativa apresentada como medição.
+
+**Não confunda "a suíte passou" com "os testes ficaram bons".** O código de saída
+diz que os gates aprovaram. Se o usuário mudou prompt, fatiamento ou modelo, ele
+quer saber o que mudou no conteúdo: quantos `it` por categoria, se o cleanup
+continua conferindo o resultado, se algum endpoint ficou sem cobertura.
+
 ## Sem `.claude/rules/`
 
 Não crie regras em `.claude/rules/`. Hoje elas seriam cópia concorrente do

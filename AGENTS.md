@@ -194,6 +194,95 @@ declarava — passaram a pular em toda máquina, e ninguém percebeu, porque su�
 verde com casos pulados parece suíte verde. O `-rs` diz o motivo de cada pulo:
 leia-o.
 
+Nada acima chama o provedor. Para isso existe a seção seguinte.
+
+---
+
+## A suíte completa com o modelo real
+
+Esta é a verificação que **gasta dinheiro e leva dezenas de minutos**: o pipeline
+inteiro, contra o backend de referência, com o DeepSeek respondendo de verdade. É
+o único jeito de saber se uma mudança melhorou ou piorou a qualidade dos testes
+gerados — o `--dry-run` prova o encanamento, não o julgamento do modelo.
+
+**Só rode quando o usuário pedir.** Ele custa, e a decisão de gastar é dele.
+
+### Antes de rodar
+
+```powershell
+python -m orquestrador doctor
+```
+
+Os dez itens precisam estar OK. Depois, a régua de tamanho, que não chama modelo
+nenhum e diz a ordem de grandeza do que você está prestes a gastar:
+
+```powershell
+python -m orquestrador --estimar
+```
+
+### O alvo
+
+Tudo já está no [`config.toml`](config.toml) versionado; não invente caminho nem
+troque de backend sem o usuário pedir.
+
+| O quê | Onde |
+| --- | --- |
+| Backend de referência | `C:\LangChainTestes-01\Backend-` (Java/Spring, 27 endpoints em 5 controllers) |
+| Projeto Cypress que recebe os testes | `C:\LangChainTestes-01\projeto-de-testes` |
+| Recursos | `customers` e `products` — são os nomes reais, e `--recurso` é obrigatório numa execução real |
+| Onde os specs aparecem | `<projeto>/cypress/e2e/apis/<recurso>/` |
+| Artefatos e log da execução | `.execucoes/<run_id>/` |
+
+### O comando
+
+```powershell
+python -m orquestrador --recurso customers --recurso products
+```
+
+Rode-o **em segundo plano** e acompanhe: são dezenas de minutos, e prender o
+terminal impede o usuário de ver o log enquanto anda. O JSONL vai sendo escrito
+durante a execução, então dá para seguir com `Get-Content -Wait`.
+
+Acrescente `--rodar-cypress` **só se o usuário pedir**: ele executa a suíte
+gerada de verdade e exige Node e um `[execucao].cypress` configurado. Sem essa
+flag, a cobertura relatada é estática — e o resumo final diz isso, em vermelho.
+
+### O relatório é obrigatório
+
+Uma execução sem números não serviu para nada: o motivo de rodá-la é comparar
+com a anterior. **Sempre entregue, sem o usuário precisar pedir:**
+
+| Dado | De onde tirar |
+| --- | --- |
+| Dólares gastos | `orquestrador execucoes listar` → coluna `US$`. É o valor que o **provedor** reportou, não estimativa nossa |
+| Tokens por estágio, com cache e raciocínio | tabelas impressas no fim da execução |
+| Tempo por estágio | coluna `tempo (s)` da tabela por estágio |
+| Tempo total | `orquestrador execucoes mostrar <run_id>` → `duracao_s` |
+| Chamadas, falhas de requisição e tools | mesma saída do `mostrar` |
+| Tentativas de cada gate | o resumo final: `N tentativa(s)` por estágio |
+| Testes gerados | quantos `it` em cada spec de `cypress/e2e/apis/<recurso>/` |
+| Ambiente e modelo de cada estágio | `.execucoes/<run_id>/manifesto-execucao.json` |
+
+```powershell
+python -m orquestrador execucoes listar
+python -m orquestrador execucoes listar --historico
+python -m orquestrador execucoes mostrar <run_id>
+python -m orquestrador execucoes comparar <run_id_antes> <run_id_depois>
+```
+
+O `comparar` é o que responde "melhorou?", e o `--historico` mostra a tendência
+ao longo das execuções. Os dois existem para não se comparar execução com
+lembrança — e lembrança de custo é sempre otimista.
+
+O `--json` de qualquer um deles serve para colar num relatório sem redigitar
+número, que é como se introduz erro de transcrição num dado que custou dinheiro
+para obter.
+
+**Relate o que deu errado com o mesmo destaque do que deu certo**: gate que
+esgotou tentativas, recurso reprovado, requisição que falhou, campo ausente no
+manifesto. Uma execução que terminou com `sucesso: false` e um relatório que só
+mostra tokens é pior que nenhum relatório.
+
 **Toda correção de bug inclui um teste que falha antes e passa depois.** Escreva o
 teste primeiro e veja-o falhar — teste escrito depois costuma provar o código, não o
 comportamento.

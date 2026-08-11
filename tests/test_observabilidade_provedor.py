@@ -77,6 +77,89 @@ def test_callback_mede_cada_requisicao_e_atribui_endpoint_e_fatia():
     assert chamada.request_id == "req-123"
 
 
+def test_custo_e_lido_de_dentro_do_bloco_de_uso():
+    """O OpenRouter põe `cost` dentro de `usage`, não no topo da resposta.
+
+    O formato abaixo é o que a sonda contra o provedor real devolveu: o LangChain
+    reexporta o objeto `usage` como `response_metadata["token_usage"]`, e o `cost`
+    viaja dentro dele. Lendo só o nível de cima, `custo_reportado` era `None` em
+    TODA chamada — e a coluna `US$` do `orquestrador execucoes listar`, o
+    somatório de `resumir_execucao` e o campo do evento existiam completos sem
+    nunca mostrar um número. Era o único dado autoritativo de gasto que temos: o
+    resto é estimativa por token.
+    """
+    registro = RegistroFalso()
+    telemetria = Telemetria(registro)
+    observador = ObservadorDeProvedor(
+        telemetria=telemetria,
+        registro=registro,
+        estagio="mapeador",
+        recurso="pedidos",
+        tentativa=1,
+        modelo="modelo-configurado",
+    )
+    run_id = uuid4()
+    observador.on_chat_model_start({}, [[HumanMessage(content="entrada")]], run_id=run_id)
+    observador.on_llm_end(
+        LLMResult(
+            generations=[
+                [
+                    ChatGeneration(
+                        message=AIMessage(
+                            content="ok",
+                            response_metadata={
+                                "token_usage": {
+                                    "prompt_tokens": 9,
+                                    "completion_tokens": 2,
+                                    "cost": 1.0374e-06,
+                                    "cost_details": {"upstream_inference_cost": 1.0374e-06},
+                                },
+                                "finish_reason": "stop",
+                            },
+                        )
+                    )
+                ]
+            ]
+        ),
+        run_id=run_id,
+    )
+
+    assert telemetria.chamadas[0].custo_reportado == 1.0374e-06
+
+
+def test_custo_no_topo_tem_precedencia_sobre_o_do_bloco_de_uso():
+    """Provedor direto pode reportar no topo; o valor explícito ali é o mais específico."""
+    registro = RegistroFalso()
+    telemetria = Telemetria(registro)
+    observador = ObservadorDeProvedor(
+        telemetria=telemetria,
+        registro=registro,
+        estagio="mapeador",
+        recurso="pedidos",
+        tentativa=1,
+        modelo="modelo-configurado",
+    )
+    run_id = uuid4()
+    observador.on_chat_model_start({}, [[HumanMessage(content="entrada")]], run_id=run_id)
+    observador.on_llm_end(
+        LLMResult(
+            generations=[
+                [
+                    ChatGeneration(
+                        message=AIMessage(
+                            content="ok",
+                            response_metadata={"cost": 0.5, "token_usage": {"cost": 0.1}},
+                        )
+                    )
+                ]
+            ]
+        ),
+        run_id=run_id,
+    )
+
+    assert telemetria.chamadas[0].custo_reportado == 0.5
+
+
 def test_callback_registra_falha_sem_transcrever_a_excecao():
     registro = RegistroFalso()
     observador = ObservadorDeProvedor(

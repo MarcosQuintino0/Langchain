@@ -81,6 +81,28 @@ def _metadados(mensagem: BaseMessage | None) -> dict[str, Any]:
     return cast(dict[str, Any], getattr(mensagem, "response_metadata", None) or {})
 
 
+def _custo_reportado(meta: dict[str, Any]) -> float | None:
+    """O gasto em dólares que o provedor informou, onde quer que ele o ponha.
+
+    O OpenRouter devolve `cost` **dentro de `usage`**, e o LangChain reexporta
+    esse objeto como `response_metadata["token_usage"]`. Ler só o nível de cima
+    achava `None` em toda chamada: o campo `custo_reportado`, o somatório em
+    `resumir_execucao` e a coluna `US$` do `orquestrador execucoes listar`
+    existiam completos e nunca mostravam um número.
+
+    O nível de cima continua sendo consultado primeiro porque é onde um provedor
+    direto (sem roteador) naturalmente o colocaria, e porque um valor explícito
+    ali é mais específico que o do bloco de uso.
+    """
+    for origem in (meta, meta.get("token_usage")):
+        if not isinstance(origem, dict):
+            continue
+        valor = cast(dict[str, Any], origem).get("cost")
+        if isinstance(valor, int | float) and not isinstance(valor, bool):
+            return float(valor)
+    return None
+
+
 class ObservadorDeProvedor(BaseCallbackHandler):
     """Transforma callbacks LangChain em eventos e medidas por request."""
 
@@ -163,8 +185,7 @@ class ObservadorDeProvedor(BaseCallbackHandler):
         status = status_bruto if isinstance(status_bruto, int) else None
         finish_reason = str(meta.get("finish_reason") or meta.get("stop_reason") or "")
         provedor = str(meta.get("provider") or meta.get("model_provider") or "")
-        custo_bruto = meta.get("cost")
-        custo = float(custo_bruto) if isinstance(custo_bruto, int | float) else None
+        custo = _custo_reportado(meta)
         uso = _uso(mensagem, response)
         chamada = RegistroDeChamada(
             estagio=self.estagio,

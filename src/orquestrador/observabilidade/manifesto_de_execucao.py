@@ -7,7 +7,7 @@ que é dono da composição da execução.
 
 O problema que ele resolve: hoje "ontem passou, hoje falhou" não tem resposta. O
 `execucao.jsonl` diz o que o pipeline fez; ele não diz em cima de qual commit do
-backend, com qual versão de Node, com quais prompts. `manifesto-execucao.json`
+backend, com qual versão do extrator, com quais prompts. `manifesto-execucao.json`
 fecha essa lacuna — é o cabeçalho de um chamado de suporte.
 
 Três invariantes, e nenhuma delas é negociável
