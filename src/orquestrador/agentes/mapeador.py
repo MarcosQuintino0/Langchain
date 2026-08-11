@@ -55,6 +55,7 @@ from orquestrador.dominio.notas import (
     endpoints_das_notas,
     endpoints_nao_citados,
     rotas_dinamicas_das_notas,
+    schemas_das_notas,
 )
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import Delta, Violacao
@@ -520,7 +521,27 @@ def _serializar(
             fatia=f"fatia:{fatia}",
         )
 
-    pendentes = [fatia for fatia in FATIAS_DE_MODELO if base is None or fatia in fatias_alvo]
+    # Schemas por código, como o inventário: o contrato das notas manda colar o
+    # conteúdo JSON completo, e pagar o modelo para redigitá-lo era desperdício
+    # medido (9,5k tokens de raciocínio numa amostra, transcrevendo dois arquivos
+    # já escritos). Só no caminho sem delta: reparo de gate sobre schemas
+    # significa que o que estava nas notas não bastou, e aí é o modelo que
+    # trabalha, com as violações à vista.
+    schemas_de_codigo: FatiaDeSchemas | None = None
+    if delta is None:
+        colados = schemas_das_notas(notas)
+        if colados is not None:
+            try:
+                schemas_de_codigo = FatiaDeSchemas(schemas=colados)
+            except ValidationError:
+                schemas_de_codigo = None
+
+    pendentes = [
+        fatia
+        for fatia in FATIAS_DE_MODELO
+        if (base is None or fatia in fatias_alvo)
+        and not (fatia == "schemas" and schemas_de_codigo is not None)
+    ]
     # Mesmo arranjo do planejador: tarefas independentes por construção, cópia de
     # contexto POR TAREFA (thread nova nasce com contexto vazio e o span do
     # recurso não atravessaria), resultados na ordem das tarefas.
@@ -540,7 +561,7 @@ def _serializar(
 
     manifesto = resultados.get("manifesto") or (base.manifesto if base else None)
     dossie = resultados.get("dossie") or (base.dossie if base else None)
-    fatia_schemas = resultados.get("schemas")
+    fatia_schemas = resultados.get("schemas") or schemas_de_codigo
     schemas = (
         fatia_schemas.schemas
         if isinstance(fatia_schemas, FatiaDeSchemas)

@@ -21,21 +21,28 @@ vale inteira — nada aqui abre arquivo nem conhece estágio.
 
 from __future__ import annotations
 
+import json
 import re
 
+from pydantic import ValidationError
+
+from orquestrador.dominio.artefatos import ArquivoSchema
 from orquestrador.dominio.endpoint import normalizar_endpoint
 from orquestrador.dominio.inventario import Endpoint, RotaDinamica
 
 __all__ = [
     "SECAO_ENDPOINTS",
     "SECAO_ROTAS_DINAMICAS",
+    "SECAO_SCHEMAS",
     "endpoints_das_notas",
     "endpoints_nao_citados",
     "rotas_dinamicas_das_notas",
+    "schemas_das_notas",
 ]
 
 SECAO_ENDPOINTS = "## Endpoints do recurso"
 SECAO_ROTAS_DINAMICAS = "## Rotas dinâmicas não resolvidas"
+SECAO_SCHEMAS = "## Schemas de entrada"
 
 # `- MÉTODO /rota | handler nome | arquivo[:linha]` — o formato da semente. A
 # palavra `handler` é opcional no parse: medido na primeira execução real, o
@@ -126,6 +133,66 @@ def rotas_dinamicas_das_notas(notas: str) -> list[RotaDinamica]:
             )
         )
     return nao_resolvidas
+
+
+def schemas_das_notas(notas: str) -> list[ArquivoSchema] | None:
+    """Os schemas de entrada colados nas notas, prontos para o artefato.
+
+    O contrato das notas manda o explorador colar o conteúdo JSON completo de
+    cada schema; pagar um modelo para redigitá-lo era desperdício medido —
+    9,5 mil tokens de raciocínio numa amostra para transcrever dois arquivos que
+    já estavam escritos. Como no inventário: o que já está decidido e escrito,
+    código copia.
+
+    `None` significa "não dá para confiar no parse" (seção ausente, JSON quebrado,
+    caminho inválido) e manda o chamador ao fallback de modelo. Lista vazia é
+    resultado legítimo: recurso sem endpoint de escrita não emite schema. A regra
+    é tudo-ou-nada de propósito — uma lista parcial passaria por completa e o
+    schema faltante viraria reprovação tardia no gate, longe da causa.
+    """
+    corpo = _secao(notas, SECAO_SCHEMAS)
+    if not corpo:
+        return None
+
+    encontrados: list[ArquivoSchema] = []
+    caminho_atual: str | None = None
+    fence: list[str] | None = None
+    for linha in corpo:
+        texto = linha.strip()
+        if fence is not None:
+            if texto.startswith("```"):
+                if caminho_atual is None:
+                    return None
+                conteudo = "\n".join(fence).strip()
+                try:
+                    json.loads(conteudo)
+                    encontrados.append(
+                        ArquivoSchema(caminho=caminho_atual, conteudo=conteudo + "\n")
+                    )
+                except (ValueError, ValidationError):
+                    return None
+                caminho_atual = None
+                fence = None
+            else:
+                fence.append(linha)
+            continue
+        if texto.startswith("###"):
+            achado = _CAMINHO_DE_SCHEMA.search(texto)
+            caminho_atual = achado.group("caminho") if achado else None
+            if caminho_atual is None:
+                # Um `###` na seção que não nomeia schema é forma que o parser não
+                # entende — melhor o fallback do que adivinhar.
+                return None
+        elif texto.startswith("```"):
+            fence = []
+    if fence is not None:
+        return None
+    return encontrados
+
+
+# O caminho dentro do título `###`: primeiro token terminado em `.schema.json`,
+# com ou sem crases, ignorando anotações depois dele.
+_CAMINHO_DE_SCHEMA = re.compile(r"`?(?P<caminho>\S+?\.schema\.json)`?")
 
 
 def endpoints_nao_citados(notas: str, canonicos: list[str]) -> list[str]:

@@ -251,14 +251,17 @@ def test_explora_em_notas_e_serializa_por_fatias(config_falso, monkeypatch):
     # A exploração passou pelo agente (com tools) e devolveu texto, não JSON.
     assert exploracao.chamadas, "a exploração precisa ter acontecido"
     assert produzido.notas == partes["notas"]
-    # Cada fatia foi chamada uma vez, sem tools, com as notas na entrada.
-    for fatia in ("manifesto", "dossie", "schemas"):
+    # As fatias de julgamento foram chamadas uma vez cada, sem tools.
+    for fatia in ("manifesto", "dossie"):
         assert len(modelos[fatia].chamadas) == 1, fatia
         assert modelos[fatia].com_tools is False
         entrada = "\n".join(str(m.content) for m in modelos[fatia].chamadas[0])
         assert "Notas de descoberta" in entrada
-    # O inventário veio por código, do parse das notas — o fallback nunca rodou.
+    # Inventário E schemas vieram por código, do parse das notas: as notas da
+    # fixture colam o conteúdo completo, então nenhum modelo é pago para copiar.
     assert modelos["inventario"].chamadas == []
+    assert modelos["schemas"].chamadas == []
+    assert [s.caminho for s in produzido.saida.schemas] == ["pedidos/entidade.schema.json"]
     assert [e.canonico for e in produzido.saida.inventario.endpoints] == [
         "GET /pedidos",
         "POST /pedidos",

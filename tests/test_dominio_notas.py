@@ -14,6 +14,7 @@ from orquestrador.dominio.notas import (
     endpoints_das_notas,
     endpoints_nao_citados,
     rotas_dinamicas_das_notas,
+    schemas_das_notas,
 )
 
 pytestmark = pytest.mark.unit
@@ -93,6 +94,51 @@ def test_rotas_dinamicas_ignoram_o_marcador_de_nenhuma():
     assert rotas[0].arquivo == "src/rotas.js"
     assert rotas[0].linha == 12
     assert rotas[0].motivo == "prefixo calculado em runtime"
+
+
+SECAO_DE_SCHEMAS = """## Schemas de entrada
+
+### pedidos/entidade.schema.json (POST — PedidoDto.Create)
+```json
+{"type": "object", "properties": {"situacao": {"type": "string"}}}
+```
+
+### `pedidos/patch.schema.json`
+```json
+{"type": "object"}
+```
+
+## Regras de negócio
+- RN-01: irrelevante para esta seção
+"""
+
+
+def test_schemas_colados_nas_notas_saem_por_codigo():
+    """O conteúdo é copiado byte a byte — redigitar por modelo era o desperdício."""
+    schemas = schemas_das_notas(SECAO_DE_SCHEMAS)
+
+    assert schemas is not None
+    assert [s.caminho for s in schemas] == [
+        "pedidos/entidade.schema.json",
+        "pedidos/patch.schema.json",
+    ]
+    assert '"situacao"' in schemas[0].conteudo
+    assert schemas[0].conteudo.endswith("\n")
+
+
+def test_secao_de_schemas_ausente_manda_ao_fallback():
+    assert schemas_das_notas("## Regras de negócio\n- RN-01") is None
+
+
+def test_json_quebrado_invalida_o_parse_inteiro():
+    """Tudo-ou-nada: lista parcial passaria por completa e viraria gate tardio."""
+    quebrado = SECAO_DE_SCHEMAS.replace('{"type": "object"}', "{type: quebrado")
+    assert schemas_das_notas(quebrado) is None
+
+
+def test_secao_presente_e_vazia_e_resultado_legitimo():
+    """Recurso sem endpoint de escrita não emite schema — vazio não é falha."""
+    assert schemas_das_notas("## Schemas de entrada\n\nnenhum\n\n## Erros por endpoint") == []
 
 
 def test_guarda_de_citacao_aceita_mencao_em_qualquer_secao():
