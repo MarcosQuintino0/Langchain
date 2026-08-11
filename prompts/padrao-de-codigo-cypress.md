@@ -75,6 +75,29 @@ específica ou limpeza; `asserts.js` quando uma verificação se repetir — ver
 de um cenário só fica no próprio teste. Todo export precisa de consumidor dentro do
 recurso, e todo import relativo precisa resolver.
 
+**O endereço da API e a montagem da request não são seus.** Eles vêm dos módulos
+compartilhados que o projeto já tem (o client HTTP, o mapa de rotas, a autenticação),
+listados na seção da superfície. Rota literal dentro do recurso é duplicação que
+some do lugar onde alguém iria procurar quando a rota mudar.
+
+## Nada de comando customizado do Cypress
+
+Não escreva `Cypress.Commands.add`. As operações do recurso são funções importadas
+de `_support/api.js`, e ponto.
+
+São três motivos, e o terceiro é o que decide:
+
+1. `cy.criarCliente()` aparece do nada — quem lê não sabe onde a função mora nem o
+   que ela faz. `import { criarCliente } from "./_support/api.js"` é clicável.
+2. Comando global vale para o projeto inteiro, então uma mudança sua atinge suítes
+   de outros recursos que você não leu.
+3. **Comando global não é verificável.** Se tudo é global, nenhum gate consegue
+   provar que um spec respeitou as camadas — a regra vira honra, e honra não reprova.
+
+A própria documentação do Cypress recomenda comando customizado só para o que é
+usado em quase toda suíte e precisa encadear. Nada do que este recurso faz se
+qualifica.
+
 ## A estrutura: três níveis, sempre os mesmos
 
 ```js
@@ -174,9 +197,16 @@ importa, porque quem lê o spec não vê aquela linha — e é lá que ela costu
 
 ## Identificadores e encadeamento
 
-- **Nenhum nome de uma letra.** `criacao`, `consulta`, `resposta` — nunca `r`, `c`.
-- O spec não navega estrutura crua fora de uma asserção com mensagem: nada de
-  `resposta.body.items[0].id` solto no meio do teste. Dê nome ao valor.
+- **Nenhum nome de uma letra**, em lugar nenhum — parâmetro de `.then`, variável,
+  argumento de `forEach`. `criacao`, `consulta`, `resposta`; nunca `r`, `c`, `x`.
+  Quem lê `r.body.id` precisa subir três linhas para descobrir o que é `r`. `QAORQ-077`
+- **Quem interpreta resposta é a camada de verificação, não o spec.** `.status`
+  nunca aparece no spec fora de um `expect` com mensagem: ler status é julgar o
+  resultado, e julgar é trabalho do `asserts.js`. `QAORQ-073`
+- `.body` o spec pode ler, mas só para **pegar um valor e seguir** — o id recém-criado
+  que a próxima chamada precisa. Ler `.body` para decidir se está certo é a mesma
+  violação, escrita de outro jeito. E nada de `resposta.body.items[0].nome` solto no
+  meio do teste: dê nome ao valor antes de usá-lo.
 - Abra `.then` só para **ler um valor resolvido**. O Cypress já enfileira comandos
   na ordem em que aparecem; `.then` para ordenar é ruído.
 - No máximo **dois níveis** de aninhamento (criar → agir → reler). Precisou de três,
@@ -206,9 +236,25 @@ texto — com significado dado por constante nomeada em português
 (`const STATUS_CANCELADO = "CANCELLED";`), preservando o literal. Chaves de payload
 e de resposta ficam idênticas às do backend.
 
-**Nenhuma URL, credencial, token ou senha literal no código.** Endereço de API e
-identidade vêm da configuração do projeto (`Cypress.env`, variáveis `CYPRESS_*`);
-segredo nunca entra em spec, factory, fixture ou log. `QAORQ-075`
+**Nenhuma URL, credencial, token ou senha literal no código.** `QAORQ-075`
+
+E **não crie arquivo `.env`.** O Cypress não lê `.env`; ele lê sozinho qualquer
+variável de ambiente prefixada com `CYPRESS_`, e a entrega em `Cypress.env()`:
+
+```
+CYPRESS_apiUrl=https://api.homolog.exemplo.com
+CYPRESS_senhaDoUsuarioDeTeste=...
+```
+
+```js
+const url = Cypress.env("apiUrl");
+```
+
+Assim o segredo nunca vira arquivo — não há o que esquecer no `.gitignore`, e o CI
+injeta pelo próprio cofre de variáveis. Um `.env` criado por conveniência é a via
+mais comum de credencial de homologação chegar ao repositório.
+
+Segredo nunca entra em spec, factory, fixture, título de teste ou log.
 
 Mascare `Authorization`, `Cookie`, `password`, `accessToken`, `refreshToken` e
 equivalentes ao registrar qualquer coisa. Nada de `cy.log(JSON.stringify(resposta))`
@@ -293,6 +339,146 @@ it('recusa o cadastro com e-mail sem arroba', () => {});
 A tag é índice, não oráculo: declara o que o teste pretende cobrir; quem prova é a
 asserção.
 
+## Um exemplo completo
+
+Uma operação inteira, das camadas ao teste. Os nomes de `apiRequest`, `RotasApi` e
+`tokenPadrao` aqui são ilustrativos — use os que a seção da superfície listar.
+
+```js
+// _support/api.js — as operações do recurso. Nenhuma asserção, nenhum cy.request.
+import { apiRequest } from "../../../../support/api/client.js";
+import { RotasApi } from "../../../../support/api/rotas.js";
+
+export function criarCliente({ token, corpo }) {
+  return apiRequest({ metodo: "POST", url: RotasApi.customers.raiz, corpo, token });
+}
+
+export function obterCliente({ token, id }) {
+  return apiRequest({ metodo: "GET", url: RotasApi.customers.porId(id), token });
+}
+```
+
+```js
+// _support/factories.js — só entradas. Nada persistido, nenhuma request.
+export function clienteValido(sobrescritas = {}) {
+  return {
+    externalCode: `EXT-${Date.now()}`,
+    name: "Cliente Exemplo",
+    email: "cliente@exemplo.com",
+    ...sobrescritas,
+  };
+}
+
+export function clienteSemEmail() {
+  const { email, ...semEmail } = clienteValido();
+  return semEmail;
+}
+```
+
+```js
+// _support/helpers.js — cria massa de verdade e registra a limpeza. Sem oráculo.
+import { criarCliente, excluirCliente } from "./api.js";
+
+const criados = [];
+
+export function criarClienteParaTeste({ token, corpo }) {
+  return criarCliente({ token, corpo }).then((criacao) => {
+    // Registrado ANTES de qualquer verificação: asserção que falha interrompe o
+    // teste, e o cliente já existe no banco mesmo assim.
+    if (criacao.body && criacao.body.id) {
+      criados.push({ id: criacao.body.id, token });
+    }
+    return criacao;
+  });
+}
+
+export function limparClientesCriados() {
+  const falhas = [];
+  while (criados.length) {
+    const { id, token } = criados.pop();
+    excluirCliente({ token, id }).then((exclusao) => {
+      if (exclusao.status !== 204) falhas.push(`${id}: ${exclusao.status}`);
+    });
+  }
+  cy.then(() => {
+    expect(falhas, "toda massa criada pelo teste precisa ser apagada").to.be.empty;
+  });
+}
+```
+
+```js
+// _support/asserts.js — recebe resposta pronta. Nunca faz request.
+export function validarClienteCadastrado(criacao, enviado) {
+  expect(criacao.status, "cliente com dados válidos deve ser cadastrado").to.equal(201);
+  expect(criacao.body.name, "o nome salvo deve ser o que foi enviado").to.equal(enviado.name);
+  expect(criacao.body.id, "o cadastro deve devolver o identificador criado").to.be.a("string");
+}
+
+export function validarCadastroRecusado(resposta, motivo) {
+  expect(resposta.status, `cadastro deve ser recusado: ${motivo}`).to.equal(422);
+  expect(resposta.body.erros, `a resposta deve dizer o que está errado: ${motivo}`).to.not.be.empty;
+}
+```
+
+```js
+// criar-cliente.cy.js
+import { obterCliente } from "./_support/api.js";
+import { clienteValido, clienteSemEmail } from "./_support/factories.js";
+import { criarClienteParaTeste, limparClientesCriados } from "./_support/helpers.js";
+import { validarClienteCadastrado, validarCadastroRecusado } from "./_support/asserts.js";
+import { tokenPadrao, tokenSemPermissao } from "../../../support/api/auth.js";
+
+describe("Criar cliente", () => {
+  afterEach(() => {
+    limparClientesCriados();
+  });
+
+  context("quando os dados estão corretos", () => {
+    // @endpoint POST /api/v1/customers  @cat CAT-01
+    it("cadastra o cliente e devolve os dados salvos", () => {
+      // Arrange: um cliente completo e uma identidade com permissão
+      const token = tokenPadrao();
+      const corpo = clienteValido();
+
+      // Act:
+      criarClienteParaTeste({ token, corpo }).then((criacao) => {
+        // Assert: a resposta confirma, e a releitura prova que ficou salvo
+        validarClienteCadastrado(criacao, corpo);
+
+        obterCliente({ token, id: criacao.body.id }).then((consulta) => {
+          expect(consulta.body.name, "o cliente salvo deve continuar lá depois").to.equal(corpo.name);
+        });
+      });
+    });
+  });
+
+  context("quando os dados estão errados", () => {
+    // @endpoint POST /api/v1/customers  @cat CAT-02  @campo email
+    it("recusa o cadastro sem e-mail", () => {
+      criarClienteParaTeste({ token: tokenPadrao(), corpo: clienteSemEmail() }).then((resposta) => {
+        validarCadastroRecusado(resposta, "e-mail é obrigatório");
+      });
+    });
+  });
+
+  context("quando quem está chamando não tem permissão", () => {
+    // @endpoint POST /api/v1/customers  @cat CAT-08
+    it("recusa o cadastro de quem não pode criar clientes", () => {
+      criarClienteParaTeste({ token: tokenSemPermissao(), corpo: clienteValido() }).then(
+        (resposta) => {
+          expect(resposta.status, "quem não tem permissão não deve cadastrar").to.equal(403);
+        },
+      );
+    });
+  });
+});
+```
+
+Repare no que o spec **não** tem: nenhum `cy.request`, nenhuma rota escrita à mão,
+nenhum status interpretado fora de um `expect` com mensagem, nenhum `if`. E repare
+no que ele tem: os três níveis lidos como frase, e cada `it` dizendo o que prova
+antes de qualquer um abrir o corpo.
+
 ## O que nunca se produz
 
 - `it.only`, `.skip`, teste vazio ou só comentado;
@@ -324,7 +510,8 @@ automaticamente.
 | `QAORQ-070` | `it` fora de `context`, `context` que não começa com "quando", quarto nível de aninhamento |
 | `QAORQ-071` | título com verbo proibido, acima de 80 caracteres, repetido no mesmo `context`, citando `CAT-xx`, ou cujo resultado é só um número |
 | `QAORQ-072` | `expect` sem mensagem |
-| `QAORQ-073` | spec importando de camada proibida, ou falando HTTP direto |
+| `QAORQ-073` | spec falando HTTP direto, importando de camada proibida, lendo `.status` fora de um `expect`, ou declarando `Cypress.Commands.add` |
 | `QAORQ-074` | espera de tempo fixo, ou condicional decidindo o que o teste verifica |
-| `QAORQ-075` | URL, credencial, token ou senha literal no código |
+| `QAORQ-075` | URL, credencial, token ou senha literal no código, ou arquivo `.env` criado |
 | `QAORQ-076` | asserção que só prova existência |
+| `QAORQ-077` | identificador de uma letra |
