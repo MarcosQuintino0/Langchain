@@ -48,17 +48,12 @@ def veredito_de(itens: list[ItemDeDiagnostico], nome: str) -> ItemDeDiagnostico:
 
 @pytest.fixture
 def projeto(tmp_path: Path) -> Path:
-    """Um ambiente completo: skill, backend, projeto preparado e manifesto fixado.
+    """Um ambiente completo: backend e projeto de testes preparado.
 
     Montado a partir do template do `orquestrador init`, com os campos preenchidos.
     Assim o teste do `doctor` também é um teste do template: se `init` passar a
     escrever um campo que a configuração recusa, esta fixture quebra.
     """
-    skill = tmp_path / "skill"
-    (skill / "scripts").mkdir(parents=True)
-    for nome in ("validar-suite-gerada.mjs", "qa-cobertura.mjs", "qa-reindex.mjs"):
-        (skill / "scripts" / nome).write_text("// duplo de teste\n", encoding="utf-8")
-
     (tmp_path / "backend").mkdir()
 
     testes = tmp_path / "projeto-de-testes"
@@ -69,20 +64,10 @@ def projeto(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    manifesto = testes / ".agents" / "skills" / "graphify" / "manifest.json"
-    manifesto.parent.mkdir(parents=True)
-    manifesto.write_text(
-        '{"command": "graphify", "version": "'
-        + VERSAO_DO_GRAPHIFY
-        + '", "install": {"uv": "uv tool install graphifyy"}}\n',
-        encoding="utf-8",
-    )
-
     assert main(["init", "--em", str(tmp_path)]) == SUCESSO
     arquivo = tmp_path / "config.toml"
     texto = (
         arquivo.read_text(encoding="utf-8")
-        .replace("PREENCHA/caminho/para/skills/qa-api", skill.as_posix())
         .replace("PREENCHA/caminho/para/o/backend", (tmp_path / "backend").as_posix())
         .replace("PREENCHA/caminho/para/o/projeto-de-testes", testes.as_posix())
         .replace('modelo = ""', 'modelo = "provedor/modelo-de-teste"')
@@ -95,13 +80,13 @@ def projeto(tmp_path: Path) -> Path:
 def versoes(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     """Instala o duplo de `executar` que responde `--version` por executável."""
 
-    def instalar(*, node: str = "v24.11.1", graphify: str | None = VERSAO_DO_GRAPHIFY) -> None:
+    def instalar(*, graphify: str | None = VERSAO_DO_GRAPHIFY) -> None:
         def falso(argv: list[str], **_: object) -> SaidaProcesso:
-            alvo = Path(argv[0]).stem
-            if alvo == "graphify" and graphify is None:
+            if Path(argv[0]).stem == "graphify" and graphify is None:
                 raise ExecutavelAusente('executável não encontrado no PATH: "graphify".')
-            texto = node if alvo == "node" else f"graphify {graphify}"
-            return SaidaProcesso(argv=argv, codigo=0, stdout=texto, stderr="", duracao_s=0.0)
+            return SaidaProcesso(
+                argv=argv, codigo=0, stdout=f"graphify {graphify}", stderr="", duracao_s=0.0
+            )
 
         monkeypatch.setattr("orquestrador.cli.doctor.executar", falso)
 
@@ -138,35 +123,20 @@ def test_ambiente_completo_nao_reprova_nada(
 # ---------------------------------------------------------------------------
 
 
-def test_node_antigo_reprova_dizendo_a_versao_minima(projeto: Path, versoes: Callable[..., None]):
-    versoes(node="v20.11.0")
-    item = veredito_de(diagnosticar(projeto / "config.toml"), "Node")
-
-    assert item.veredito is Veredito.FALHOU
-    assert "24" in item.conserto
-
-
-def test_graphify_divergente_do_manifesto_reprova(projeto: Path, versoes: Callable[..., None]):
-    """A comparação é exata porque a do `qa-reindex.mjs` também é.
-
-    Aprovar uma versão que a skill vai recusar empurra a descoberta para dentro do
-    Bloco 0, com o erro vindo de um script de outro repositório.
-    """
-    versoes(graphify="0.9.27")
-    item = veredito_de(diagnosticar(projeto / "config.toml"), "Graphify")
-
-    assert item.veredito is Veredito.FALHOU
-    assert VERSAO_DO_GRAPHIFY in item.detalhe and "0.9.27" in item.detalhe
-
-
-def test_graphify_ausente_reprova_com_a_receita_de_instalacao(
+def test_graphify_ausente_reprova_dizendo_como_reinstalar(
     projeto: Path, versoes: Callable[..., None]
 ):
+    """O Graphify é a única ferramenta externa que sobrou como pré-requisito.
+
+    Não há mais versão "fixada" para conferir contra manifesto: ele é dependência
+    declarada deste pacote, e quem a garante é o instalador. Sobrou a pergunta que
+    o `doctor` ainda precisa responder — ele está no PATH e responde `--version`?
+    """
     versoes(graphify=None)
     item = veredito_de(diagnosticar(projeto / "config.toml"), "Graphify")
 
     assert item.veredito is Veredito.FALHOU
-    assert "uv tool install graphifyy" in item.conserto
+    assert "pip install" in item.conserto
 
 
 def test_projeto_sem_modulos_compartilhados_reprova(projeto: Path, versoes: Callable[..., None]):
@@ -178,19 +148,6 @@ def test_projeto_sem_modulos_compartilhados_reprova(projeto: Path, versoes: Call
 
     assert item.veredito is Veredito.FALHOU
     assert "preparar-projeto" in item.conserto
-
-
-def test_skill_ausente_reprova_nomeando_o_script_que_falta(
-    projeto: Path, versoes: Callable[..., None]
-):
-    versoes()
-    for arquivo in (projeto / "skill" / "scripts").iterdir():
-        arquivo.unlink()
-
-    item = veredito_de(diagnosticar(projeto / "config.toml"), "Skill qa-api")
-
-    assert item.veredito is Veredito.FALHOU
-    assert "qa-reindex.mjs" in item.detalhe
 
 
 # ---------------------------------------------------------------------------
@@ -255,14 +212,33 @@ def test_o_codigo_de_saida_acompanha_o_pior_veredito(tmp_path: Path):
     assert main(["doctor", "--config", str(tmp_path / "nao-existe.toml")]) == ERRO_DE_USO
 
 
+def test_toml_malformado_vira_diagnostico_e_nao_traceback(tmp_path: Path):
+    """TOML quebrado é o erro mais provável de quem edita o arquivo à mão.
+
+    `Config.carregar` já traduzia o `ValidationError` do Pydantic em mensagem
+    legível, mas o `tomllib.load` acima dele ficava sem `except`: uma aspa faltando
+    subia como `TOMLDecodeError` cru e o `doctor` — o comando cuja função é
+    explicar o que está errado — morria com traceback. Quem visse aquilo concluiria
+    que o programa está quebrado, não a linha 3 do arquivo dele.
+    """
+    arquivo = tmp_path / "config.toml"
+    arquivo.write_text('[caminhos]\nbackend = "sem fechar\n', encoding="utf-8")
+
+    item = veredito_de(diagnosticar(arquivo), "Configuração")
+
+    assert item.veredito is Veredito.FALHOU
+    assert "orquestrador init" in item.conserto
+    assert main(["doctor", "--config", str(arquivo)]) == ERRO_DE_USO
+
+
 def test_todo_item_reprovado_diz_o_que_fazer(projeto: Path, versoes: Callable[..., None]):
     """Diagnóstico sem conserto obriga quem lê a descobrir sozinho o que instalar.
 
     Vale a pena testar porque a tentação de acrescentar um item novo sem a frase de
     conserto é grande — o veredito parece suficiente na hora de escrevê-lo.
     """
-    versoes(node="v18.0.0", graphify=None)
-    for arquivo in (projeto / "skill" / "scripts").iterdir():
+    versoes(graphify=None)
+    for arquivo in (projeto / "projeto-de-testes" / "cypress" / "support" / "api").iterdir():
         arquivo.unlink()
 
     sem_conserto = [

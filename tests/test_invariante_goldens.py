@@ -207,7 +207,6 @@ def superficie_da_fixture() -> SuperficieDoProjeto:
     config = Config.model_validate(
         {
             "caminhos": {
-                "skill": str(DIR_FIXTURES),
                 "backend": str(DIR_FIXTURES / "backend"),
                 "projeto_testes": str(DIR_FIXTURES / "projeto-testes"),
             },
@@ -215,7 +214,7 @@ def superficie_da_fixture() -> SuperficieDoProjeto:
                 "mapeador": {"modelo": "fake/mapeador"},
                 "executor": {"modelo": "fake/executor"},
             },
-            "gates": {"a": {"flags": []}, "b": {"flags": []}},
+            "gates": {"a": {}, "b": {}},
         }
     )
     return extrair(config)

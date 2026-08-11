@@ -63,8 +63,8 @@ diagnostica o ambiente. Sem comando, esta é a execução do pipeline.
 ## `--dry-run`
 
 Substitui **apenas a resposta do modelo**, por fixtures de `fixtures/roteiros/`.
-Tools, scripts `.mjs`, gates e deltas são reais, e a escrita acontece numa sandbox
-dentro do diretório da execução — o projeto do consumidor não é tocado.
+Tools, gates e deltas são reais, e a escrita acontece numa sandbox dentro do
+diretório da execução — o projeto do consumidor não é tocado.
 
 Ele não prova compatibilidade com provedor real. Prova que o fluxo, os gates e o
 loop de reparo funcionam.

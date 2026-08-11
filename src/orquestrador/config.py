@@ -1,7 +1,7 @@
 """Carga e validação da configuração do orquestrador.
 
-Tudo que varia entre projetos — caminhos, modelo de cada estágio, flags de cada
-gate, limite de tentativas — mora no arquivo de configuração. Princípio 6: nenhum
+Tudo que varia entre projetos — caminhos, modelo de cada estágio, limite de
+tentativas de cada gate — mora no arquivo de configuração. Princípio 6: nenhum
 nome de modelo é fixado no código.
 
 Caminhos relativos no TOML são resolvidos **contra o diretório do próprio arquivo
@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AnyHttpUrl,
@@ -58,12 +58,16 @@ MODELO_DE_CONFIG = ConfigDict(extra="forbid", validate_assignment=True)
 
 
 class ConfigCaminhos(BaseModel):
-    """Onde estão a skill, o backend e o projeto de testes."""
+    """Onde estão o backend e o projeto de testes.
+
+    `skill` e `scripts` saíram junto com o desacoplamento. Campo de
+    configuração que nada lê é pior que campo ausente: ele sobrevive no
+    arquivo do cliente, alguém o preenche com um caminho inventado, e o
+    preenchimento não produz efeito nenhum que denuncie o engano.
+    """
 
     model_config = MODELO_DE_CONFIG
 
-    skill: Path
-    scripts: Path | None = None
     backend: Path
     projeto_testes: Path
     # Relativos ao projeto de testes.
@@ -83,42 +87,7 @@ class ConfigCaminhos(BaseModel):
     # caminho é configurável para a Fase 2 poder iterá-los onde quiser.
     prompts: Path = DIR_PROMPTS_PADRAO
 
-    @model_validator(mode="before")
-    @classmethod
-    def _derivar_scripts(cls, bruto: Any) -> Any:
-        """`scripts` omitido vira `<skill>/scripts`.
-
-        Feito **antes** da construção, e não num validador `after`: com
-        `validate_assignment=True`, escrever num campo dentro do validador `after`
-        dispara outra rodada de validação do modelo inteiro.
-        """
-        if not isinstance(bruto, dict):
-            return bruto
-        # Um validador `mode="before"` recebe o que quem chamou passou, então `Any` é a
-        # anotação honesta. O `cast` só nomeia o que o `isinstance` acabou de provar
-        # sobre a forma — chave de TOML é string —, sem afirmar nada sobre os valores.
-        dados = cast(dict[str, Any], bruto)
-        if not dados.get("scripts") and dados.get("skill"):
-            return {**dados, "scripts": Path(str(dados["skill"])) / "scripts"}
-        return dados
-
     # -- caminhos derivados -------------------------------------------------
-
-    def script(self, nome: str) -> Path:
-        # Checagem real, e não `assert`: o `_derivar_scripts` só preenche `scripts`
-        # quando o `skill` bruto é verdadeiro, então um `skill = ""` no config.toml
-        # atravessa a validação (vira `Path(".")`) e deixa `scripts` em None. Quem
-        # tropeça nisso primeiro é `validar_caminhos`, cuja função é justamente
-        # transformar caminho errado em mensagem acionável — e um `assert` nu ali
-        # devolvia `AssertionError('')`, sem dizer o que estava errado. Sob
-        # `python -O` seria pior: some a checagem e sobra um TypeError de `None /
-        # str`, dentro do adaptador de subprocesso, longe da causa.
-        if self.scripts is None:
-            raise ErroDeConfiguracao(
-                "[caminhos].scripts não pôde ser derivado porque [caminhos].skill está "
-                "vazio. Preencha o caminho da skill qa-api, ou aponte scripts direto."
-            )
-        return self.scripts / nome
 
     @property
     def dir_recursos_abs(self) -> Path:
@@ -289,24 +258,31 @@ class ConfigEstagio(BaseModel):
 
 
 class ConfigGate(BaseModel):
-    """Flags do validador e limite de tentativas de reparo de um gate."""
+    """Limite de tentativas de reparo de um gate.
+
+    Sobrou um campo. `flags` eram argumentos de linha de comando dos validadores
+    `.mjs`, e `exigir_cobertura` ligava a reconciliação por categoria: os dois
+    saíram com o desacoplamento, junto com o código que os lia. Um interruptor que
+    não comanda nada é pior que interruptor nenhum — ele afirma que a checagem
+    existe. Quando a reconciliação for reescrita em Python, o campo volta com ela;
+    a pendência está em `docs/arquitetura/pendencias.md`.
+    """
 
     model_config = MODELO_DE_CONFIG
 
-    flags: list[str] = Field(default_factory=list)
     max_tentativas: Tentativas = 3
-    # Reprovar quando o gabarito declarar categoria que nenhum `it` cobre. Ligado por
-    # padrão: é a checagem que responde por "planejei e não entreguei", que é o
-    # defeito de origem do projeto. Só o Gate B a consome.
-    exigir_cobertura: bool = True
 
 
 class ConfigExecucao(BaseModel):
-    """Executáveis externos e limites de processo."""
+    """Executáveis externos e limites de processo.
+
+    `node` saiu junto com o desacoplamento: nenhum script JavaScript é mais
+    invocado pelo orquestrador. O Cypress do consumidor continua sendo Node,
+    mas quem o roda é o comando declarado em `cypress`, não este campo.
+    """
 
     model_config = MODELO_DE_CONFIG
 
-    node: str = "node"
     graphify: str = "graphify"
     timeout_s: Segundos = 600
     # Comandos opcionais do Gate B. Lista vazia = etapa desligada.
@@ -322,23 +298,6 @@ class ConfigExecucao(BaseModel):
     # protege o custo é a soma, não cada leitura — mas zero desligaria as tools.
     max_bytes_arquivo: Annotated[PositiveInt, Field(le=50_000_000)] = 2_000_000
     max_resultados_busca: Annotated[PositiveInt, Field(le=1_000)] = 40
-
-
-class ConfigSkill(BaseModel):
-    """Compatibilidade com a skill externa `qa-api`.
-
-    A skill é outro repositório e a integração com ela é um contrato **implícito**:
-    formato dos argumentos, código de saída, forma do JSON e semântica dos códigos
-    `QAAPI-`. Nada disso está declarado em lugar nenhum, e é por isso que precisa de
-    uma âncora.
-
-    Campo vazio desliga a verificação — é o padrão para quem está desenvolvendo a
-    skill e o consumidor ao mesmo tempo, onde o hash mudaria a cada edição.
-    """
-
-    model_config = MODELO_DE_CONFIG
-
-    impressao_esperada: str = ""
 
 
 class ConfigOtlp(BaseModel):
@@ -371,7 +330,6 @@ class Config(BaseModel):
     estagios: dict[str, ConfigEstagio]
     gates: dict[str, ConfigGate]
     execucao: ConfigExecucao = Field(default_factory=ConfigExecucao)
-    skill: ConfigSkill = Field(default_factory=lambda: ConfigSkill())
     observabilidade: ConfigObservabilidade = Field(default_factory=ConfigObservabilidade)
     # Sem tetos configurados, `Orcamento.configurado` é falso e a checagem custa
     # uma comparação por chamada. Orçamento que aparece sem ninguém pedir
@@ -386,8 +344,14 @@ class Config(BaseModel):
         arquivo = Path(caminho) if caminho else CONFIG_PADRAO
         if not arquivo.is_file():
             raise ErroDeConfiguracao(f"arquivo de configuração não encontrado: {arquivo}")
-        with arquivo.open("rb") as fluxo:
-            bruto: dict[str, Any] = tomllib.load(fluxo)
+        try:
+            with arquivo.open("rb") as fluxo:
+                bruto: dict[str, Any] = tomllib.load(fluxo)
+        except (OSError, tomllib.TOMLDecodeError) as erro:
+            # Mesma razão do `ValidationError` abaixo: TOML mal formado é o erro mais
+            # provável de quem edita o arquivo à mão, e subir cru vira traceback — que
+            # se parece com defeito do programa, não com "falta uma aspa na linha 12".
+            raise ErroDeConfiguracao(f"{arquivo} não pôde ser lido: {erro}") from erro
         base = arquivo.resolve().parent
         bruto = _resolver_caminhos(bruto, base)
         bruto["origem"] = arquivo.resolve()
@@ -470,7 +434,7 @@ class Config(BaseModel):
 def _resolver_caminhos(bruto: dict[str, Any], base: Path) -> dict[str, Any]:
     """Torna absolutos os caminhos do bloco [caminhos], usando `base` como âncora."""
     caminhos = dict(bruto.get("caminhos") or {})
-    for chave in ("skill", "scripts", "backend", "projeto_testes", "saida", "prompts"):
+    for chave in ("backend", "projeto_testes", "saida", "prompts"):
         valor = caminhos.get(chave)
         if valor is None:
             continue

@@ -499,17 +499,15 @@ def test_a_flag_continua_reconhecida_pelo_argparse():
 
 
 def config_de_dry_run(tmp_path: Path) -> Path:
-    """config.toml mínimo que atravessa `validar_caminhos` sem precisar de Node.
+    """config.toml mínimo que atravessa `validar_caminhos`.
 
-    A skill deixou de ser obrigatória em `validar_caminhos` com o desacoplamento
-    (2026-08-10), então o diretório dela é só um caminho — nada nesta seção o lê.
+    Dois campos de caminho, e nenhuma ferramenta externa: é todo o pré-requisito
+    que um `--dry-run` tem depois do desacoplamento.
     """
-    (tmp_path / "skill").mkdir(parents=True, exist_ok=True)
     arquivo = tmp_path / "config.toml"
     arquivo.write_text(
         f"""
 [caminhos]
-skill = {str(tmp_path / "skill")!r}
 backend = {str(tmp_path / "backend")!r}
 projeto_testes = {str(tmp_path / "projeto")!r}
 saida = {str(tmp_path / "execucoes")!r}

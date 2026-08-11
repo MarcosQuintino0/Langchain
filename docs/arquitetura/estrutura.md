@@ -17,7 +17,7 @@ src/orquestrador/
     codigos_de_saida.py  0..5 — o contrato com quem automatiza
     estimativa.py    `--estimar`: conta endpoints e devolve a faixa de token
     init.py          `orquestrador init`: o config.toml comentado
-    doctor.py        `orquestrador doctor`: 14 diagnósticos do ambiente
+    doctor.py        `orquestrador doctor`: dez diagnósticos do ambiente
     execucoes.py     listar, mostrar, validar e comparar execuções locais
     principal.py     argumentos, montagem da execução e apresentação
   aplicacao/
@@ -125,12 +125,14 @@ quem paga pela ferramenta.
 
 O staging do recurso é um irmão do diretório real, no mesmo nível
 (`cypress/e2e/apis/.qa-staging-<execucao>-<recurso>`). Precisa ser ali, e não em
-`.execucoes/`, por duas resoluções de caminho da skill: os specs importam os
-módulos compartilhados por caminho relativo (`../../../../support/api/...`), que o
-validador resolve a partir do arquivo, e o `cobertura/handlers.mjs` **sobe** do
-recurso procurando `.agents/config/qa-api/handlers.json`. Os schemas, esses, ficam
-em `.execucoes/<ts>/staging/`, porque as duas ferramentas aceitam o diretório
-pronto (`--schemas`). O ponto inicial do nome mantém o staging fora do
+`.execucoes/`, por causa da resolução de caminho: os specs importam os módulos
+compartilhados por caminho relativo (`../../../../support/api/...`), resolvido a
+partir do arquivo. Numa árvore de outra profundidade todo import falharia no
+staging e resolveria no destino — que é justamente o contrário do motivo de validar
+o staging. (Havia uma segunda razão, a busca que o `cobertura/handlers.mjs` da
+skill fazia subindo do recurso; ela saiu com o desacoplamento, e a primeira sozinha
+já decide.) Os schemas, esses, ficam em `.execucoes/<ts>/staging/`, porque quem os
+lê recebe o diretório pronto. O ponto inicial do nome mantém o staging fora do
 `specPattern` padrão do Cypress.
 
 A publicação é atômica por recurso, com verificação de conflito antes e rollback

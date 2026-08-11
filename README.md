@@ -1,18 +1,21 @@
-# Orquestrador multi-agente da skill `qa-api`
+# Orquestrador multi-agente de testes de API
 
 Orquestrador em Python que coordena três estágios (dois com LLM, um determinístico)
-para gerar suítes de teste Cypress de API, dirigido pela skill `qa-api`.
+para gerar suítes de teste Cypress de API a partir de um backend.
 
-Este projeto é **independente** do repositório da skill. Ele apenas **consome** a
-skill: invoca os scripts `.mjs` dela por subprocess e nunca modifica nada dentro
-dela. O caminho é configuração — veja `[caminhos].skill` em
-[`config.toml`](config.toml).
+Nada fora do pacote precisa existir na máquina de quem o roda: `pip install` e
+pronto. O extrator de grafo (Graphify) é dependência declarada em
+[`pyproject.toml`](pyproject.toml) e é instalado junto.
 
-A integração é um contrato **implícito**: formato dos argumentos, código de saída,
-forma do JSON e semântica dos códigos `QAAPI-`. E os prompts em `prompts/` são
-condensação **manual** das `references/` dela. Por isso
-`[skill].impressao_esperada` fixa o hash dos `.mjs` invocados — se a skill mudar,
-o pipeline recusa rodar até alguém conferir o contrato.
+**Até 2026-08-10 não era assim.** O pipeline consumia a skill `qa-api`, um
+repositório externo: invocava os `.mjs` dela por subprocess, exigia Node 24 e
+recusava rodar quando o hash daqueles scripts mudava. Nada disso existe hoje — não
+há `[caminhos].skill`, nem seção `[skill]`, nem `[execucao].node`, e nenhum
+JavaScript é invocado pelo orquestrador. Os prompts de `prompts/` continuam sendo
+condensação **manual** das `references/` dela, e é de lá que vem o vocabulário das
+12 categorias. O que se perdeu junto com os `.mjs` — a reconciliação de cobertura
+por categoria e por campo, principalmente — está registrado em
+[`docs/arquitetura/pendencias.md`](docs/arquitetura/pendencias.md).
 
 > **O que ainda é stub:** o auditor semântico. Veja
 > [O que é stub](#o-que-é-stub). O resto do fluxo roda ponta a ponta, com escrita
@@ -44,8 +47,10 @@ divergiu depois que já foi seguida errada.
 
 ## Por que esta arquitetura existe
 
-A skill `qa-api` executada por um único modelo, numa sessão só, apresenta dois
-defeitos medidos:
+A skill `qa-api` executada por um único modelo, numa sessão só, apresentava dois
+defeitos medidos. Eles não sumiram quando o projeto se desacoplou dela: são
+propriedade de instrução densa executada de uma vez, e é contra os dois que este
+desenho existe.
 
 **Completude.** O modelo não implementa todos os testes que a própria skill exige.
 A causa não é falta de capacidade: é horizonte longo somado a instrução densa. O
@@ -56,7 +61,7 @@ cobertura é escrito pelo mesmo modelo que depois vai satisfazê-lo.
 reenviavam o contexto inteiro a cada etapa e a cada correção.
 
 O desenho ataca os dois: **decomposição por estágio** (cada agente recebe só a
-fatia da skill do seu estágio) e **verificação determinística** (contar 12
+fatia da instrução do seu estágio) e **verificação determinística** (contar 12
 categorias × N endpoints × M campos é trabalho de script, não de LLM) contra o
 primeiro; **handoff por artefato em disco** e **loops de reparo que enviam só o
 delta** contra o segundo.
@@ -81,26 +86,30 @@ A razão de cada um está em
 ## Os quatro blocos
 
 ```
-BLOCO 0  qa-reindex.mjs (Graphify, AST)          determinístico, zero token
+BLOCO 0  Graphify (AST, --code-only)             determinístico, zero token
          → .agents/state/qa-api/graphify-out/graph.json
 BLOCO 1  MAPEADOR (LLM + tools, ReAct)           um recurso por vez
-         → inventario.json + _support/cobertura.json
-         GATE A: validar-suite-gerada --so-manifesto  +  diff grafo × manifesto
+         → inventario.json + _support/cobertura.json + dossiê
+         GATE A: diff grafo × manifesto  +  conferência do dossiê
          reprova → delta → volta ao mapeador
 BLOCO 2  EXECUTOR (LLM, sem tools)               um recurso por vez
          → specs *.cy.js com tags @endpoint @cat @campo
-         GATE B: prettier + eslint + validar-suite-gerada + lacuna (QAORQ-030)
-         reprova → delta (QAAPI-0xx) → volta ao executor
-BLOCO 3  Cypress + qa-cobertura.mjs --json       determinístico
+         GATE B: prettier + eslint (opcionais) + limpeza gerada (QAORQ-031/032/033)
+         reprova → delta (QAORQ-0xx) → volta ao executor
+BLOCO 3  Cypress                                 determinístico
          AUDITOR SEMÂNTICO [STUB] — sob demanda, fora do loop
 ```
 
-**Por que o Gate A tem duas checagens.** O validador da skill enxerga apenas o
-projeto de testes, nunca o backend — limite deliberado, documentado em
-`skills/qa-api/scripts/cobertura/handlers.mjs:15`. Ele prova *"entreguei o que
-planejei"*, nunca *"planejei tudo que existe"*. O diff grafo × manifesto é o que
-fecharia esse elo, e continua **stub** — é o item que ainda não fecha o defeito
-de completude que originou o projeto.
+**Por que o Gate A tem duas checagens.** O diff grafo × manifesto responde
+*"planejei tudo que existe"*, e é a única checagem do pipeline cujo denominador
+não passa por LLM nenhum: ele sai do fonte do backend. A conferência do dossiê
+responde outra coisa, mais barata e igualmente necessária — que a evidência que o
+mapeador citou aponta arquivo e linha que existem de verdade.
+
+Quem provava *"entreguei o que planejei"* era o validador da skill, que enxergava
+apenas o projeto de testes e nunca o backend. Com o desacoplamento essa metade
+ficou descoberta, e é a maior perda registrada em
+[`docs/arquitetura/pendencias.md`](docs/arquitetura/pendencias.md).
 
 ---
 
@@ -116,7 +125,9 @@ em cada um estão em [`docs/referencia/matriz-de-suporte.md`](docs/referencia/ma
 
 ## Instalação
 
-Requer Python 3.13, Node 24+ e Git já instalados. Sem Docker, sem container.
+Requer Python 3.13 e Git já instalados. Sem Docker, sem container. Node deixou de
+ser pré-requisito no desacoplamento: ele só entra se você ligar o Cypress, o
+prettier ou o eslint do seu projeto, que são comandos opcionais de `[execucao]`.
 
 ### A partir do wheel (uso)
 
@@ -132,11 +143,14 @@ padrão possível. Ele **recusa sobrescrever** um arquivo existente; `--forcar` 
 
 `doctor` verifica, com veredito e instrução de conserto em cada item: versão do
 Python, de onde o pacote está rodando, os prompts empacotados, o `config.toml`, o
-modelo de cada estágio, a skill `qa-api` e sua impressão, o Node (24+), o Graphify
-contra a versão fixada no `manifest.json` da skill, o projeto de testes e seus
-módulos compartilhados, o backend e a presença da chave do provedor — **a presença,
-nunca o valor**. Sai com código 2 se algum item reprovar, para servir de porta de
-CI.
+modelo de cada estágio, o Graphify, o projeto de testes e seus módulos
+compartilhados, o backend e a presença da chave do provedor — **a presença, nunca o
+valor**. Sai com código 2 se algum item reprovar, para servir de porta de CI.
+
+Skill e Node saíram da lista, e o Graphify deixou de ser conferido contra o
+`manifest.json` de um repositório de terceiro: sendo dependência do pacote, ele
+chega na versão certa junto com a instalação, e não há segunda fonte para
+divergir.
 
 O `--dry-run` **não** existe na instalação pelo wheel: ele depende de `fixtures/`,
 que é material de desenvolvimento deste repositório e não vai no pacote. A recusa é
@@ -155,8 +169,9 @@ de qualquer diretório de trabalho — é o que permite rodar `pytest` de onde f
 Sem o extra `[dev]` você fica sem `pytest`, `ruff` e `pyright`. Dependências e configuração de teste
 vivem num arquivo só: [`pyproject.toml`](pyproject.toml).
 
-Confira também `[caminhos].skill` no `config.toml`: ele aponta para o repositório
-da skill `qa-api`, que é outro projeto. Sem ele, os gates não têm o que invocar.
+Confira `backend` e `projeto_testes` no `config.toml`: depois do desacoplamento
+são os dois únicos caminhos que apontam para fora deste repositório, e sem eles só
+o `--dry-run` funciona.
 
 `orquestrador doctor` também vale no checkout, e é a forma mais rápida de conferir
 tudo isso de uma vez.
@@ -190,13 +205,15 @@ entra na instrução do executor — é o que impede que ele invente `apiRequest
 `RotasApi` ou a profundidade de um `../../../..`.
 
 Se o diretório não existir ou não tiver export algum, o pipeline **falha antes de
-chamar qualquer modelo**, com a mensagem dizendo o que fazer. Ele não substitui pela
-arquitetura-base da skill: isso produziria imports que não existem no seu projeto, e
+chamar qualquer modelo**, com a mensagem dizendo o que fazer. Ele não põe uma
+arquitetura-base no lugar: isso produziria imports que não existem no seu projeto, e
 o loop de reparo não converge sobre nome de símbolo que o executor nunca teve — o
 delta do gate diz "import não resolve", não diz qual era o nome certo.
 
-Preparar o projeto é outro fluxo da skill: `references/preparar-projeto.md`, ou a
-arquitetura-base executável em `assets/cypress-api-base/`.
+**Preparar o projeto continua sendo passo manual.** Era um fluxo da skill
+(`references/preparar-projeto.md`) e nenhum comando daqui o substituiu; a pendência
+está em
+[`docs/arquitetura/pendencias.md`](docs/arquitetura/pendencias.md).
 
 Para rodar de verdade (não é preciso para o `--dry-run`):
 
@@ -216,12 +233,11 @@ diretório do próprio arquivo.
 
 | Bloco | O que define |
 | --- | --- |
-| `[caminhos]` | skill, backend, projeto de testes, `graph.json`, `prompts/`, onde vão os logs |
+| `[caminhos]` | backend, projeto de testes, `graph.json`, `prompts/`, onde vão os logs |
 | `[openrouter]` | `base_url`, nome da variável de ambiente da chave, timeout |
 | `[estagios.*]` | **modelo por estágio**, temperatura, modo de saída estruturada, tentativas de schema |
-| `[gates.a]` / `[gates.b]` | flags do validador, `max_tentativas` e `exigir_cobertura` |
-| `[skill]` | `impressao_esperada`: hash dos `.mjs` invocados; vazio desliga a trava |
-| `[execucao]` | executáveis (node, graphify, prettier, eslint, cypress) e limites |
+| `[gates.a]` / `[gates.b]` | `max_tentativas` de reparo de cada gate |
+| `[execucao]` | executáveis (graphify, prettier, eslint, cypress) e limites |
 
 Antes do primeiro uso real, ajuste `backend`, `projeto_testes` e os três
 `estagios.*.modelo`. O `config.toml` versionado aponta para o backend e o projeto
@@ -245,17 +261,23 @@ python -m orquestrador --dry-run --recurso pedidos
 
 O dry-run substitui **apenas a resposta do modelo**, que passa a vir de fixture.
 Todo o resto é real: o loop ReAct do LangGraph roda, as tools são chamadas, os
-scripts `.mjs` da skill são invocados sobre arquivos escritos em disco, os deltas
-são montados e reenviados. Ele trabalha numa sandbox por execução
-(`.execucoes/<timestamp>/sandbox/`), então as fixtures ficam limpas.
+gates leem os arquivos escritos em disco, os deltas são montados e reenviados. Ele
+trabalha numa sandbox por execução (`.execucoes/<timestamp>/sandbox/`), então as
+fixtures ficam limpas.
 
 As fixtures exercitam o caminho feliz **e** um ciclo reprova → delta → reparo →
-aprova em cada gate:
+aprova no Gate A:
 
 | Estágio | Tentativa 1 | Gate | Tentativa 2 |
 | --- | --- | --- | --- |
-| mapeador | `CAT-05` não contabilizada em `POST /pedidos` | Gate A reprova com `QAAPI-021` | manifesto completo → aprova |
-| executor | falta `seguranca.cy.js` e o teste `@campo situacao` de `CAT-03` | Gate B reprova com `QAAPI-002` e `QAAPI-025` | suíte completa → aprova |
+| mapeador | sai sem o dossiê do recurso | Gate A reprova com `QAORQ-063` | dossiê emitido → aprova |
+| executor | suíte completa | Gate B aprova de primeira | não é alcançada |
+
+O ciclo do Gate B ficou sem gatilho no desacoplamento: quem reprovava a primeira
+tentativa do executor era a reconciliação de cobertura dos `.mjs` (`QAAPI-002` e
+`QAAPI-025`), e ela saiu. O roteiro
+`fixtures/roteiros/pedidos/executor/tentativa-02.json` continua no lugar, e volta a
+ser exercitado quando a checagem for reconstruída em Python.
 
 Saída esperada ao final: as três tabelas de telemetria (marcadas **SIMULADO**) e
 o resumo por recurso.
@@ -341,9 +363,9 @@ Código de saída diferente de zero reprova o recurso. Quando o Cypress não rod
 resumo diz `NÃO EXECUTADOS` em vez de deixar a cobertura estática passar por prova
 de runtime.
 
-⚠️ **Nunca chame `graphify extract` na mão.** Sem a flag `--code-only` que o
-`qa-reindex.mjs` passa, ele faz extração semântica paga por LLM sobre o backend
-inteiro, sem avisar. O Bloco 0 sempre passa pelo reindex.
+⚠️ **Nunca chame `graphify extract` na mão.** Sem a flag `--code-only` que o Bloco 0
+passa, ele faz extração semântica paga por LLM sobre o backend inteiro, sem avisar.
+Chame sempre pelo Bloco 0.
 
 ---
 
@@ -376,10 +398,14 @@ O vocabulário é fechado e a tabela é **gerada** a partir de
 ### `manifesto-execucao.json`
 
 Responde ao chamado de suporte que o JSONL não responde: *"ontem passou, hoje
-falhou"*. Ele registra o `run_id`, a versão do orquestrador, do Python e do Node, o
-commit e o **estado sujo** dos dois repositórios quando são checkouts Git, a
-impressão da skill, a configuração **redigida**, os modelos configurados por
-estágio e o hash de cada prompt e de cada artefato.
+falhou"*. Ele registra o `run_id`, a versão do orquestrador e do Python, o commit e
+o **estado sujo** dos repositórios do orquestrador e do backend quando são
+checkouts Git, a versão do Graphify, a configuração **redigida**, os modelos
+configurados por estágio e o hash de cada prompt e de cada artefato.
+
+A versão do Graphify ocupa o lugar que era da impressão digital da skill: o que
+precisa ser reproduzível é a ferramenta que leu o backend, e ela agora é
+dependência declarada daqui — não um repositório de terceiro congelado por hash.
 
 É escrito **duas vezes**: no início, para que uma execução que morra no meio ainda
 deixe o cabeçalho do chamado; e no fim, com os hashes dos artefatos.
@@ -392,7 +418,7 @@ Três regras que o módulo não pode violar, e que
   varrido atrás do valor real da chave;
 * **código-fonte nunca entra** — de arquivo sai hash, nunca conteúdo;
 * **sonda que falha não derruba a execução** — backend que não é repositório Git
-  ou `node` fora do PATH deixam o campo ausente **com o motivo** em
+  ou `graphify` fora do PATH deixam o campo ausente **com o motivo** em
   `campos_ausentes`, e o manifesto sai assim mesmo. Um diagnóstico que impede o
   trabalho é pior que um diagnóstico incompleto.
 
@@ -473,17 +499,22 @@ de schemas (`<recurso>/<nome>.schema.json`, sem `..` e sem raiz absoluta, como o
 `ArquivoGerado` do executor). Um validador cruzado exige que todo `schemaEntrada`
 declarado no manifesto tenha o arquivo correspondente na lista — o ponteiro JSON
 opcional (`entidade#/properties/entity`) escolhe o nó dentro do arquivo e sai antes da
-comparação. Rejeitar aqui vira um delta de schema, o reparo mais barato que existe,
-sem tirar do Gate A a autoridade sobre o arquivo em disco: quem reprova o schema
-ausente continua sendo o `validar-suite-gerada.mjs`, com `QAAPI-027`.
+comparação. Rejeitar aqui vira um delta de schema, o reparo mais barato que existe.
 
-O `Manifesto` espelha `_support/cobertura.json`, cujo formato é definido **pela
-skill** (SKILL.md passo 6 + `scripts/cobertura/manifesto.mjs` e `estrutura.mjs`).
-Ele valida apenas o que é estrutural: tipos, ids de categoria bem formados,
-endpoint na forma canônica, ausência de campo desconhecido. A **contabilidade das
-12 categorias** fica deliberadamente de fora — quem reprova isso é o
-`validar-suite-gerada.mjs` (princípio 4). Duplicar a regra no Pydantic apagaria o
-Gate A do fluxo e criaria duas fontes de verdade para a mesma invariante.
+Essa rejeição era a primeira linha, não a única: o schema **ausente em disco** era
+reprovado pelo `validar-suite-gerada.mjs`, com `QAAPI-027`, e essa segunda linha
+saiu com a skill. O validador cruzado enxerga o que o mapeador declarou, não o que
+sobreviveu à escrita.
+
+O `Manifesto` espelha `_support/cobertura.json`, num formato que foi definido pela
+skill e continua valendo porque é o que os prompts ensinam ao mapeador. Ele valida
+apenas o que é estrutural: tipos, ids de categoria bem formados, endpoint na forma
+canônica, ausência de campo desconhecido. A **contabilidade das 12 categorias**
+ficava de fora porque quem a reprovava era o `validar-suite-gerada.mjs`
+(princípio 4). Sem ele ninguém a reprova, e a resposta continua não sendo movê-la
+para o Pydantic: contrato de dados não é gate, e um gate que mora no construtor do
+artefato não tem como emitir violação reparável. Ver
+[`docs/arquitetura/pendencias.md`](docs/arquitetura/pendencias.md).
 
 ### Saída estruturada é tratada como não confiável
 
@@ -496,37 +527,48 @@ recurso e qual estágio.
 
 ### Códigos de violação
 
-Os `QAAPI-0xx` vêm da skill; os `QAORQ-0xx` são do orquestrador e a tabela deles
-é gerada a partir de `gates/codigos.py`. As duas famílias estão em
+Todo código que o fluxo emite hoje é `QAORQ-0xx`, do orquestrador, e a tabela é
+gerada a partir de `gates/codigos.py`. Os `QAAPI-0xx` eram da skill e saíram com
+ela; continuam listados porque delta e log de execução antiga ainda os nomeiam. As
+duas famílias estão em
 [`docs/referencia/codigos-de-violacao.md`](docs/referencia/codigos-de-violacao.md).
 
-### A lacuna é um gate, não só um número no relatório
+### A lacuna foi um gate, e voltou a ser buraco
 
-`QAORQ-030` fecha o buraco que sobrou entre os dois scripts da skill. O
-`validar-suite-gerada.mjs` prova **forma** — manifesto contabilizado, specs-base
+`QAORQ-030` fechava o vão entre os dois scripts da skill. O
+`validar-suite-gerada.mjs` provava **forma** — manifesto contabilizado, specs-base
 presentes, imports resolvidos, campo do schema com teste `@campo` ou exceção. Ele
-não confere se cada categoria declarada em `cats` virou um `it`. Quem sabe disso é
-o `qa-cobertura.mjs`, que classifica cada célula e conta as `lacunas` — só que era
-relatório, rodava no Bloco 3 depois do loop, e saía com código 0 de qualquer jeito.
+não conferia se cada categoria declarada em `cats` virou um `it`. Quem sabia disso
+era o `qa-cobertura.mjs`, que classificava cada célula e contava as `lacunas` — só
+que era relatório, rodava no Bloco 3 depois do loop, e saía com código 0 de
+qualquer jeito.
 
 O número aparecia na tela e ninguém agia sobre ele. Foi assim que uma execução real
 gerou 50 testes, deixou `CAT-07` (regras de negócio) sem um único teste nos cinco
 endpoints, e **passou** no Gate B. É o defeito "planejei e não entreguei" — o
 mesmo que motivou o projeto — uma camada acima de onde os gates olhavam.
 
-Agora o `qa-cobertura.mjs` roda **dentro** do Gate B, e `lacunas > 0` reprova.
-Desligável em `[gates.b].exigir_cobertura`, ligado por padrão.
+A correção foi trazer o `qa-cobertura.mjs` para **dentro** do Gate B, com
+`lacunas > 0` reprovando. **Ela saiu junto com a skill em 2026-08-10**, e é a maior
+perda do desacoplamento: nenhum gate responde hoje "planejei e não entreguei" sobre
+o código gerado. Quem responde por cobertura é o `QAORQ-050/051/052`, no
+planejador, e ele julga o **plano**, não os specs. A reconstrução em Python está
+desenhada em
+[`docs/arquitetura/pendencias.md`](docs/arquitetura/pendencias.md) — as tags
+`@endpoint`/`@cat`/`@campo` já são lidas por `analise_estatica/tags_cypress.py`,
+que hoje serve só para nomear o que faltou num delta, sem autoridade para reprovar.
 
-**Autoridade e detalhe são coisas diferentes.** Quem decide se reprova é o contador
-do script; o orquestrador nunca recalcula esse número. Mas "6 lacunas" não diz ao
-executor o que escrever, então o detalhe é reconstruído cruzando o manifesto com as
-tags dos specs — e **conferido contra o contador antes de ser usado**. Se as duas
-contas divergirem, a lista é descartada e o delta sai só com o número. Um par
-endpoint×categoria errado na lista faria o executor gastar tentativa consertando o
-que não estava quebrado, e palpite com cara de precisão é pior que número honesto.
-Pela mesma razão, spec com tag dinâmica (`@cat ${...}`, a forma data-driven que a
-skill permite) desliga o detalhe: este parser não resolve template, e o que ele não
-resolve pareceria lacuna.
+**Autoridade e detalhe eram coisas diferentes**, e a distinção fica registrada
+porque quem reconstruir a checagem vai reencontrá-la. Quem decidia se reprovava era
+o contador do script, e o orquestrador nunca recalculava aquele número — mas "6
+lacunas" não diz ao executor o que escrever, então o detalhe era reconstruído
+cruzando o manifesto com as tags dos specs e **conferido contra o contador antes de
+ser usado**. Contas divergentes descartavam a lista, e o delta saía só com o
+número: um par endpoint×categoria errado faria o executor gastar tentativa
+consertando o que não estava quebrado, e palpite com cara de precisão é pior que
+número honesto. Pela mesma razão, spec com tag dinâmica (`@cat ${...}`, a forma
+data-driven que a skill permitia) desligava o detalhe — o parser não resolve
+template, e o que ele não resolve pareceria lacuna.
 
 ---
 
@@ -541,8 +583,9 @@ Roda de qualquer diretório de trabalho (o pacote é instalado, não achado por
 
 Cobrem: parsing dos gates (incluindo stdout×stderr e exit 2), montagem do delta,
 confinamento de caminho, o loop de reparo, os contratos Pydantic, a etapa de
-formatadores do Gate B e o dry-run ponta a ponta. Os testes de integração pulam
-sozinhos se o Node ou a skill não estiverem disponíveis.
+formatadores do Gate B e o dry-run ponta a ponta. Os `integration` e os `e2e` rodam
+na CI desde o desacoplamento: o único pré-requisito que sobrou é o `uv`, e um caso
+que pule ali reprova o job.
 
 Dois módulos guardam invariantes de **comportamento**, não de estrutura — são os
 que uma refatoração quebraria em silêncio:

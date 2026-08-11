@@ -30,12 +30,12 @@ pytestmark = pytest.mark.unit
 def config_com(**openrouter: Any) -> Config:
     return Config.model_validate(
         {
-            "caminhos": {"skill": ".", "backend": ".", "projeto_testes": "."},
+            "caminhos": {"backend": ".", "projeto_testes": "."},
             "estagios": {
                 "mapeador": {"modelo": "fake/mapeador"},
                 "executor": {"modelo": "fake/executor"},
             },
-            "gates": {"a": {"flags": []}, "b": {"flags": []}},
+            "gates": {"a": {}, "b": {}},
             "openrouter": openrouter,
         }
     )

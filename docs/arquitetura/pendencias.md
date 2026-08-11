@@ -34,6 +34,12 @@ próprio padrão — e reconstruir a prova de cobertura em Python.
 - `QAORQ-060..063` — a evidência do dossiê aponta arquivo e linha que existem.
 - `QAORQ-031/032/033` — a receita de limpeza virou código que confere o resultado.
 
+**O interruptor também saiu.** `[gates.b].exigir_cobertura` sobreviveu ao
+desacoplamento por alguns dias com valor `true` e nenhum leitor: a configuração
+afirmava que a checagem estava ligada enquanto ela não existia mais. Foi removido
+junto com `[caminhos].skill` e as `flags` dos gates. Quando a reconciliação
+voltar, o campo volta com ela — e aí ligado vai querer dizer ligado.
+
 **O caminho de volta.** A reconciliação por categoria e por campo é conhecida: as
 tags `@endpoint`/`@cat`/`@campo` já são parseadas por
 `analise_estatica/tags_cypress.py`, hoje sem autoridade — ele serve só para nomear

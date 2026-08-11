@@ -182,7 +182,6 @@ def test_com_max_tentativas_revalida_e_nao_muta_o_original(config_falso):
     # A cópia é cópia: o original segue com o que veio do arquivo (3 e 2).
     assert [gate.max_tentativas for gate in config_falso.gates.values()] == [3, 2]
     # E o resto da configuração atravessa intacto.
-    assert novo.gates["a"].flags == ["--so-manifesto"]
     assert novo.caminhos == config_falso.caminhos
 
     with pytest.raises(ErroDeConfiguracao):

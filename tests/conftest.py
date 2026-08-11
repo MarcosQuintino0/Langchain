@@ -79,12 +79,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 @pytest.fixture
 def config_falso(tmp_path: Path) -> Config:
     """Config mínima e coerente, apontando para diretórios temporários."""
-    for nome in ("skill/scripts", "backend", "projeto/cypress/e2e/apis"):
+    for nome in ("backend", "projeto/cypress/e2e/apis"):
         (tmp_path / nome).mkdir(parents=True, exist_ok=True)
     return Config.model_validate(
         {
             "caminhos": {
-                "skill": str(tmp_path / "skill"),
                 "backend": str(tmp_path / "backend"),
                 "projeto_testes": str(tmp_path / "projeto"),
                 "saida": str(tmp_path / "saida"),
@@ -94,8 +93,8 @@ def config_falso(tmp_path: Path) -> Config:
                 "executor": {"modelo": "fake/executor"},
             },
             "gates": {
-                "a": {"flags": ["--so-manifesto"], "max_tentativas": 3},
-                "b": {"flags": [], "max_tentativas": 2},
+                "a": {"max_tentativas": 3},
+                "b": {"max_tentativas": 2},
             },
         }
     )

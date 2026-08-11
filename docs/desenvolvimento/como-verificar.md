@@ -20,22 +20,22 @@ Quase tudo é `unit` e roda com o venv e nada mais. Para rodar só o rápido:
 python -m pytest -m unit
 ```
 
-## 3. O contrato com a skill — só nesta máquina
+## 3. Integração e ponta a ponta — um minuto
 
 ```bash
 python -m pytest -m "integration or e2e" -rs
 ```
 
-**A CI não roda isto.** A skill `qa-api` é outro projeto e não há cópia que o runner
-alcance; o job virou um workflow próprio, disparado só à mão, e a
-decisão está registrada no [ADR 0014](../adr/0014-contrato-da-skill-fora-da-ci.md).
+Se esses testes **pularem**, você não os rodou. O `-rs` diz o motivo — hoje o único
+pré-requisito é o `uv`, que `test_wheel_limpo` usa para construir o wheel e
+instalá-lo num ambiente vazio.
 
-Se esses testes **pularem**, você não os rodou. O `-rs` diz o motivo — normalmente
-Node ausente ou `[caminhos].skill` apontando para lugar nenhum.
-
-Enquanto o job estiver desligado, a única defesa contra a skill mudar por baixo é a
-impressão digital dela, conferida a cada execução. Ela detecta **mudança**, não
-incompatibilidade.
+**A CI roda isto**, no job `integracao`, e reprova se qualquer caso pular. Não era
+assim: enquanto os gates invocavam os `.mjs`, esta bateria precisava de Node e de
+um checkout da skill `qa-api` que o runner não alcançava, e por isso ficou num
+workflow disparado à mão ([ADR 0014](../adr/0014-contrato-da-skill-fora-da-ci.md),
+superada). Suíte verde com caso pulado parece suíte verde — foi o que aconteceu
+por meses.
 
 ## 4. O pipeline inteiro, sem gastar token — segundos
 
@@ -43,8 +43,8 @@ incompatibilidade.
 python -m orquestrador --dry-run --recurso pedidos
 ```
 
-Substitui **apenas a resposta do modelo**. Tools, scripts `.mjs`, gates e deltas são
-reais, e a escrita vai para uma sandbox dentro do diretório da execução.
+Substitui **apenas a resposta do modelo**. Tools, gates e deltas são reais, e a
+escrita vai para uma sandbox dentro do diretório da execução.
 
 O que ele prova: que o fluxo, os dois gates e o loop de reparo funcionam ponta a
 ponta. O que ele **não** prova: compatibilidade com provedor real.
@@ -55,8 +55,8 @@ ponta. O que ele **não** prova: compatibilidade com provedor real.
 orquestrador doctor
 ```
 
-Catorze diagnósticos, cada um com o conserto ao lado. Sai com código 2 se algo
-estiver faltando.
+Dez diagnósticos, cada um com o conserto ao lado. Sai com código 2 se algo estiver
+faltando.
 
 ## 6. A cobertura — como a CI mede
 

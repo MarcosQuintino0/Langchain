@@ -34,17 +34,11 @@ MODELO_DE_CONFIG_DE_PROJETO = """# Configuração do orquestrador — gerada por
 # fazer em cada falha.
 
 [caminhos]
-# A skill `qa-api` mora em OUTRO repositório e é apenas consumida, nunca modificada.
-# Caminho absoluto: os dois projetos são independentes e não têm posição relativa
-# garantida.
-skill = "PREENCHA/caminho/para/skills/qa-api"
-# scripts = ".../skills/qa-api/scripts"   # derivado de `skill` quando omitido
-
 # O backend a mapear e o projeto Cypress que recebe os testes gerados.
 backend = "PREENCHA/caminho/para/o/backend"
 projeto_testes = "PREENCHA/caminho/para/o/projeto-de-testes"
 
-# Relativos ao projeto de testes. Os padrões abaixo são a convenção da skill;
+# Relativos ao projeto de testes. Os padrões abaixo são a convenção mais comum;
 # troque-os se o seu projeto usa outro layout.
 dir_recursos = "cypress/e2e/apis"
 dir_schemas = "cypress/fixtures/schemas"
@@ -66,12 +60,6 @@ timeout_s = 5.0
 service_name = "orquestrador"
 headers_env = "OTEL_EXPORTER_OTLP_HEADERS"
 incluir_identificadores = false
-
-[skill]
-# Hash dos `.mjs` que este orquestrador invoca. Vazio desliga a trava — que é o
-# certo até você conferir o contrato pela primeira vez. `orquestrador doctor`
-# imprime o hash atual para você colar aqui.
-impressao_esperada = ""
 
 [openrouter]
 base_url = "https://openrouter.ai/api/v1"
@@ -150,16 +138,12 @@ modo_estruturado = "prompt"
 max_tentativas_schema = 3
 
 [gates.a]
-flags = ["--so-manifesto"]
 max_tentativas = 3
 
 [gates.b]
-flags = ["--exigir-campos"]
 max_tentativas = 3
-exigir_cobertura = true
 
 [execucao]
-node = "node"
 graphify = "graphify"
 timeout_s = 600
 
@@ -211,7 +195,7 @@ def comando_init(argv: list[str], console: Console) -> int:
     arquivo = destino / "config.toml"
     if arquivo.exists() and not args.forcar:
         # Recusar é o padrão porque este arquivo é do usuário: ele tem caminhos,
-        # escolha de modelo e a impressão da skill conferida à mão. Sobrescrever em
+        # escolha de modelo e limites ajustados à mão. Sobrescrever em
         # silêncio apagaria trabalho que não temos como recuperar.
         console.print(
             f"[red]já existe:[/red] {arquivo}\n"

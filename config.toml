@@ -4,12 +4,6 @@
 # Nenhum nome de modelo aparece no código: tudo vem daqui (princípio 6).
 
 [caminhos]
-# A skill `qa-api` mora em OUTRO projeto e é apenas consumida, nunca modificada.
-# Caminho absoluto de propósito: os dois repositórios são independentes e não têm
-# posição relativa garantida.
-skill = "C:/Agents/skills/qa-api"
-# scripts = ".../skills/qa-api/scripts"   # derivado de `skill` quando omitido
-
 # AJUSTE OS DOIS ABAIXO antes de rodar sem --dry-run.
 # O --dry-run ignora ambos e usa a sandbox de fixtures.
 backend = "../Backend-"
@@ -19,15 +13,15 @@ projeto_testes = "../projeto-de-testes"
 dir_recursos = "cypress/e2e/apis"
 graph = ".agents/state/qa-api/graphify-out/graph.json"
 
-# Raiz dos schemas de entrada. O mapeador grava aqui, em <recurso>/<nome>.schema.json,
-# e é daqui que o validador da skill tira o denominador da cobertura por campo.
+# Raiz dos schemas de entrada. O mapeador grava aqui, em <recurso>/<nome>.schema.json.
 dir_schemas = "cypress/fixtures/schemas"
 
 # Módulos compartilhados (client, rotas, auth, asserts base, schema) que o executor
 # importa. O Bloco 0 extrai deles a superfície — nomes de export, assinaturas
 # verbatim e caminhos de import calculados — e a injeta na instrução do executor.
 # PRÉ-CONDIÇÃO: este diretório precisa existir e ter exports. O orquestrador gera
-# testes num projeto já preparado; preparar o projeto é outro fluxo da skill.
+# testes num projeto já preparado; preparar o projeto ainda é passo manual
+# (ver docs/arquitetura/pendencias.md).
 support_compartilhado = "cypress/support/api"
 
 # Relativo a este diretório: logs, artefatos e sandbox de cada execução.
@@ -48,15 +42,6 @@ timeout_s = 5.0
 service_name = "orquestrador"
 headers_env = "OTEL_EXPORTER_OTLP_HEADERS"
 incluir_identificadores = false
-
-# ---------------------------------------------------------------------------
-# Skill qa-api (LEGADO — não é mais usada em runtime)
-# ---------------------------------------------------------------------------
-# Em 2026-08-10 o orquestrador foi desacoplado da skill: o Bloco 0 chama o
-# graphify direto (dependência Python deste projeto) e os gates que rodavam
-# .mjs saíram. Nada aqui é lido para executar; o caminho fica declarado só
-# enquanto o doctor o usa como diagnóstico informativo.
-# O que se perdeu com a troca está em docs/arquitetura/pendencias.md.
 
 [openrouter]
 base_url = "https://openrouter.ai/api/v1"
@@ -172,23 +157,16 @@ modo_estruturado = "prompt"
 # ---------------------------------------------------------------------------
 
 [gates.a]
-# --so-manifesto é acrescentado de qualquer forma; --json também.
-flags = ["--so-manifesto"]
 max_tentativas = 3
 
 [gates.b]
-flags = ["--exigir-campos"]
 max_tentativas = 3
-# Reprova quando o gabarito declara uma categoria em `cats` e nenhum `it` a cobre —
-# a lacuna que o qa-cobertura.mjs conta e o validar-suite-gerada.mjs não enxerga.
-exigir_cobertura = true
 
 # ---------------------------------------------------------------------------
 # Execução
 # ---------------------------------------------------------------------------
 
 [execucao]
-node = "node"
 graphify = "graphify"
 timeout_s = 600
 

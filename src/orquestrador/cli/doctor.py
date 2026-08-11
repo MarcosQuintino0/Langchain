@@ -9,13 +9,11 @@ que é a parte útil."""
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, cast
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -39,13 +37,6 @@ from orquestrador.raiz import (
     DIR_PROMPTS_PADRAO,
     RAIZ_PROJETO,
 )
-
-# Node 24 é o piso do README e o que a skill assume. Graphify é comparado com a
-# versão FIXADA no manifesto, e a igualdade é exata de propósito: é a mesma
-# comparação que o `qa-reindex.mjs` faz antes de reindexar. Divergir aqui e passar
-# significaria descobrir a incompatibilidade no Bloco 0, com o erro vindo de dentro
-# de um script de outro repositório.
-NODE_MINIMO = (24, 0, 0)
 
 # Os prompts sem os quais não há estágio de LLM. O auditor está fora porque é stub e
 # a flag que o invocaria é recusada.
@@ -80,15 +71,6 @@ class ItemDeDiagnostico:
     veredito: Veredito
     detalhe: str
     conserto: str = ""
-
-
-def _versao(texto: str) -> tuple[int, int, int] | None:
-    """Primeira versão semântica do texto, como tripla comparável."""
-    achado = _VERSAO.search(texto)
-    if achado is None:
-        return None
-    partes = achado.group(0).split("-")[0].split("+")[0].split(".")
-    return (int(partes[0]), int(partes[1]), int(partes[2]))
 
 
 def _texto_da_versao(texto: str) -> str | None:
@@ -194,37 +176,6 @@ def _diagnosticar_diretorio(
     return ItemDeDiagnostico(nome, Veredito.OK, str(caminho))
 
 
-def _diagnosticar_skill(config: Config) -> list[ItemDeDiagnostico]:
-    presenca = _diagnosticar_diretorio(
-        "Skill qa-api",
-        config.caminhos.skill,
-        campo="[caminhos].skill",
-        para_que="o checkout do repositório da skill qa-api",
-    )
-    if presenca.veredito is not Veredito.OK:
-        return [presenca]
-
-    try:
-        ausentes = [
-            nome
-            for nome in ("validar-suite-gerada.mjs", "qa-cobertura.mjs", "qa-reindex.mjs")
-            if not config.caminhos.script(nome).is_file()
-        ]
-    except ErroDeConfiguracao as erro:
-        return [ItemDeDiagnostico("Skill qa-api", Veredito.FALHOU, str(erro).splitlines()[0])]
-    if ausentes:
-        return [
-            ItemDeDiagnostico(
-                "Skill qa-api",
-                Veredito.FALHOU,
-                f"scripts ausentes em {config.caminhos.scripts}: {', '.join(ausentes)}",
-                "confira se [caminhos].skill aponta para a raiz da skill (não para "
-                "scripts/) e se o checkout dela está completo.",
-            )
-        ]
-    return [presenca]
-
-
 def _saida_de_versao(executavel: str, config: Config) -> str | ItemDeDiagnostico:
     """Roda `<executavel> --version`, ou devolve o item de falha já formado."""
     try:
@@ -240,108 +191,29 @@ def _saida_de_versao(executavel: str, config: Config) -> str | ItemDeDiagnostico
     return saida.texto
 
 
-def _diagnosticar_node(config: Config) -> ItemDeDiagnostico:
-    resposta = _saida_de_versao(config.execucao.node, config)
-    if isinstance(resposta, ItemDeDiagnostico):
-        return ItemDeDiagnostico(
-            "Node",
-            Veredito.FALHOU,
-            resposta.detalhe,
-            "instale o Node 24+ e deixe-o no PATH, ou aponte [execucao].node para o "
-            "binário. Os gates são scripts .mjs — sem Node não há reprovação "
-            "determinística, e o pipeline recusa rodar.",
-        )
-    versao = _versao(resposta)
-    if versao is None:
-        return ItemDeDiagnostico(
-            "Node",
-            Veredito.AVISO,
-            f"versão não reconhecida na saída: {resposta.strip()[:60]}",
-            "confira manualmente se é 24 ou mais novo.",
-        )
-    if versao < NODE_MINIMO:
-        return ItemDeDiagnostico(
-            "Node",
-            Veredito.FALHOU,
-            f"v{'.'.join(str(p) for p in versao)}",
-            f"a skill assume Node {NODE_MINIMO[0]}+. Atualize o Node.",
-        )
-    return ItemDeDiagnostico("Node", Veredito.OK, f"v{'.'.join(str(p) for p in versao)}")
-
-
-def _manifesto_do_graphify(config: Config) -> Path | None:
-    """O mesmo manifesto que o `qa-reindex.mjs` vai consultar, na mesma ordem.
-
-    Procurar em outro lugar seria pior que não procurar: o `doctor` aprovaria uma
-    versão que a skill vai recusar, ou reprovaria uma que ela aceitaria. A ordem
-    abaixo é a de `manifestCandidates` no `qa-reindex.mjs`, com o projeto de testes
-    como raiz e a skill como último recurso (`<skills>/graphify/manifest.json`).
-    """
-    projeto = config.caminhos.projeto_testes
-    candidatos = [
-        projeto / ".agents" / "skills" / "graphify" / "manifest.json",
-        projeto / "skills" / "graphify" / "manifest.json",
-        config.caminhos.skill.parent / "graphify" / "manifest.json",
-    ]
-    return next((caminho for caminho in candidatos if caminho.is_file()), None)
-
-
-def _ler_manifesto(manifesto: Path) -> dict[str, Any] | str:
-    """Conteúdo do manifesto do Graphify, ou a explicação de por que não deu."""
-    try:
-        bruto: Any = json.loads(manifesto.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as erro:
-        return f"manifesto ilegível ({manifesto}): {erro}"
-    if not isinstance(bruto, dict):
-        return f"manifesto não é um objeto JSON ({manifesto})"
-    return cast(dict[str, Any], bruto)
-
-
 def _diagnosticar_graphify(config: Config) -> ItemDeDiagnostico:
-    manifesto = _manifesto_do_graphify(config)
-    fixada: str | None = None
-    instalacao = ""
-    if manifesto is not None:
-        dados = _ler_manifesto(manifesto)
-        if isinstance(dados, str):
-            return ItemDeDiagnostico("Graphify", Veredito.FALHOU, dados)
-        versao: Any = dados.get("version")
-        fixada = versao if isinstance(versao, str) else None
-        receita: Any = dados.get("install")
-        if isinstance(receita, dict):
-            passos = cast(dict[str, Any], receita)
-            sugerida: Any = passos.get("uv") or passos.get("pipx") or passos.get("pip")
-            instalacao = f" Instale com: {sugerida}" if isinstance(sugerida, str) else ""
+    """Presença e versão do extrator.
 
+    Não há mais versão "fixada" para conferir. Enquanto quem chamava o Graphify era
+    o `qa-reindex.mjs`, ele exigia igualdade exata com um `manifest.json` de outra
+    skill, e o `doctor` reproduzia essa busca para não aprovar o que aquele script
+    recusaria. Hoje o Graphify é dependência declarada deste pacote: quem fixa a
+    versão é o `pyproject.toml`, e o resolvedor do instalador já a garantiu antes
+    de o `doctor` existir. Procurar um manifesto externo só produziria o AVISO
+    permanente de "manifesto não encontrado" em toda máquina de cliente.
+    """
     resposta = _saida_de_versao(config.execucao.graphify, config)
     if isinstance(resposta, ItemDeDiagnostico):
-        alvo = f" Versão fixada: {fixada}." if fixada else ""
         return ItemDeDiagnostico(
             "Graphify",
             Veredito.FALHOU,
             resposta.detalhe,
-            f"o Bloco 0 indexa o backend com ele; sem ele não há grafo.{alvo}{instalacao}",
+            "o Bloco 0 indexa o backend com ele; sem ele não há grafo. Ele vem junto "
+            "com este pacote: reinstale com `pip install orquestrador-testes-api`, ou "
+            "aponte [execucao].graphify para o executável.",
         )
-
     atual = _texto_da_versao(resposta)
-    if fixada is None:
-        return ItemDeDiagnostico(
-            "Graphify",
-            Veredito.AVISO,
-            f"{atual or resposta.strip()[:40]}; manifesto do Graphify não encontrado",
-            "sem o manifesto não dá para conferir a versão fixada. Ele é procurado em "
-            "<projeto_testes>/.agents/skills/graphify/, <projeto_testes>/skills/graphify/ "
-            "e ao lado da skill qa-api.",
-        )
-    if atual != fixada:
-        return ItemDeDiagnostico(
-            "Graphify",
-            Veredito.FALHOU,
-            f"fixada {fixada} ({manifesto}), instalada {atual or resposta.strip()[:40]}",
-            "o qa-reindex.mjs compara as duas por igualdade exata e recusa reindexar "
-            f"quando divergem.{instalacao}",
-        )
-    return ItemDeDiagnostico("Graphify", Veredito.OK, f"{atual} (fixada em {manifesto})")
+    return ItemDeDiagnostico("Graphify", Veredito.OK, atual or resposta.strip()[:40])
 
 
 def _diagnosticar_projeto_de_testes(config: Config) -> list[ItemDeDiagnostico]:
@@ -437,8 +309,6 @@ def diagnosticar(caminho_da_config: Path | None) -> list[ItemDeDiagnostico]:
         load_dotenv(config.origem.parent / ".env")
 
     itens.append(_diagnosticar_modelos(config))
-    itens.extend(_diagnosticar_skill(config))
-    itens.append(_diagnosticar_node(config))
     itens.append(_diagnosticar_graphify(config))
     itens.extend(_diagnosticar_projeto_de_testes(config))
     itens.append(
@@ -457,8 +327,8 @@ def comando_doctor(argv: list[str], console: Console) -> int:
     analisador = argparse.ArgumentParser(
         prog="orquestrador doctor",
         description=(
-            "Diagnostica o ambiente: Python, Node, Graphify, skill, projeto de "
-            "testes e chave do provedor. Cada item com veredito e o que fazer."
+            "Diagnostica o ambiente: Python, Graphify, prompts, projeto de testes, "
+            "backend e chave do provedor. Cada item com veredito e o que fazer."
         ),
     )
     analisador.add_argument("--config", type=Path, default=None, help="arquivo de configuração")

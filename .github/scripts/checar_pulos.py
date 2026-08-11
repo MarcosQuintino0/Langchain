@@ -1,9 +1,13 @@
 """Reprova se algum teste de integração foi pulado — ou se nenhum rodou.
 
-O job de integração da CI garante Node 24 e o repositório da skill `qa-api`.
-Os testes de integração, por outro lado, pulam sozinhos quando qualquer um dos
-dois falta: comportamento certo na máquina de quem desenvolve, e desastroso na
-CI, onde um pulo silencioso vira um job verde que não executou nada.
+Os testes de integração pulam sozinhos quando um pré-requisito falta (hoje só o
+`uv`): comportamento certo na máquina de quem desenvolve, e desastroso na CI,
+onde um pulo silencioso vira um job verde que não executou nada. O job de
+integração garante esse pré-requisito, então pulo ali é anomalia.
+
+Isto não é hipotético: os testes `e2e` deste repositório pularam por meses
+procurando um checkout da skill `qa-api` que a configuração já não declarava, e
+a suíte continuou verde o tempo todo.
 
 Este script lê o JUnit XML do pytest e falha em dois casos:
 
@@ -58,7 +62,7 @@ def main(argv: list[str]) -> int:
             print(f"::error::teste de integração pulado: {classe}::{nome} — {motivo}")
         print(
             f"::error::{len(pulados)} de {len(casos)} testes de integração foram pulados. "
-            "Este job garante Node 24 e a skill qa-api, então pulo aqui significa "
+            "Este job garante os pré-requisitos, então pulo aqui significa "
             "pré-requisito quebrado, não ambiente incompleto.",
             file=sys.stderr,
         )

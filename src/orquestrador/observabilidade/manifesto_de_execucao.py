@@ -206,16 +206,6 @@ def _versao_do_orquestrador(ausencias: _Ausencias) -> str | None:
         return None
 
 
-def _versao_do_node(config: Config, ausencias: _Ausencias) -> str | None:
-    try:
-        return executar(
-            [config.execucao.node, "--version"], timeout_s=_TEMPO_LIMITE_DA_SONDA_S
-        ).stdout.strip()
-    except (ErroDeFerramenta, OSError) as erro:
-        ausencias.por_falha("ambiente.node", erro)
-        return None
-
-
 def _versao_do_graphify(config: Config, ausencias: _Ausencias) -> str | None:
     """A versão do extrator que produziu o grafo desta execução.
 
@@ -223,11 +213,11 @@ def _versao_do_graphify(config: Config, ausencias: _Ausencias) -> str | None:
     ferramenta que lê o backend, e ela agora é dependência declarada deste
     projeto — não um repositório de terceiro cujo conteúdo se congela por hash.
     """
-    from orquestrador.ferramentas.processo import executar  # noqa: PLC0415
-
     try:
-        saida = executar([config.execucao.graphify, "--version"], timeout_s=30)
-    except ErroDeFerramenta as erro:
+        saida = executar(
+            [config.execucao.graphify, "--version"], timeout_s=_TEMPO_LIMITE_DA_SONDA_S
+        )
+    except (ErroDeFerramenta, OSError) as erro:
         ausencias.por_falha("graphify.versao", erro)
         return None
     return saida.texto.strip() or None
@@ -331,7 +321,10 @@ def coletar(
             # `sys.version_info` completo distingue um 3.13.0rc de um 3.13.0 final,
             # que já foi diferença de comportamento em `enum` e em `pathlib`.
             "python_completo": sys.version.replace("\n", " "),
-            "node": _versao_do_node(config, ausencias),
+            # A versão do Node saiu com o desacoplamento: o orquestrador não invoca
+            # mais nenhum JavaScript. O que sobra de Node no fluxo são os comandos
+            # opcionais do Gate B, e esses o manifesto registra como comando, não
+            # como versão de runtime.
             "sistema": platform.system(),
             "release": platform.release(),
             "arquitetura": platform.machine(),

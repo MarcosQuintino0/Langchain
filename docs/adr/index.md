@@ -31,7 +31,7 @@ citável.
 | [0011](0011-documentacao-sem-publicacao.md) | Documentação com MkDocs, sem publicação |
 | [0012](0012-marker-classifica-por-dependencia.md) | Marker classifica por dependência, não por escopo |
 | [0013](0013-sem-fachada-em-movimento-de-modulo.md) | Sem fachada de compatibilidade em movimento de módulo |
-| [0014](0014-contrato-da-skill-fora-da-ci.md) | O contrato com a skill não é verificado na CI |
+| [0014](0014-contrato-da-skill-fora-da-ci.md) | O contrato com a skill não é verificado na CI — **superada**: não há mais skill, e `integration` e `e2e` voltaram para o `ci.yml` |
 | [0015](0015-teto-para-antes-nao-garante-nao-ultrapassar.md) | O teto para antes da próxima chamada, e não promete mais |
 
 Para escrever a próxima, copie o [template](0000-template.md).

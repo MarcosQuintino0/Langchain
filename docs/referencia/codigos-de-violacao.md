@@ -1,14 +1,16 @@
 # Códigos de violação
 
-Duas famílias, com donos diferentes.
+Duas famílias, com donos diferentes. Só uma delas ainda é emitida.
 
-## `QAAPI-0xx` — da skill
+## `QAAPI-0xx` — da skill, e fora do fluxo desde 2026-08-10
 
-Vêm dos scripts `.mjs` de `qa-api`, que é **outro projeto**. A lista canônica está
-lá, e este site não a copia de propósito: uma segunda fonte de verdade sobre um
-contrato que não é nosso envelheceria sem sinal.
+Vinham dos scripts `.mjs` de `qa-api`, que é **outro projeto**. Com o
+desacoplamento nada mais os emite. A tabela fica porque delta guardado, log de
+execução antiga e o texto que explica o que se perdeu continuam nomeando esses
+códigos — e um código sem verbete é lido como erro do leitor.
 
-Os que aparecem com mais frequência no delta:
+A lista canônica sempre esteve lá, não aqui: uma segunda fonte de verdade sobre um
+contrato que não era nosso envelheceria sem sinal. Os que mais apareciam no delta:
 
 | Código | O que ele cobra |
 | --- | --- |
@@ -19,7 +21,9 @@ Os que aparecem com mais frequência no delta:
 
 ## `QAORQ-0xx` — do orquestrador
 
-Prefixo próprio para nunca colidir com os da skill. A tabela é **gerada** a partir
+Os únicos que o fluxo emite hoje. O prefixo próprio nasceu para nunca colidir com
+os da skill, e continua valendo — log antigo e log novo se leem lado a lado sem
+ambiguidade. A tabela é **gerada** a partir
 de `src/orquestrador/gates/codigos.py` — não edite aqui;
 edite o catálogo e regenere.
 
@@ -47,6 +51,11 @@ edite o catálogo e regenere.
 | `QAORQ-062` | a checklist negativa do dossiê não respondeu todos os aspectos |
 | `QAORQ-063` | o mapeador não emitiu o dossiê do recurso |
 <!-- FIM DOS CODIGOS QAORQ -->
+
+`QAORQ-030` está no catálogo e **não é emitido hoje**: quem contava as lacunas era
+o `qa-cobertura.mjs`, dentro do Gate B, e a checagem saiu com a skill. O código
+continua declarado porque a reconciliação vai voltar em Python com o mesmo
+significado — ver [Pendências](../arquitetura/pendencias.md).
 
 `QAORQ-001` é **aviso, não reprovação**, e isso é decisão e não omissão: rota
 dinâmica que o extrator não resolveu é registro de incerteza, não ausência. Não há

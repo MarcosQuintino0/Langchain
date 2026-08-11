@@ -10,10 +10,10 @@ sequenceDiagram
     participant PL as aplicacao/pipeline
     participant GX as Graphify
     participant MP as Mapeador (LLM)
-    participant GA as Gate A (.mjs)
+    participant GA as Gate A
     participant ST as Área de staging
     participant EX as Executor (LLM)
-    participant GB as Gate B (.mjs)
+    participant GB as Gate B
     participant PJ as Projeto do consumidor
     participant DI as Diário de propriedade
 
@@ -42,7 +42,7 @@ sequenceDiagram
 
     PL->>PJ: publica (uma vez só)
     PL->>DI: registra o que criou e o que modificou
-    PL->>PJ: Cypress + qa-cobertura
+    PL->>PJ: Cypress (só com --rodar-cypress)
 ```
 
 ## O que o diagrama mostra e o texto não mostrava

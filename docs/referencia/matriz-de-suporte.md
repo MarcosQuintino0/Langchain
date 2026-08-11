@@ -22,8 +22,9 @@ que existe. Suporte, aqui, significa que existe um verificador que sabe reprovar
 blocos funcionam inteiros: o Bloco 0 indexa o backend,
 `src/orquestrador/analise_estatica/rotas_java_spring.py`
 lê as rotas do fonte e dá ao Gate A o **denominador** do diff grafo × manifesto, o
-Gate B roda o validador da skill e a lacuna de cobertura, e o Bloco 3 executa a
-suíte.
+Gate B confere a limpeza gerada e roda os formatadores do projeto, e o Bloco 3
+executa a suíte. A reconciliação de cobertura que o Gate B tinha era do validador
+da skill e saiu com ela — ver [Pendências](../arquitetura/pendencias.md).
 
 Esta seção declara para quais linguagens existe denominador; em que fase está o
 gate que o consome é assunto de O que é stub. São perguntas
@@ -57,8 +58,10 @@ Os limites que valem **mesmo dentro do Tier A**, porque suporte avaliado não é
 suporte perfeito:
 
 * **A superfície do projeto é lida por heurística, não por AST.**
-  `analise_estatica/exports_javascript.py` reconhece as formas de `export` que a
-  arquitetura-base da skill usa; um módulo escrito de forma exótica (reexport
+  `analise_estatica/exports_javascript.py` reconhece as formas de `export` do
+  padrão em que este projeto nasceu — a arquitetura-base da skill `qa-api`, que
+  continua sendo o layout esperado do projeto do consumidor mesmo depois do
+  desacoplamento; um módulo escrito de forma exótica (reexport
   dinâmico, `Object.assign(module.exports, …)`) some da superfície, e o executor
   passa a não saber que aquele símbolo existe. O sintoma é import que não resolve
   no Gate B, não silêncio.

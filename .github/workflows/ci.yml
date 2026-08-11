@@ -4,7 +4,7 @@
 #
 # 1. `windows-latest` e nada mais. Este projeto conversa com o sistema de
 #    arquivos e com subprocessos o tempo todo (confinamento de caminho,
-#    `node ... .mjs`, comparação de caminho sem diferenciar caixa). É
+#    invocação de executável, comparação de caminho sem diferenciar caixa). É
 #    justamente onde Windows e Linux divergem. Rodar em Ubuntu daria um verde
 #    que não diz nada sobre a máquina de quem usa isto.
 #
@@ -101,6 +101,50 @@ jobs:
           name: cobertura
           path: coverage.xml
           if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  integracao:
+    name: Integração e ponta a ponta
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    # Job próprio, e não um passo do `testes`, por causa do passo final: o
+    # `checar_pulos` reprova QUALQUER pulo, e a suíte completa tem um pulo
+    # legítimo (a isenção de checagem de crase em `test_invariante_documentacao`).
+    # Misturar os dois faria a única checagem que enxerga "verde sem executar
+    # nada" reprovar por um motivo que não é o dela.
+    #
+    # Estes testes rodavam num workflow à parte, disparado só à mão, porque
+    # precisavam de Node e de um checkout da skill `qa-api` que o runner não
+    # alcançava (ADR 0014). Nenhuma das duas coisas é verdade desde o
+    # desacoplamento — sobrou o `uv`, que se instala com pip.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Instalar o projeto e o ferramental
+        run: python -m pip install -e ".[dev]"
+
+      - name: Instalar o uv
+        # `test_wheel_limpo` constrói o wheel e o instala num ambiente vazio, e
+        # pula sozinho sem o `uv`. Aqui pulo é anomalia — é o que o passo final
+        # cobra —, então o `uv` deixa de ser opcional.
+        run: python -m pip install uv
+
+      - name: Testes de integração e ponta a ponta
+        # Seleção por marker, e não por caminho de arquivo: renomear um arquivo
+        # de teste passaria a esvaziar a seleção em silêncio.
+        run: python -m pytest -m "integration or e2e" -rs --junitxml=junit-integracao.xml
+
+      - name: Nenhum teste pode ter sido pulado
+        if: always()
+        run: python .github/scripts/checar_pulos.py junit-integracao.xml
 
   # ---------------------------------------------------------------------------
   docs:

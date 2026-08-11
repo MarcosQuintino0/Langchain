@@ -27,12 +27,15 @@ dependência do projeto. Para o site, o extra é outro: `pip install -e ".[docs]
 
 ## O que a CI roda, e o que ela não roda
 
-Roda: `ruff check`, `ruff format --check`, `pyright`, a suíte com cobertura, e
-`mkdocs build --strict`. Tudo em `windows-latest` e Python 3.13, porque este projeto
-conversa com o sistema de arquivos e com subprocessos o tempo todo — é justamente
-onde Windows e Linux divergem.
+Roda: `ruff check`, `ruff format --check`, `pyright`, a suíte com cobertura,
+`integration` e `e2e` num job próprio, e `mkdocs build --strict`. Tudo em
+`windows-latest` e Python 3.13, porque este projeto conversa com o sistema de
+arquivos e com subprocessos o tempo todo — é justamente onde Windows e Linux
+divergem.
 
-**Não roda:** o contrato com a skill `qa-api`. Ver
+O job de integração reprova se **qualquer** caso pular. Ele ficou fora da CI
+enquanto os gates dependiam de um checkout da skill `qa-api` e do Node; o
+desacoplamento tirou os dois pré-requisitos. Ver
 [Como verificar, item 3](como-verificar.md).
 
 ## Antes de mexer
@@ -43,8 +46,10 @@ exponha o conflito, em vez de contornar em silêncio.
 
 Três coisas que costumam surpreender:
 
-- **a skill `qa-api` é somente leitura.** Nunca modifique, formate, mova ou commite
-  nada dela. Este repositório é consumidor.
+- **a skill `qa-api` não é mais dependência, e continua intocável.** Ela ainda
+  existe fora deste repositório: nunca modifique, formate, mova nem copie nada dela
+  para cá — nem para consultar como algo era feito lá. Se precisar do
+  comportamento, escreva-o aqui, em Python, com gate e teste próprios.
 - **`prompts/` é conteúdo editorial.** Mudança de prompt é tarefa própria, com diff
   próprio — nunca efeito colateral de uma mudança de código.
 - **um teste que reprova por organização é para ser resolvido movendo o código**, ou

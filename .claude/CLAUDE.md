@@ -16,10 +16,11 @@ silêncio.
 - Leia o `SKILL.md` inteiro antes de usar uma skill.
 - Não invoque a skill `push` por iniciativa própria. Commit e push exigem pedido
   explícito do usuário, e a skill já vem com `disable-model-invocation: true`.
-- Suas skills são as de `.claude/skills/`. `C:\Agents\skills\qa-api` tem um
-  `SKILL.md`, mas **não é uma skill sua**: é a dependência externa que o
-  orquestrador consome por subprocesso. Não a invoque nem a edite — o regime dela
-  está no `AGENTS.md`.
+- Suas skills são as de `.claude/skills/`, e só elas. `C:\Agents\skills\qa-api`
+  tem um `SKILL.md`, mas **não é uma skill sua e não é mais dependência deste
+  projeto**: o orquestrador foi desacoplado dela em 2026-08-10 e não invoca mais
+  nada de lá. Não a invoque, não a edite, não copie trecho dela para cá — nem para
+  consultar como algo era feito. O regime dela está no `AGENTS.md`.
 
 ## Sem `.claude/rules/`
 

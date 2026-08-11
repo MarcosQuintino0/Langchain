@@ -204,9 +204,18 @@ def test_backend_que_nao_e_repositorio_git_deixa_o_campo_ausente_com_motivo(
     assert "commit" not in manifesto["repositorios"]["backend"]
 
 
-def test_node_indisponivel_nao_derruba_a_coleta(
+def test_graphify_indisponivel_nao_derruba_a_coleta(
     config_com_prompts: Config, monkeypatch: pytest.MonkeyPatch
 ):
+    """Sonda que falha vira ausência declarada, nunca manifesto abortado.
+
+    Era o Node que este teste exercitava; a sonda dele saiu com o desacoplamento e
+    o alvo passou a ser o Graphify — que é hoje a única ferramenta externa cuja
+    versão o manifesto registra. O `_versao_do_graphify` reimportava `executar`
+    dentro do corpo, o que sombreava o símbolo do módulo e fazia esta substituição
+    não alcançá-lo: a sonda continuava chamando o processo real.
+    """
+
     def so_git(argv: list[str], **_kwargs: Any) -> SaidaProcesso:
         if argv[0] != "git":
             raise ExecutavelAusente(f'executável não encontrado no PATH: "{argv[0]}"')
@@ -216,8 +225,8 @@ def test_node_indisponivel_nao_derruba_a_coleta(
 
     manifesto = _coletar(config_com_prompts)
 
-    assert manifesto["ambiente"]["node"] is None
-    assert "ambiente.node" in manifesto["campos_ausentes"]
+    assert manifesto["graphify"]["versao"] is None
+    assert "graphify.versao" in manifesto["campos_ausentes"]
     assert manifesto["ambiente"]["python"]
 
 
@@ -242,7 +251,6 @@ def test_o_manifesto_carrega_o_minimo_para_reproduzir(config_com_prompts: Config
     assert manifesto["run_id"] == "20260807-101112-4242"
     assert manifesto["dry_run"] is True
     assert manifesto["recursos"] == ["pedidos"]
-    assert manifesto["ambiente"]["node"] == "v24.4.0"
     assert manifesto["ambiente"]["python"]
     assert manifesto["repositorios"]["orquestrador"]["commit"] == "a" * 40
     # Árvore suja é a informação que mais falta num chamado: commit limpo é

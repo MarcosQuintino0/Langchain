@@ -169,7 +169,8 @@ def test_init_escreve_uma_configuracao_que_carrega(tmp_path: Path):
 
     config = Config.carregar(tmp_path / "config.toml")
     assert config.origem == (tmp_path / "config.toml").resolve()
-    assert config.gates["b"].exigir_cobertura is True
+    assert set(config.gates) == {"a", "b"}
+    assert config.estagios["mapeador"].limite_passos == 60
 
 
 @pytest.mark.unit
@@ -184,11 +185,7 @@ def test_init_deixa_os_campos_sem_padrao_possivel_detectaveis(tmp_path: Path):
     main(["init", "--em", str(tmp_path)])
     config = Config.carregar(tmp_path / "config.toml")
 
-    for caminho in (
-        config.caminhos.skill,
-        config.caminhos.backend,
-        config.caminhos.projeto_testes,
-    ):
+    for caminho in (config.caminhos.backend, config.caminhos.projeto_testes):
         assert MARCA_DE_PREENCHIMENTO in caminho.as_posix()
         assert not caminho.is_dir()
 
@@ -310,7 +307,14 @@ def test_wheel_limpo(tmp_path: Path):
     # Segue reprovando — os campos PREENCHA continuam lá —, mas agora o que ele diz
     # é o que falta preencher, e os prompts empacotados já aparecem como OK.
     assert depois.returncode != SUCESSO
-    assert "orquestrador" in depois.stdout and "prompts" in depois.stdout
+    # Sem espaços, quebras e bordas: o `rich` dobra a coluna de detalhe na largura
+    # do terminal, e dobra NO MEIO DA PALAVRA — o caminho do wheel saiu como
+    # "…orquestrador\prompt │\n│ s (empacotados…". A largura da coluna muda quando
+    # um item entra ou sai da tabela, então procurar "prompts" no texto cru fazia
+    # esta asserção depender de onde a dobra caiu: ela quebrou ao remover os
+    # diagnósticos de Node e da skill, que não têm relação com o que ela prova.
+    plano = "".join(depois.stdout.split()).replace("│", "")
+    assert "Prompts" in plano and "prompts" in plano, depois.stdout + depois.stderr
 
     seco = orquestrador("--dry-run", "--recurso", "pedidos")
     assert seco.returncode != SUCESSO

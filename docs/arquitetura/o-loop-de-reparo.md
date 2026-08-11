@@ -47,7 +47,11 @@ prova o efeito numa execução real.
 
 ## Por que persistir antes de avaliar
 
-O gate é um script `.mjs` que lê arquivos. Avaliar o objeto em memória seria avaliar
-outra coisa: a serialização é onde mora metade dos defeitos — chave em `camelCase`,
-campo `null` onde a skill espera ausência, arquivo que não foi escrito porque o
-caminho escapava do recurso.
+O gate lê arquivos do disco. Avaliar o objeto em memória seria avaliar outra coisa:
+a serialização é onde mora metade dos defeitos — chave em `camelCase`, campo `null`
+onde o formato espera ausência, arquivo que não foi escrito porque o caminho
+escapava do recurso.
+
+Isso valia quando o gate era um script `.mjs` de outro processo, e continua valendo
+agora que ele é Python no mesmo processo: o que se quer avaliar é o que vai ser
+publicado, não o que o modelo disse que produziu.

@@ -11,7 +11,8 @@ isso depois que já foi seguida errada.
 
 Orquestrador em Python (LangGraph + OpenRouter) que coordena três estágios — dois
 com LLM, um determinístico — para gerar suítes Cypress de API a partir de um
-backend, dirigido pela skill externa `qa-api`.
+backend. É um produto instalável: `pip install` num ambiente vazio, e nada fora
+do pacote precisa existir na máquina de quem o roda.
 
 A promessa do projeto é cobertura **provada por verificador determinístico**, nunca
 cobertura afirmada por um LLM. Quase toda regra abaixo existe para proteger isso.
@@ -83,7 +84,7 @@ de inventar um arranjo novo.
 fronteira entre as duas não é "toca em `Path`", é **o que muda o módulo**:
 `ferramentas/` acompanha a CLI, o código de retorno e o formato de saída de uma
 ferramenta de terceiro; `analise_estatica/` acompanha a sintaxe da linguagem e a
-convenção de marcação da skill.
+convenção de marcação dos specs (`@endpoint`, `@cat`, `@campo`).
 
 **Estas regras têm teste.**
 [`tests/test_invariante_estrutura_do_codigo.py`](tests/test_invariante_estrutura_do_codigo.py) verifica
@@ -100,19 +101,27 @@ reparar.
 
 ---
 
-## A skill `qa-api` é somente leitura
+## Nada fora do pacote
 
-Ela mora em `C:\Agents\skills\qa-api` (configurável em `[caminhos].skill` do
-[`config.toml`](config.toml)) e é **outro projeto**.
+O orquestrador é instalado com `pip` e roda com o que veio no wheel. Não há
+script de outro repositório, não há Node, não há caminho de máquina configurado.
+**Não reintroduza dependência externa sem decisão explícita do dono**: cada uma é
+uma máquina de cliente onde a instalação falha, e o cliente não tem como
+consertá-la. Quem cobra isso é `test_wheel_limpo`, que instala o wheel num
+ambiente vazio e roda `--help`, `init` e `doctor`.
 
-**Nunca modifique, formate, mova, versione, commite nem copie nada dela para dentro
-deste repositório.** Nem para "corrigir um bug óbvio", nem para "só rodar o
-prettier". Este repositório é consumidor: invoca os scripts `.mjs` por subprocesso,
-através dos adaptadores em `ferramentas/`.
+Ferramenta de terceiro entra como **dependência declarada no `pyproject.toml`** —
+foi assim que o `graphify` entrou — e nunca como caminho que alguém preenche.
 
-Se o comportamento dela precisar mudar, isso é trabalho no repositório dela. Se a
-CLI, o JSON de saída ou o código de retorno dela mudarem, o ajuste aqui vem
-acompanhado de teste de contrato.
+Isto tem história recente. Até 2026-08-10 o projeto era dirigido pela skill
+externa `qa-api`, invocando os `.mjs` dela por subprocesso. Ela ainda existe em
+`C:\Agents\skills\qa-api` e é **outro projeto**: **nunca modifique, formate,
+mova, versione, commite nem copie nada dela para dentro deste repositório** — nem
+para consultar como algo era feito lá. O que ela fazia ou virou Python aqui
+dentro, ou está registrado como perda em
+[`docs/arquitetura/pendencias.md`](docs/arquitetura/pendencias.md); a
+reconciliação de cobertura por categoria e por campo é a principal. Se precisar
+daquele comportamento, escreva-o aqui, com gate e teste próprios.
 
 ---
 
@@ -132,10 +141,10 @@ Mudança de prompt é tarefa própria, com diff próprio.
   `.llmignore` do consumidor e a redação de conteúdo, e as tools do mapeador
   consultam a política pelo próprio `Confinamento`. Ferramenta nova que leia o
   backend passa por lá; não reimplemente a regra ao lado.
-- **Não propague a chave do provedor para subprocesso** (Node, Cypress, prettier,
-  eslint). O ambiente do subprocesso é montado explicitamente.
-- **Nenhuma chamada externa em teste unitário** — nem rede, nem provedor, nem Node.
-  Integração tem marker próprio.
+- **Não propague a chave do provedor para subprocesso** (Cypress, prettier, eslint,
+  graphify). O ambiente do subprocesso é montado explicitamente.
+- **Nenhuma chamada externa em teste unitário** — nem rede, nem provedor, nem
+  subprocesso. Integração tem marker próprio.
 - Confine caminho à raiz permitida depois de `Path.resolve()`; nada de comparação
   textual de prefixo.
 
@@ -165,27 +174,25 @@ python -m pytest
 python -m orquestrador --dry-run --recurso pedidos
 ```
 
-O dry-run substitui **apenas a resposta do modelo**; tools, scripts `.mjs`, gates e
-deltas são reais. Ele não prova compatibilidade com provedor real.
+O dry-run substitui **apenas a resposta do modelo**; tools, gates e deltas são
+reais. Ele não prova compatibilidade com provedor real.
 
 **Todo teste declara exatamente um marker**: `unit` (roda com o venv e nada mais),
-`integration` (precisa de Node, dos `.mjs` da skill, do `uv` ou de outro executável)
-ou `e2e` (o pipeline inteiro). A coleta reprova sem ele — ver
-`pytest_collection_modifyitems` em [`tests/conftest.py`](tests/conftest.py).
+`integration` (precisa do `uv` ou de outro executável) ou `e2e` (o pipeline
+inteiro). A coleta reprova sem ele — ver `pytest_collection_modifyitems` em
+[`tests/conftest.py`](tests/conftest.py).
 
-**A CI não verifica o contrato com a skill.** Ela roda lint, tipagem e
-`pytest --cov`; o job de integração virou um workflow próprio
-(`.github/workflows/contrato-da-skill.yml`), disparado só à mão, porque `qa-api`
-mora fora deste repositório e não há cópia que o runner alcance. Quem prova esse
-contrato é você, nesta máquina:
+Rode também os dois marcadores pesados, sempre com `-rs`:
 
 ```powershell
 python -m pytest -m "integration or e2e" -rs
 ```
 
-Se esses testes **pularem**, você não os rodou — o `-rs` diz o motivo. Enquanto o
-job estiver desligado, a única defesa contra a skill mudar por baixo é a impressão
-digital dela (`config.py`), que detecta mudança, não incompatibilidade.
+**Se algum deles pular, isso é um defeito, não um resultado.** Os `e2e` pularam
+por meses porque procuravam um checkout da skill que a configuração já não
+declarava — passaram a pular em toda máquina, e ninguém percebeu, porque suíte
+verde com casos pulados parece suíte verde. O `-rs` diz o motivo de cada pulo:
+leia-o.
 
 **Toda correção de bug inclui um teste que falha antes e passa depois.** Escreva o
 teste primeiro e veja-o falhar — teste escrito depois costuma provar o código, não o

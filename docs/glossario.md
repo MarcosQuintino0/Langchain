@@ -1,6 +1,6 @@
 # Glossário
 
-Onze palavras que este projeto usa com sentido próprio. Nenhuma delas é jargão da
+Doze palavras que este projeto usa com sentido próprio. Nenhuma delas é jargão da
 indústria com o significado usual.
 
 **Recurso** — a unidade de trabalho: um conjunto de endpoints que se testa junto
@@ -32,9 +32,11 @@ passou, hoje falhou"*.
 **Inventário** — o que o mapeador afirma ter encontrado no backend. É o lado
 esquerdo do diff do Gate A; o manifesto é o direito.
 
-**Lacuna** — categoria que o manifesto planejou e que nenhum spec entregou
-(`QAORQ-030`). Era o buraco entre os dois scripts da skill: um prova forma, o outro
-conta cobertura, e ninguém reprovava por "planejei CAT-07 e não escrevi".
+**Lacuna** — categoria que o manifesto planejou e que nenhum spec entregou. Foi o
+buraco entre os dois scripts da skill (um provava forma, o outro contava cobertura,
+e ninguém reprovava por "planejei CAT-07 e não escrevi"); virou o gate `QAORQ-030`,
+e voltou a ser buraco com o desacoplamento. É a principal
+[pendência](arquitetura/pendencias.md).
 
 **Staging** — a área de trabalho de um recurso, irmã do diretório de destino. Cada
 tentativa do loop reescreve o staging; o projeto do consumidor é tocado **uma vez**,
@@ -43,11 +45,6 @@ depois que os dois gates aprovaram.
 **Diário de propriedade** — o `diario-de-propriedade.json`, que registra quais
 arquivos do projeto do consumidor **nós** criamos e quais modificamos, com hash.
 Vive acima da execução porque a pergunta atravessa execuções.
-
-**Impressão da skill** — hash dos `.mjs` de `qa-api` que o orquestrador invoca. A
-integração é um contrato implícito (argumentos, código de saída, forma do JSON), e
-a impressão é o que faz uma mudança do outro lado virar recusa em vez de defeito
-silencioso.
 
 **Superfície do projeto** — o que o projeto de testes do consumidor já oferece:
 módulos compartilhados, exports e os caminhos relativos de import. O executor não

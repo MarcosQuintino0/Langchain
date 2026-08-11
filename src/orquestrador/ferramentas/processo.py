@@ -4,10 +4,10 @@ Regras que valem para todo subprocess deste projeto (aprendidas no Windows):
 
 * sempre **lista de argumentos**, nunca `shell=True` com string montada — separador
   de caminho e aspas quebram de formas difíceis de diagnosticar;
-* `stdout` e `stderr` capturados **separadamente** — o `validar-suite-gerada.mjs`
-  escreve no stdout quando aprova e no stderr quando reprova, então quem lê só
-  stdout enxerga reprovação como saída vazia;
-* `encoding="utf-8"` explícito — a saída dos scripts tem acentuação;
+* `stdout` e `stderr` capturados **separadamente** — validador que aprova pelo
+  stdout e reprova pelo stderr é comum, e quem lê só stdout enxerga reprovação
+  como saída vazia;
+* `encoding="utf-8"` explícito — a saída das ferramentas tem acentuação;
 * `.cmd`/`.bat` (npx, npm, prettier) resolvidos por `shutil.which` antes da chamada;
 * `env` **sempre explícito** — veja `montar_ambiente`.
 """
@@ -35,7 +35,6 @@ __all__ = [
     "MedidaProcesso",
     "SaidaProcesso",
     "executar",
-    "executar_node",
     "montar_ambiente",
     "observar_processos",
     "resolver_executavel",
@@ -48,7 +47,11 @@ class MedidaProcesso:
 
     executavel: str
     comando_sha256: str
-    script_sha256: str
+    # `script_sha256` saiu com o desacoplamento: ele existia para fixar QUAL `.mjs`
+    # da skill tinha rodado, e nenhum subprocesso nosso é mais um script. Manter o
+    # campo o congelaria em "" em todo log futuro, e campo estruturalmente vazio é
+    # lido como "não houve", não como "não se aplica". Log antigo continua legível:
+    # o leitor não enumera as chaves de `dados`.
     codigo: int | None
     duracao_s: float
     stdout_bytes: int
@@ -72,18 +75,6 @@ def observar_processos(observador: Callable[[MedidaProcesso], None]) -> Generato
         _OBSERVADOR.reset(token)
 
 
-def _hash_de_script(argv: list[str]) -> str:
-    for item in argv[1:]:
-        caminho = Path(item)
-        if caminho.suffix.lower() != ".mjs" or not caminho.is_file():
-            continue
-        try:
-            return hashlib.sha256(caminho.read_bytes()).hexdigest()
-        except OSError:
-            return ""
-    return ""
-
-
 def _notificar(
     argv: list[str],
     *,
@@ -101,7 +92,6 @@ def _notificar(
     medida = MedidaProcesso(
         executavel=Path(argv[0]).name if argv else "",
         comando_sha256=hashlib.sha256(serializado).hexdigest(),
-        script_sha256=_hash_de_script(argv),
         codigo=codigo,
         duracao_s=time.perf_counter() - inicio,
         stdout_bytes=len(stdout.encode("utf-8")),
@@ -156,16 +146,16 @@ VARIAVEIS_BASE: tuple[str, ...] = (
     # -- decisões que o Node toma na partida --
     "NUMBER_OF_PROCESSORS",  # os.cpus() e o dimensionamento do thread pool do libuv
     "PROCESSOR_ARCHITECTURE",  # escolha do binário nativo (x64 × arm64)
-    "OS",  # scripts .mjs que testam Windows_NT
-    # -- codificação: a saída dos scripts da skill tem acentuação --
+    "OS",  # ferramenta Node que testa Windows_NT
+    # -- codificação: a saída das ferramentas tem acentuação --
     "LANG",
     "LC_ALL",
 )
 
-# Para o pipeline passar em `variaveis_extras` quando for rodar o Cypress: tanto a
-# skill quanto o `cypress.config.js` do cliente recebem configuração por `CYPRESS_*`,
-# e `CI` muda o reporter. Fica fora da base porque só o Bloco 3 precisa disso — o
-# validador e os formatadores não têm por que enxergar a configuração do runner.
+# Para o pipeline passar em `variaveis_extras` quando for rodar o Cypress: o
+# `cypress.config.js` do cliente recebe configuração por `CYPRESS_*`, e `CI` muda o
+# reporter. Fica fora da base porque só o Bloco 3 precisa disso — os formatadores
+# não têm por que enxergar a configuração do runner.
 VARIAVEIS_DO_CYPRESS: tuple[str, ...] = ("CYPRESS_*", "CI")
 
 # Rede de segurança sobre a allowlist. Uma allowlist já exclui estas por construção;
@@ -314,23 +304,3 @@ def executar(
         stderr=saida.stderr,
     )
     return saida
-
-
-def executar_node(
-    script: Path,
-    argumentos: list[str],
-    *,
-    node: str = "node",
-    cwd: Path | str | None = None,
-    timeout_s: int = 600,
-    variaveis_extras: Sequence[str] | None = None,
-) -> SaidaProcesso:
-    """Invoca um script `.mjs` da skill."""
-    if not script.is_file():
-        raise ErroDeFerramenta(f"script não encontrado: {script}")
-    return executar(
-        [node, str(script), *argumentos],
-        cwd=cwd,
-        timeout_s=timeout_s,
-        variaveis_extras=variaveis_extras,
-    )

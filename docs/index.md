@@ -1,7 +1,9 @@
 # Orquestrador `qa-api`
 
 Orquestrador em Python que coordena três estágios — dois com LLM, um determinístico
-— para gerar suítes de teste Cypress de API, dirigido pela skill externa `qa-api`.
+— para gerar suítes de teste Cypress de API a partir de um backend. Até 2026-08-10
+ele era dirigido pela skill externa `qa-api`; desde o desacoplamento nada fora do
+pacote precisa existir na máquina de quem o roda.
 
 A promessa é **cobertura provada por verificador determinístico**, nunca cobertura
 afirmada por um LLM. Quase toda decisão registrada aqui existe para proteger isso.

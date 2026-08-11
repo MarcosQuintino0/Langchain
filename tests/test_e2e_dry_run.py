@@ -1,51 +1,28 @@
 """Critério de aceite: o pipeline roda ponta a ponta sem chamar nenhum modelo.
 
-Este é um teste de integração de verdade — os scripts `.mjs` da skill são
-invocados sobre arquivos escritos em disco. Precisa de Node.
+Integração de verdade: os gates leem e escrevem arquivos em disco. O que ele
+prova é o ciclo reprova-repara-aprova completo, com os roteiros de
+`fixtures/roteiros/` no lugar das respostas do modelo.
+
+Não precisa mais de Node nem do checkout da skill. Enquanto precisava, estes
+casos PULAVAM em qualquer máquina sem os dois — e depois do desacoplamento
+passaram a pular em todas, porque o caminho da skill saiu da configuração.
+Teste que pula não reprova nada.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
-import tomllib
 from pathlib import Path
 
 import pytest
 
 from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.cli import principal as modulo_cli
-from orquestrador.raiz import DIR_FIXTURES, RAIZ_PROJETO
+from orquestrador.raiz import DIR_FIXTURES
 
-# A raiz do projeto vem do módulo único que a resolve (nada de Path(__file__) aqui).
-RAIZ = RAIZ_PROJETO
-
-
-def _skill_configurada() -> Path:
-    """Onde a skill `qa-api` está, segundo o config.toml deste projeto.
-
-    A skill vive em outro repositório; ler o caminho da configuração evita que o
-    teste adivinhe uma posição relativa que não existe mais.
-    """
-    arquivo = RAIZ / "config.toml"
-    if not arquivo.is_file():
-        return Path("skill-nao-configurada")
-    with arquivo.open("rb") as fluxo:
-        bruto = tomllib.load(fluxo)
-    caminho = Path(str(bruto.get("caminhos", {}).get("skill", "")))
-    return caminho if caminho.is_absolute() else (RAIZ / caminho).resolve()
-
-
-SKILL = _skill_configurada()
-
-precisa_de_node = pytest.mark.skipif(shutil.which("node") is None, reason="Node não está no PATH")
-precisa_da_skill = pytest.mark.skipif(
-    not (SKILL / "scripts" / "validar-suite-gerada.mjs").is_file(),
-    reason=f"skill qa-api não encontrada em {SKILL}",
-)
-
-# Módulo misto: três casos exercitam o pipeline inteiro contra os `.mjs` reais, e o
-# quarto só lê `fixtures/roteiros/`. Por isso o marker vem por função e não em
+# Módulo misto: três casos exercitam o pipeline inteiro em disco, e o quarto só lê
+# `fixtures/roteiros/`. Por isso o marker vem por função e não em
 # `pytestmark` — o pytest **soma** os markers de módulo e de função, e um
 # `pytestmark = e2e` faria `-m e2e` selecionar também o caso que não precisa de nada.
 e2e = pytest.mark.e2e
@@ -57,7 +34,6 @@ def config_toml(tmp_path: Path) -> Path:
     arquivo.write_text(
         f"""
 [caminhos]
-skill = {str(SKILL)!r}
 backend = {str(tmp_path / "backend-ignorado")!r}
 projeto_testes = {str(tmp_path / "projeto-ignorado")!r}
 dir_recursos = "cypress/e2e/apis"
@@ -70,10 +46,8 @@ modelo = "<placeholder: dry-run não chama modelo>"
 modelo = "<placeholder: dry-run não chama modelo>"
 
 [gates.a]
-flags = ["--so-manifesto"]
 max_tentativas = 3
 [gates.b]
-flags = ["--exigir-campos"]
 max_tentativas = 3
 """,
         encoding="utf-8",
@@ -89,9 +63,15 @@ def ultima_execucao(base: Path) -> Path:
 
 
 @e2e
-@precisa_de_node
-@precisa_da_skill
-def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path: Path):
+def test_dry_run_completo_com_reparo_no_gate_a(config_toml: Path, tmp_path: Path):
+    """O ciclo reprova-repara-aprova, com o delta que o alimentou.
+
+    O Gate B entrava aqui também, reprovando por `QAAPI-025` e `QAAPI-002` — dois
+    códigos do `validar-suite-gerada.mjs`. Ele saiu com o desacoplamento e, com os
+    roteiros de hoje, o Gate B aprova de primeira. Ver
+    `test_gate_b_ainda_nao_cobra_o_spec_base`, que é onde essa perda está
+    registrada como perda, e não como silêncio.
+    """
     codigo = modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)])
     assert codigo == 0
 
@@ -102,23 +82,18 @@ def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path:
         eventos.append({**evento, **evento.get("dados", {})})
     gates = [evento for evento in eventos if evento["tipo"] == "gate"]
 
-    # Cada gate reprovou uma vez e aprovou na tentativa seguinte.
-    for nome in ("gate_a", "gate_b"):
-        deste = [evento for evento in gates if evento["gate"] == nome]
-        assert [evento["aprovado"] for evento in deste] == [False, True], nome
-        assert deste[0]["violacoes"], f"{nome} precisa reprovar com violações reais"
+    do_a = [evento for evento in gates if evento["gate"] == "gate_a"]
+    assert [evento["aprovado"] for evento in do_a] == [False, True]
+    assert do_a[0]["violacoes"], "o gate_a precisa reprovar com violações reais"
 
-    # O delta do Gate A trouxe a contabilidade das 12 categorias (QAAPI-021)…
+    # O delta que foi ao reparo carrega o código que o produziu — é ele, e só ele,
+    # que o princípio 2 permite mandar de volta ao modelo.
     delta_a = next(
         evento for evento in eventos if evento["tipo"] == "delta" and evento["estagio"] == "gate_a"
     )
-    assert "QAAPI-021" in delta_a["codigos"]
+    assert "QAORQ-063" in delta_a["codigos"], "dossiê ausente é o que a 1ª tentativa erra"
 
-    # …e o do Gate B, a cobertura por campo e o spec-base ausente.
-    delta_b = next(
-        evento for evento in eventos if evento["tipo"] == "delta" and evento["estagio"] == "gate_b"
-    )
-    assert {"QAAPI-025", "QAAPI-002"} <= set(delta_b["codigos"])
+    assert [evento["aprovado"] for evento in gates if evento["gate"] == "gate_b"] == [True]
 
     # Nenhum modelo foi chamado.
     chamadas = [evento for evento in eventos if evento["tipo"] == "requisicao_llm_concluida"]
@@ -131,8 +106,6 @@ def test_dry_run_completo_com_reparo_nos_dois_gates(config_toml: Path, tmp_path:
 
 
 @e2e
-@precisa_de_node
-@precisa_da_skill
 def test_o_reparo_nao_cresce_o_contexto(config_toml: Path, tmp_path: Path):
     # A prova prática do princípio 2: a tentativa de reparo do mapeador entra com
     # MENOS tokens que a primeira, porque recebe só o artefato e as violações —
@@ -154,8 +127,6 @@ def test_o_reparo_nao_cresce_o_contexto(config_toml: Path, tmp_path: Path):
 
 
 @e2e
-@precisa_de_node
-@precisa_da_skill
 def test_artefatos_ficam_em_disco(config_toml: Path, tmp_path: Path):
     modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)])
     execucao = ultima_execucao(tmp_path / "execucoes")
@@ -167,9 +138,30 @@ def test_artefatos_ficam_em_disco(config_toml: Path, tmp_path: Path):
     for entrada in manifesto["endpoints"]:
         assert len(set(entrada["cats"]) | set(entrada["naoAplica"])) == 12
 
-    for spec in ("crud.cy.js", "validacoes.cy.js", "seguranca.cy.js"):
+    for spec in ("crud.cy.js", "validacoes.cy.js"):
         assert (recurso / spec).is_file()
-    assert (execucao / "artefatos" / "pedidos" / "inventario.json").is_file()
+    for artefato in ("inventario.json", "plano.json", "dossie.json", "dossie.md"):
+        assert (execucao / "artefatos" / "pedidos" / artefato).is_file()
+
+
+@e2e
+def test_gate_b_ainda_nao_cobra_o_spec_base(config_toml: Path, tmp_path: Path):
+    """A perda do desacoplamento, escrita como teste em vez de como comentário.
+
+    O roteiro do executor não escreve `seguranca.cy.js`. Enquanto o
+    `validar-suite-gerada.mjs` rodava, isso era `QAAPI-002` e o Gate B reprovava;
+    hoje passa. Está em `docs/arquitetura/pendencias.md`.
+
+    Este teste afirma a ausência de propósito. Quando o gate novo for escrito, ele
+    quebra — e quem o escrever é obrigado a vir aqui trocar a asserção pela
+    exigência, que é exatamente o momento em que a pendência deixa de existir. Uma
+    linha de comentário não teria feito isso: ninguém a lê no dia certo.
+    """
+    assert modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]) == 0
+    execucao = ultima_execucao(tmp_path / "execucoes")
+    recurso = execucao / "sandbox" / "projeto-testes" / "cypress" / "e2e" / "apis" / "pedidos"
+
+    assert not (recurso / "seguranca.cy.js").is_file()
 
 
 @pytest.mark.unit

@@ -1,6 +1,24 @@
 # ADR 0014 — O contrato com a skill não é verificado na CI
 
-**Status:** Aceita
+**Status:** Superada
+
+> **O que mudou — desacoplamento de 2026-08-10.** Não há mais contrato com a skill
+> para verificar. O orquestrador
+> deixou de invocar os `.mjs`, o `graphify` virou dependência declarada do pacote e
+> `[caminhos].skill` saiu da configuração. Com isso, o único pré-requisito que
+> sobrou para `integration` e `e2e` é o `uv`, que o runner instala com pip — então
+> o workflow à mão foi apagado e os dois markers voltaram para o `ci.yml`, num job
+> que roda a cada push e reprova se qualquer caso pular.
+>
+> O registro abaixo fica como estava, porque o **gatilho para rever** que ele
+> nomeia foi de fato o que aconteceu, ainda que pelo caminho oposto ao previsto:
+> em vez de publicar a skill num repositório alcançável, o projeto parou de
+> depender dela.
+>
+> A perda que o desacoplamento trouxe está em
+> [`docs/arquitetura/pendencias.md`](../arquitetura/pendencias.md).
+
+**Status original:** Aceita
 
 ## Contexto
 
@@ -8,8 +26,9 @@ O job de integração dependia de `vars.SKILL_REPO`, uma variável que nunca foi
 
 ## Decisão
 
-O job sai do `ci.yml` e vira um workflow próprio,
-`.github/workflows/contrato-da-skill.yml`, disparado só por `workflow_dispatch`.
+O job sai do `ci.yml` e vira um workflow próprio, `contrato-da-skill.yml` em
+`.github/workflows/` (apagado em 2026-08-10 — ver o topo), disparado só por
+`workflow_dispatch`.
 
 Workflow separado, e não um job com `if:` dentro do `ci.yml`, por um motivo
 visível: um job com condição falsa **ainda aparece** na lista da execução, como
