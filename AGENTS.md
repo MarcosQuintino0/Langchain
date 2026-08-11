@@ -266,6 +266,29 @@ Acrescente `--rodar-cypress` **só se o usuário pedir**: ele executa a suíte
 gerada de verdade e exige Node e um `[execucao].cypress` configurado. Sem essa
 flag, a cobertura relatada é estática — e o resumo final diz isso, em vermelho.
 
+### Iterar no executor sem pagar o pipeline inteiro
+
+Quando o que mudou foi a norma de código, o prompt do executor ou o fatiamento,
+o mapeador e o planejador vão refazer exatamente o mesmo trabalho — caro, lento,
+e com variância própria que suja a comparação.
+
+```powershell
+.venv-execucao\Scripts\python -m orquestrador --recurso customers --reaproveitar <run_id>
+```
+
+A execução começa no Bloco 2 com o gabarito, o plano, o dossiê e o inventário da
+execução citada. **Os dois gates continuam rodando** e o executor roda inteiro,
+do zero: o que se reaproveita é decisão, nunca veredito nem código.
+
+É a forma honesta de medir uma mudança no Bloco 2, porque a entrada fica
+literalmente idêntica entre as voltas — o mesmo plano, os mesmos cenários, na
+mesma ordem. Rodar o pipeline inteiro duas vezes compara duas coisas que já
+diferem antes de o executor começar.
+
+A execução nova é auto-contida: ela grava a própria cópia dos artefatos
+reaproveitados, então `execucoes comparar` continua funcionando mesmo depois de
+a execução de origem ser apagada pela retenção.
+
 ### O relatório é obrigatório
 
 Uma execução sem números não serviu para nada: o motivo de rodá-la é comparar

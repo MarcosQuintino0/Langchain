@@ -33,8 +33,9 @@ Em CI, o que importa é **não ser 0**: zero é indistinguível de trabalho feit
 <!-- INICIO DA AJUDA: gerado por cli/principal.py::parse_args -->
 ```
 usage: orquestrador [-h] [--config CONFIG] [--recurso RECURSOS] [--dry-run]
-                    [--max-tentativas MAX_TENTATIVAS] [--estimar] [--rodar-cypress]
-                    [--auditor] [--remover-reprovados]
+                    [--max-tentativas MAX_TENTATIVAS] [--estimar]
+                    [--reaproveitar RUN_ID] [--rodar-cypress] [--auditor]
+                    [--remover-reprovados]
 
 Orquestrador multi-agente de testes de API (skill qa-api).
 
@@ -48,6 +49,11 @@ options:
                         sobrescreve max_tentativas de todos os gates (inteiro >= 1).
   --estimar             conta os endpoints do backend e devolve a faixa de token, sem
                         chamar modelo nenhum. Roda só o Bloco 0.
+  --reaproveitar RUN_ID
+                        começa no executor, com o gabarito e o plano de uma execução
+                        anterior. Mapeador e planejador não são chamados; os dois
+                        gates continuam rodando. Serve para iterar no Bloco 2 sem
+                        pagar o pipeline inteiro.
   --rodar-cypress       executa o Cypress no Bloco 3 (por padrão é pulado).
   --auditor             RECUSADO enquanto o auditor semântico for stub: encerra com
                         erro.

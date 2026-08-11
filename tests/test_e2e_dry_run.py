@@ -19,6 +19,7 @@ import pytest
 
 from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.cli import principal as modulo_cli
+from orquestrador.cli.codigos_de_saida import ERRO_DE_USO
 from orquestrador.raiz import DIR_FIXTURES
 
 # Módulo misto: três casos exercitam o pipeline inteiro em disco, e o quarto só lê
@@ -186,6 +187,76 @@ def test_gate_b_ainda_nao_cobra_o_que_o_plano_mandou(config_toml: Path, tmp_path
         "o roteiro deixa cenários por transcrever de propósito; se isso deixou de "
         "ser verdade, o teste perdeu o objeto e precisa ser reescrito"
     )
+
+
+def eventos_de(execucao: Path) -> list[dict]:
+    linhas = (execucao / "execucao.jsonl").read_text(encoding="utf-8").splitlines()
+    brutos = [json.loads(linha) for linha in linhas]
+    return [{**evento, **evento.get("dados", {})} for evento in brutos]
+
+
+@e2e
+def test_reaproveitar_comeca_no_executor(config_toml: Path, tmp_path: Path):
+    """A prova prática do princípio 1: os artefatos de ontem bastam para hoje.
+
+    Se o handoff entre estágios é mesmo arquivo em disco, então o Bloco 2 roda a
+    partir do que ficou gravado, sem re-explorar o backend nem replanejar. É o que
+    torna viável iterar no executor sem pagar o pipeline inteiro a cada volta.
+    """
+    assert modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]) == 0
+    primeira = ultima_execucao(tmp_path / "execucoes")
+
+    codigo = modulo_cli.main(
+        [
+            "--dry-run",
+            "--recurso",
+            "pedidos",
+            "--config",
+            str(config_toml),
+            "--reaproveitar",
+            primeira.name,
+        ]
+    )
+    assert codigo == 0
+
+    segunda = ultima_execucao(tmp_path / "execucoes")
+    assert segunda != primeira
+
+    chamadas = [
+        evento for evento in eventos_de(segunda) if evento["tipo"] == "requisicao_llm_concluida"
+    ]
+    assert chamadas, "o executor precisa ter rodado"
+    assert {evento["estagio"] for evento in chamadas} == {"executor"}, (
+        "mapeador e planejador não podem ser chamados numa execução reaproveitada"
+    )
+
+    # Os dois gates continuam mandando: reaproveitar decisão não é reaproveitar
+    # veredito. O Gate A não roda porque não há artefato de mapeador para julgar.
+    gates = {evento["gate"] for evento in eventos_de(segunda) if evento["tipo"] == "gate"}
+    assert gates == {"gate_b"}
+
+    # A execução nova é auto-contida: quem a comparar amanhã não depende de a
+    # execução de origem ainda existir.
+    for artefato in ("manifesto.json", "plano.json", "dossie.json", "inventario.json"):
+        assert (segunda / "artefatos" / "pedidos" / artefato).is_file(), artefato
+
+
+@e2e
+def test_reaproveitar_execucao_inexistente_e_erro_de_uso(config_toml: Path, tmp_path: Path):
+    # Falha fechada e antes de qualquer chamada: run_id errado que "só rodasse o
+    # pipeline inteiro" gastaria os dois estágios caros sem ninguém pedir.
+    codigo = modulo_cli.main(
+        [
+            "--dry-run",
+            "--recurso",
+            "pedidos",
+            "--config",
+            str(config_toml),
+            "--reaproveitar",
+            "20260101-000000-0-inexistente",
+        ]
+    )
+    assert codigo == ERRO_DE_USO
 
 
 @pytest.mark.unit

@@ -24,6 +24,7 @@ src/orquestrador/
     __init__.py
     pipeline.py      a ordem dos quatro blocos e o desfecho de cada recurso
     ciclo_de_reparo.py  gera → persiste → avalia → (delta → repete)
+    reaproveitamento.py  gabarito, plano, dossiê e inventário lidos de uma execução anterior
     persistencia.py  o que sai para o disco, e de quem é cada arquivo que sai
     simulacao.py     modelo falso dirigido por fixture + sandbox do --dry-run
   dominio/

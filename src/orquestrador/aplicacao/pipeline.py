@@ -36,6 +36,7 @@ from orquestrador.agentes import mapeador as agente_mapeador
 from orquestrador.agentes import planejador as agente_planejador
 from orquestrador.aplicacao.ciclo_de_reparo import CicloDeReparo
 from orquestrador.aplicacao.persistencia import PersistenciaDeArtefatos
+from orquestrador.aplicacao.reaproveitamento import DecisoesAnteriores, carregar
 from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import SaidaExecutor, SaidaMapeador
@@ -115,6 +116,35 @@ class InterrupcaoDaExecucao:
     por_orcamento: bool = False
 
 
+def _copiar_decisoes(decisoes: DecisoesAnteriores, destino: Path) -> list[Path]:
+    """Reescreve os artefatos reaproveitados nesta execução, já validados.
+
+    Reserializar em vez de copiar byte a byte é deliberado: o que vai para o disco
+    é o que o contrato aceitou, então um artefato de versão antiga chega aqui na
+    forma de hoje, e não como cópia que só falharia na próxima leitura.
+    """
+    escritos = [
+        _gravar(destino / "manifesto.json", decisoes.manifesto.para_json()),
+        _gravar(destino / "plano.json", decisoes.plano.model_dump_json(by_alias=True, indent=1)),
+        _gravar(destino / "plano.md", decisoes.plano.render() + "\n"),
+    ]
+    if decisoes.inventario is not None:
+        escritos.append(_gravar(destino / "inventario.json", decisoes.inventario.para_json()))
+    if decisoes.dossie is not None:
+        escritos.append(
+            _gravar(
+                destino / "dossie.json",
+                decisoes.dossie.model_dump_json(by_alias=True, exclude_none=True, indent=1) + "\n",
+            )
+        )
+    return escritos
+
+
+def _gravar(arquivo: Path, conteudo: str) -> Path:
+    arquivo.write_text(conteudo, encoding="utf-8", newline="\n")
+    return arquivo
+
+
 @dataclass
 class ResultadoDoRecurso:
     recurso: str
@@ -167,6 +197,7 @@ class Pipeline:
         roteiros: Roteiros | None = None,
         dir_execucao: Path,
         pular_cypress: bool = True,
+        reaproveitar: Path | None = None,
     ) -> None:
         self.config = config
         self.registro = registro
@@ -175,6 +206,9 @@ class Pipeline:
         self.roteiros = roteiros
         self.dir_execucao = dir_execucao
         self.pular_cypress = pular_cypress
+        # A execução cujos artefatos substituem os Blocos 1 e o plano. Ela não é
+        # tocada: o que sai de lá é lido, e tudo que se escreve continua nesta.
+        self.reaproveitar = reaproveitar
         self._modelos_reais: dict[str, BaseChatModel] = {}
         # O diário mora na raiz do diretório de saída — acima desta execução, porque
         # a pergunta que ele responde ("este arquivo é nosso?") atravessa execuções.
@@ -252,6 +286,7 @@ class Pipeline:
         inventario_path = dir_artefatos / "inventario.json"
         dossie_path = dir_artefatos / "dossie.json"
         notas_path = dir_artefatos / "notas-de-descoberta.md"
+        manifesto_path = dir_artefatos / "manifesto.json"
 
         # A memória entre tentativas do MESMO recurso: o reparo parte das notas e
         # da saída da tentativa anterior em vez de re-explorar o backend. Morre com
@@ -308,6 +343,11 @@ class Pipeline:
             # se lê o que o modelo leu no backend para decidir o resto.
             notas_path.write_text(produzido.notas.rstrip() + "\n", encoding="utf-8", newline="\n")
             inventario_path.write_text(saida.inventario.para_json(), encoding="utf-8", newline="\n")
+            # O gabarito também fica no diretório da execução, e não só no `_support/`
+            # publicado: sem esta cópia a execução não é auto-contida, e reaproveitá-la
+            # depois obrigaria a ler o projeto do cliente — que pode ter mudado desde
+            # então, e aí o plano estaria sendo executado contra outro gabarito.
+            manifesto_path.write_text(saida.manifesto.para_json(), encoding="utf-8", newline="\n")
             # O inventário e o dossiê ficam no diretório da execução, que é nosso,
             # e por isso não entram na conta do que precisa ser publicado.
             if saida.dossie is not None:
@@ -403,6 +443,51 @@ class Pipeline:
             f"{len(plano.endpoints)} endpoint(s)"
         )
         return plano
+
+    # -- Reaproveitamento (no lugar do Bloco 1 e do plano) --------------------
+
+    def bloco_reaproveitado(self, recurso: Recurso, area: AreaDeStaging) -> DecisoesAnteriores:
+        """O gabarito, o plano, o dossiê e o inventário de uma execução anterior.
+
+        Substitui o Bloco 1 e o plano, não o Bloco 2: o executor roda inteiro e os
+        dois gates também. Reaproveitar veredito seria carimbar sem verificar.
+        """
+        # Mesmo caso do `roteiros` acima: invariante da nossa própria montagem — a
+        # CLI resolve o run_id antes de construir o Pipeline —, não entrada de quem
+        # opera. Quem digita run_id errado recebe ErroDeConfiguracao lá, com o texto
+        # que diz onde procurei.
+        assert self.reaproveitar is not None  # noqa: S101
+        self.registro.titulo(f"Decisões reaproveitadas · {recurso.nome}")
+        decisoes = carregar(self.reaproveitar, recurso)
+
+        # O gabarito precisa voltar ao staging: a publicação mede o diretório do
+        # recurso e remove o que ficou de fora. Sem esta linha, o
+        # `_support/cobertura.json` publicado seria dado por obsoleto e apagado do
+        # projeto de quem nos contratou — por causa de uma execução que nem tinha
+        # mapeador.
+        escritos = [area.escrever("_support/cobertura.json", decisoes.manifesto.para_json())]
+
+        # E uma cópia dos artefatos aqui dentro. Ponteiro para o diretório de origem
+        # envelheceria: a retenção pode apagar aquela execução, e comparar duas
+        # execuções exige que cada uma diga, por si, contra o que rodou.
+        destino = self.dir_execucao / "artefatos" / recurso.nome
+        destino.mkdir(parents=True, exist_ok=True)
+        copiados = _copiar_decisoes(decisoes, destino)
+
+        self.registro.evento(
+            TipoDeEvento.ARTEFATOS,
+            estagio="reaproveitamento",
+            recurso=recurso.nome,
+            arquivos=medir_arquivos(escritos + copiados),
+            origem=str(decisoes.origem),
+        )
+        self.registro.ok(
+            f"reaproveitado de {self.reaproveitar.name}: gabarito com "
+            f"{len(decisoes.manifesto.endpoints)} endpoint(s) e plano com "
+            f"{decisoes.plano.total_de_cenarios()} cenário(s). "
+            "Mapeador e planejador NÃO foram chamados."
+        )
+        return decisoes
 
     # -- Bloco 2 + Gate B ---------------------------------------------------
 
@@ -643,19 +728,26 @@ class Pipeline:
             criados_antes=self.diario.criados(),
         )
         try:
-            saida_mapeador, gate_a_ok, tentativas_a = self.bloco1(recurso, area)
-            resultado.gate_a = gate_a_ok
-            resultado.tentativas_mapeador = tentativas_a
+            if self.reaproveitar is not None:
+                decisoes = self.bloco_reaproveitado(recurso, area)
+                manifesto, plano = decisoes.manifesto, decisoes.plano
+                dossie, inventario = decisoes.dossie, decisoes.inventario
+            else:
+                saida_mapeador, gate_a_ok, tentativas_a = self.bloco1(recurso, area)
+                resultado.gate_a = gate_a_ok
+                resultado.tentativas_mapeador = tentativas_a
 
-            plano = self.bloco_plano(recurso, saida_mapeador)
+                plano = self.bloco_plano(recurso, saida_mapeador)
+                manifesto = saida_mapeador.manifesto
+                dossie, inventario = saida_mapeador.dossie, saida_mapeador.inventario
 
             _saida_executor, gate_b_ok, tentativas_b = self.bloco2(
                 recurso,
-                saida_mapeador.manifesto,
+                manifesto,
                 area,
                 plano,
-                dossie=saida_mapeador.dossie,
-                inventario=saida_mapeador.inventario,
+                dossie=dossie,
+                inventario=inventario,
             )
             resultado.gate_b = gate_b_ok
             resultado.tentativas_executor = tentativas_b

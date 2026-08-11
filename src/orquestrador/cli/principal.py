@@ -21,6 +21,7 @@ from orquestrador.aplicacao.pipeline import (
     Pipeline,
     ResultadoDoRecurso,
 )
+from orquestrador.aplicacao.reaproveitamento import resolver_execucao
 from orquestrador.aplicacao.simulacao import Roteiros, preparar_sandbox
 from orquestrador.cli.codigos_de_saida import (
     ERRO_DE_PROVEDOR,
@@ -132,6 +133,16 @@ def construir_analisador() -> argparse.ArgumentParser:
         help=(
             "conta os endpoints do backend e devolve a faixa de token, sem chamar "
             "modelo nenhum. Roda só o Bloco 0."
+        ),
+    )
+    analisador.add_argument(
+        "--reaproveitar",
+        metavar="RUN_ID",
+        default=None,
+        help=(
+            "começa no executor, com o gabarito e o plano de uma execução anterior. "
+            "Mapeador e planejador não são chamados; os dois gates continuam rodando. "
+            "Serve para iterar no Bloco 2 sem pagar o pipeline inteiro."
         ),
     )
     analisador.add_argument(
@@ -409,6 +420,21 @@ def executar_pipeline(argv: list[str] | None = None) -> int:
             )
             return ERRO_DE_USO
 
+        try:
+            origem = (
+                resolver_execucao(config.caminhos.saida, args.reaproveitar)
+                if args.reaproveitar
+                else None
+            )
+        except ErroDeConfiguracao as erro:
+            registro.falha(str(erro))
+            registro.evento(
+                TipoDeEvento.EXECUCAO_ABORTADA,
+                motivo="execução a reaproveitar não resolvida",
+                erro_tipo=type(erro).__name__,
+            )
+            return ERRO_DE_USO
+
         pipeline = Pipeline(
             config,
             registro,
@@ -416,6 +442,7 @@ def executar_pipeline(argv: list[str] | None = None) -> int:
             roteiros=roteiros,
             dir_execucao=dir_execucao,
             pular_cypress=not args.rodar_cypress,
+            reaproveitar=origem,
         )
 
         try:
