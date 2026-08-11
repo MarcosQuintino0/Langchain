@@ -24,6 +24,7 @@ A CLI que dirige tudo isto vive em `cli.py`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -250,9 +251,28 @@ class Pipeline:
         dir_artefatos = self.dir_execucao / "artefatos" / recurso.nome
         inventario_path = dir_artefatos / "inventario.json"
         dossie_path = dir_artefatos / "dossie.json"
+        notas_path = dir_artefatos / "notas-de-descoberta.md"
 
-        def produzir(tentativa: int, delta: Delta | None, atual: str | None) -> SaidaMapeador:
-            return agente_mapeador.executar(
+        # A memória entre tentativas do MESMO recurso: o reparo parte das notas e
+        # da saída da tentativa anterior em vez de re-explorar o backend. Morre com
+        # o bloco (princípio 3) — o próximo recurso começa do zero.
+        ultimo: agente_mapeador.MapeamentoProduzido | None = None
+
+        def modelo_da_fatia(tentativa: int) -> Callable[[str], BaseChatModel]:
+            def fabrica(fatia: str) -> BaseChatModel:
+                if self.dry_run:
+                    # Cada fatia tem o próprio roteiro: o ModeloSimulado escolhe o
+                    # passo contando a conversa, e as fatias começam conversa nova.
+                    return self.modelo(f"mapeador-{fatia}", recurso.nome, tentativa)
+                return self.modelo(agente_mapeador.ESTAGIO, recurso.nome, tentativa)
+
+            return fabrica
+
+        def produzir(
+            tentativa: int, delta: Delta | None, atual: str | None
+        ) -> agente_mapeador.MapeamentoProduzido:
+            nonlocal ultimo
+            ultimo = agente_mapeador.executar(
                 self.config,
                 recurso,
                 modelo=self.modelo(agente_mapeador.ESTAGIO, recurso.nome, tentativa),
@@ -261,9 +281,14 @@ class Pipeline:
                 tentativa=tentativa,
                 delta=delta,
                 artefato_atual=atual,
+                notas_anteriores=ultimo.notas if ultimo else None,
+                saida_anterior=ultimo.saida if ultimo else None,
+                modelo_da_fatia=modelo_da_fatia(tentativa),
             )
+            return ultimo
 
-        def persistir(saida: SaidaMapeador) -> list[Path]:
+        def persistir(produzido: agente_mapeador.MapeamentoProduzido) -> list[Path]:
+            saida = produzido.saida
             escritos = [
                 area.escrever("_support/cobertura.json", saida.manifesto.para_json()),
                 # Os schemas de entrada ficam fora do diretório do recurso: são o
@@ -279,6 +304,9 @@ class Pipeline:
             )
 
             inventario_path.parent.mkdir(parents=True, exist_ok=True)
+            # As notas são artefato de auditoria e a memória do reparo: é nelas que
+            # se lê o que o modelo leu no backend para decidir o resto.
+            notas_path.write_text(produzido.notas.rstrip() + "\n", encoding="utf-8", newline="\n")
             inventario_path.write_text(saida.inventario.para_json(), encoding="utf-8", newline="\n")
             # O inventário e o dossiê ficam no diretório da execução, que é nosso,
             # e por isso não entram na conta do que precisa ser publicado.
@@ -307,32 +335,34 @@ class Pipeline:
                 dossie_path.with_suffix(".md").unlink(missing_ok=True)
             return escritos
 
-        def avaliar(saida: SaidaMapeador) -> ResultadoGate:
+        def avaliar(produzido: agente_mapeador.MapeamentoProduzido) -> ResultadoGate:
             return gate_a.executar(
                 self.config,
                 recurso,
                 dir_recurso=area.dir_recurso,
                 dir_schemas=area.dir_schemas,
-                inventario=saida.inventario,
-                manifesto=saida.manifesto,
-                dossie=saida.dossie,
+                inventario=produzido.saida.inventario,
+                manifesto=produzido.saida.manifesto,
+                dossie=produzido.saida.dossie,
             )
 
-        return self.ciclo.executar(
+        produzido, resultado, tentativas = self.ciclo.executar(
             estagio=agente_mapeador.ESTAGIO,
             gate="a",
             recurso=recurso,
             produzir=produzir,
             persistir=persistir,
             avaliar=avaliar,
-            texto_do_artefato=lambda _saida, _delta: agente_mapeador.artefato_em_disco(
+            texto_do_artefato=lambda _produzido, _delta: agente_mapeador.artefato_em_disco(
                 manifesto=area.dir_recurso / "_support" / "cobertura.json",
                 inventario=inventario_path,
                 dir_schemas=area.dir_schemas,
                 recurso=recurso.nome,
                 dossie=dossie_path,
+                notas=notas_path,
             ),
         )
+        return produzido.saida, resultado, tentativas
 
     # -- Plano de cenários (entre o Gate A e o executor) ----------------------
 

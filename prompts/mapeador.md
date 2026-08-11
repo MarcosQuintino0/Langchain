@@ -5,13 +5,14 @@ primeira parcela de todo prompt de reparo
 de uma tentativa, de uma execução ou de um resultado — só o que vale sempre.
 
 Placeholders (substituídos por `montagem.carregar_prompt`). Citados aqui SEM as
-chaves de propósito: dentro do comentário eles também seriam substituídos, e o
-`schema_json` sozinho custa ~7,5 KB em toda chamada.
+chaves de propósito: dentro do comentário eles também seriam substituídos.
   recurso          nome do recurso alvo
   caminho_backend  raiz do backend (raiz do confinamento das tools de arquivo)
   caminho_graph    caminho do graph.json já validado pelo Bloco 0
   caminho_recurso  diretório do recurso no projeto de testes
-  schema_json      JSON Schema de `SaidaMapeador` (inventario, manifesto e schemas)
+
+A saída desta fase são NOTAS DE DESCOBERTA (texto), não JSON: a serialização nos
+artefatos do contrato acontece em chamadas próprias, com `mapeador-fatias.md`.
 
 Fontes: SKILL.md passos 1–7, references/descobrir-backend.md e, do
 references/catalogo-de-testes.md, os blocos "Quando aplicar", "Quando não se
@@ -343,11 +344,54 @@ próprio por padrão; juntá-la a outra é exceção que precisa ficar registrad
 - Cada endpoint aparece **uma vez** no manifesto, na forma canônica exata
   `MÉTODO /rota/completa` (um espaço, rota começando em `/`).
 
-## Contrato de saída
+## Contrato de saída — notas de descoberta
 
-Termine respondendo **apenas** com um objeto JSON que valide contra o schema
-abaixo. Sem prosa antes ou depois, sem cerca de código.
+Termine respondendo com as **notas de descoberta**: texto em Markdown, não JSON.
+Outra chamada serializa as notas nos artefatos finais **sem reler o backend** —
+decisão, evidência ou justificativa que não estiver aqui não existe para quem
+serializa, e o artefato sai vazio naquele ponto. As notas são a única memória da
+sua exploração.
 
-```json
-{{schema_json}}
+Duas seções têm forma combinada, porque **código** as lê:
+
 ```
+## Endpoints do recurso
+- MÉTODO /rota/completa | handler nome | arquivo:linha
+
+## Rotas dinâmicas não resolvidas
+- expressão | arquivo:linha | motivo
+```
+
+Uma linha por endpoint do recurso, no formato exato acima — é o mesmo da lista
+de endpoints extraídos da entrada: confirmar um endpoint é copiar a linha.
+Endpoint que você descobriu além da lista entra do mesmo jeito, com a evidência
+real. Sem rota dinâmica pendente, escreva `- nenhuma`.
+
+As demais seções são texto livre, uma por título, todas presentes:
+
+- `## Categorias por endpoint` — para cada endpoint, `cats` e `naoAplica` com a
+  justificativa **já na forma final** (as regras de escrita acima valem aqui).
+  Inclua `schemaEntrada` ou `semCorpo` de cada endpoint de escrita, `campos` com
+  as exceções por campo, e `profundidade`/`handlerCompartilhado` quando houver.
+- `## Schemas de entrada` — para cada schema declarado, o caminho
+  (`<recurso>/<nome>.schema.json`) e o **conteúdo JSON completo**, derivado do
+  DTO/entidade conforme a tabela acima. O serializador copia; não deixe para ele
+  derivar nada.
+- `## Regras de negócio` — cada regra com id (`RN-01`, ...), resumo, efeito
+  (status e código exatos), endpoints afetados e **evidência arquivo:linha
+  literal** — ela será conferida por script contra o fonte (QAORQ-060).
+  **Uma linha por evidência, sempre inteiro único**: escreva
+  `arquivo:29; arquivo:32`, nunca `arquivo:29-31` nem `arquivo:29,32` — o
+  contrato final só aceita uma linha por evidência, e intervalo ou lista obriga
+  quem serializa a adivinhar.
+- `## Erros por endpoint` — status, código do corpo, e quando. Erro sem código
+  de corpo: escreva `sem código` explicitamente, para ninguém precisar decidir
+  se você esqueceu ou conferiu.
+- `## Consultas` — parâmetros de listagem, exaustivos por contrato.
+- `## Incertezas` — o que você procurou e não determinou.
+- `## Verificações negativas` — a checklist fechada das quatro
+  (`campos-derivados`, `maquina-de-estados`, `regras-condicionais-entre-campos`,
+  `efeitos-colaterais-em-outros-recursos`): o que vasculhou e o que encontrou.
+
+Seja completo e específico; não seja prolixo. As notas carregam decisões e
+evidências, nunca o raciocínio que levou a elas.

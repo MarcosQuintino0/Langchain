@@ -34,6 +34,11 @@ usuário e leva dezenas de minutos. "Rodar a suíte" numa frase sobre testes
 costuma significar `python -m pytest`; a suíte paga é a que tem `--recurso` e
 chama o provedor. Na dúvida entre as duas, pergunte.
 
+**Rode pelo venv de execução congelado** (`.venv-execucao`, ver o tutorial no
+`AGENTS.md`) — nunca pelo `.venv` de desenvolvimento: o usuário edita o checkout
+enquanto a suíte anda, e os prompts são relidos do disco a cada chamada. Lembre
+de reinstalar (`pip install .`) antes de cada suíte.
+
 **Rode em segundo plano** e diga ao usuário como acompanhar o log ao vivo:
 
 ```powershell

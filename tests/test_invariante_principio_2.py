@@ -56,8 +56,24 @@ class ModeloEspiao(ModeloSimulado):
 
 def espiao_de(estagio: str) -> ModeloEspiao:
     """Espião que devolve o artefato bom da fixture — o foco é a entrada, não a saída."""
-    roteiro = Roteiros(FIXTURES / "roteiros").carregar("pedidos", estagio, 2)
+    tentativa = 1 if estagio == "mapeador" else 2
+    roteiro = Roteiros(FIXTURES / "roteiros").carregar("pedidos", estagio, tentativa)
     return ModeloEspiao(passos=roteiro["passos"])
+
+
+def fatias_de_fixture():
+    """Modelos simulados das fatias de serialização do mapeador.
+
+    O princípio 2 é medido na EXPLORAÇÃO (o espião); as fatias só precisam
+    devolver artefatos válidos para a montagem não interromper o teste.
+    """
+    roteiros = Roteiros(FIXTURES / "roteiros")
+
+    def fabrica(fatia: str) -> ModeloSimulado:
+        tentativa = 2 if fatia == "dossie" else 1
+        return roteiros.modelo("pedidos", f"mapeador-{fatia}", tentativa)
+
+    return fabrica
 
 
 def recurso_de(config) -> Recurso:
@@ -69,8 +85,8 @@ def recurso_de(config) -> Recurso:
 
 
 def manifesto_de_fixture() -> Manifesto:
-    roteiro = Roteiros(FIXTURES / "roteiros").carregar("pedidos", "mapeador", 2)
-    return Manifesto.model_validate(roteiro["passos"][-1]["artefato"]["manifesto"])
+    roteiro = Roteiros(FIXTURES / "roteiros").carregar("pedidos", "mapeador-manifesto", 1)
+    return Manifesto.model_validate(roteiro["passos"][-1]["artefato"])
 
 
 def delta_de(numero: int, codigo: str) -> Delta:
@@ -83,6 +99,8 @@ def delta_de(numero: int, codigo: str) -> Delta:
 
 
 def rodar_mapeador(config, *, delta: Delta | None, artefato: str | None) -> ModeloEspiao:
+    # Sem `notas_anteriores` de propósito: é o caminho frio, onde o reparo
+    # re-explora com `instrução + artefato + violações` — a fórmula medida aqui.
     espiao = espiao_de("mapeador")
     agente_mapeador.executar(
         config,
@@ -92,6 +110,7 @@ def rodar_mapeador(config, *, delta: Delta | None, artefato: str | None) -> Mode
         tentativa=delta.tentativa if delta else 1,
         delta=delta,
         artefato_atual=artefato,
+        modelo_da_fatia=fatias_de_fixture(),
     )
     return espiao
 
@@ -189,6 +208,7 @@ def test_o_tamanho_da_entrada_vai_para_a_telemetria(config_falso, estagio: str):
             modelo=espiao_de("mapeador"),
             telemetria=telemetria,
             tentativa=1,
+            modelo_da_fatia=fatias_de_fixture(),
         )
     else:
         agente_executor.executar(
@@ -204,6 +224,13 @@ def test_o_tamanho_da_entrada_vai_para_a_telemetria(config_falso, estagio: str):
     assert chamada.caracteres_instrucao > 0
     assert chamada.caracteres_entrada > 0
 
+    # A soma por tentativa cobre TODAS as chamadas dela — no mapeador fatiado,
+    # a exploração e cada fatia de serialização.
     agregado = telemetria.por_tentativa()[("pedidos", estagio, 1)]
-    assert agregado.caracteres_entrada == chamada.caracteres_entrada
+    esperado = sum(
+        c.caracteres_entrada
+        for c in telemetria.chamadas
+        if (c.recurso, c.estagio, c.tentativa) == ("pedidos", estagio, 1)
+    )
+    assert agregado.caracteres_entrada == esperado
     assert "caracteres_entrada" in json.dumps(telemetria.resumo_para_log())

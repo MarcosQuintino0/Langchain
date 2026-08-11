@@ -42,6 +42,7 @@ from orquestrador.dominio.artefatos import (
 from orquestrador.dominio.endpoint import METODOS_HTTP
 from orquestrador.dominio.inventario import Endpoint, Inventario
 from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.dominio.notas import endpoints_das_notas, rotas_dinamicas_das_notas
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
 from orquestrador.dominio.veredito import Delta, ResultadoGate, Violacao
@@ -299,19 +300,36 @@ def test_golden_da_superficie(
 
 @pytest.fixture
 def saida_do_mapeador() -> SaidaMapeador:
-    """A saída que o roteiro do dry-run entrega na tentativa aprovada.
+    """A saída aprovada do Bloco 1, montada como o mapeador monta.
 
-    Vem da fixture, e não de uma execução: o que está sob teste é a
-    **serialização**, e amarrá-la ao Node e aos `.mjs` faria este golden só rodar
-    onde a máquina está preparada — que é exatamente onde ele menos importa.
+    Vem das fixtures de fatia, e não de uma execução, porque o que está sob
+    teste é a **serialização**. A montagem espelha a de produção: o inventário
+    sai do parse das notas (o mesmo `dominio/notas.py`), e as demais fatias vêm
+    dos roteiros aprovados de cada uma.
     """
-    roteiro = json.loads(
-        (DIR_FIXTURES / "roteiros" / "pedidos" / "mapeador" / "tentativa-02.json").read_text(
-            encoding="utf-8"
+    base = DIR_FIXTURES / "roteiros" / "pedidos"
+
+    def final_de(fatia: str, tentativa: int) -> dict:
+        roteiro = json.loads(
+            (base / fatia / f"tentativa-{tentativa:02d}.json").read_text(encoding="utf-8")
         )
+        return next(passo for passo in roteiro["passos"] if passo["tipo"] == "final")
+
+    notas = final_de("mapeador", 1)["conteudo"]
+    return SaidaMapeador.model_validate(
+        {
+            "inventario": {
+                "recurso": "pedidos",
+                "endpoints": [e.model_dump() for e in endpoints_das_notas(notas)],
+                "rotas_dinamicas_nao_resolvidas": [
+                    r.model_dump() for r in rotas_dinamicas_das_notas(notas)
+                ],
+            },
+            "manifesto": final_de("mapeador-manifesto", 1)["artefato"],
+            "schemas": final_de("mapeador-schemas", 1)["artefato"]["schemas"],
+            "dossie": final_de("mapeador-dossie", 2)["artefato"],
+        }
     )
-    final = next(passo for passo in roteiro["passos"] if passo["tipo"] == "final")
-    return SaidaMapeador.model_validate(final["artefato"])
 
 
 def test_o_manifesto_serializa_no_dialeto_que_a_skill_le(saida_do_mapeador: SaidaMapeador):

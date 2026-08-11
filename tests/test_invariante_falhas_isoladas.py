@@ -134,8 +134,8 @@ def test_falta_de_passos_nao_gasta_as_tentativas_de_schema(config_falso):
         )
 
     assert telemetria.chamadas, "a exploração que consumiu requisições precisa ser observável"
-    assert {chamada.detalhe.split(";", 1)[0] for chamada in telemetria.chamadas} == {"schema:1"}, (
-        "desistiu na primeira tentativa de schema, sem reparo inútil"
+    assert {chamada.detalhe.split(";", 1)[0] for chamada in telemetria.chamadas} == {"notas:1"}, (
+        "desistiu na primeira tentativa, sem reparo inútil"
     )
     assert {chamada.fatia for chamada in telemetria.chamadas} == {"exploracao"}, (
         "nenhuma requisição pode pertencer à fatia de reparo de schema"

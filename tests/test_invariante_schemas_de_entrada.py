@@ -101,13 +101,43 @@ def staged(area: AreaDeStaging) -> Path:
     return area.dir_schemas / "pedidos" / "entidade.schema.json"
 
 
+NOTAS_DE_TESTE = """# Notas de descoberta — pedidos
+
+## Endpoints do recurso
+- POST /pedidos | handler PedidoController.criar | src/controllers/PedidoController.java:17
+
+## Rotas dinâmicas não resolvidas
+- nenhuma
+"""
+
+# O menor dossiê que valida: o Gate A está monkeypatchado nestes testes, então a
+# completude da checklist não importa — só a forma.
+DOSSIE_DE_TESTE = {"recurso": "pedidos"}
+
+
+def modelo_por_estagio(artefato: dict):
+    """A fábrica que o pipeline consulta: notas na exploração, fatia nas fatias.
+
+    Espelha o contrato real do Bloco 1 fatiado — o `pipeline.modelo` é chamado
+    com `mapeador` para a exploração e `mapeador-<fatia>` para cada fatia.
+    """
+
+    def modelo(estagio: str, _recurso: str, _tentativa: int) -> ModeloSimulado:
+        if estagio == "mapeador":
+            return ModeloSimulado(passos=[PassoFinal(tipo="final", conteudo=NOTAS_DE_TESTE)])
+        por_fatia = {
+            "mapeador-manifesto": artefato["manifesto"],
+            "mapeador-schemas": {"schemas": artefato["schemas"]},
+            "mapeador-dossie": DOSSIE_DE_TESTE,
+        }
+        return ModeloSimulado(passos=[PassoFinal(tipo="final", artefato=por_fatia[estagio])])
+
+    return modelo
+
+
 def preparar(pipeline: Pipeline, monkeypatch, veredito: ResultadoGate) -> None:
     """Modelo de fixture no lugar do OpenRouter e um Gate A com veredito fixo."""
-    monkeypatch.setattr(
-        pipeline,
-        "modelo",
-        lambda *_a, **_k: ModeloSimulado(passos=[PassoFinal(tipo="final", artefato=ARTEFATO)]),
-    )
+    monkeypatch.setattr(pipeline, "modelo", modelo_por_estagio(ARTEFATO))
     monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: veredito)
 
 
@@ -246,11 +276,7 @@ def test_divergencia_com_o_schema_preservado_e_registrada(pipeline, recurso, are
         "properties": {"situacao": {"type": "string"}, "total": {"type": "number"}},
     }
     monkeypatch.setattr(
-        pipeline,
-        "modelo",
-        lambda *_a, **_k: ModeloSimulado(
-            passos=[PassoFinal(tipo="final", artefato=artefato_com_schema(com_campo_a_mais))]
-        ),
+        pipeline, "modelo", modelo_por_estagio(artefato_com_schema(com_campo_a_mais))
     )
     monkeypatch.setattr(gate_a, "executar", lambda *_a, **_k: ResultadoGate.aprovado_por())
 
@@ -271,11 +297,9 @@ def test_schema_desta_execucao_e_reescrito_no_reparo(pipeline, recurso, area, mo
         "properties": {"situacao": {"type": "string"}, "total": {"type": "number"}},
     }
 
-    def modelo(_estagio: str, _recurso: str, tentativa: int) -> ModeloSimulado:
+    def modelo(estagio: str, recurso_nome: str, tentativa: int) -> ModeloSimulado:
         esquema = corrigido if tentativa > 1 else SCHEMA
-        return ModeloSimulado(
-            passos=[PassoFinal(tipo="final", artefato=artefato_com_schema(esquema))]
-        )
+        return modelo_por_estagio(artefato_com_schema(esquema))(estagio, recurso_nome, tentativa)
 
     vereditos = iter(
         [

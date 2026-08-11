@@ -87,11 +87,27 @@ def test_dry_run_completo_com_reparo_no_gate_a(config_toml: Path, tmp_path: Path
     assert do_a[0]["violacoes"], "o gate_a precisa reprovar com violações reais"
 
     # O delta que foi ao reparo carrega o código que o produziu — é ele, e só ele,
-    # que o princípio 2 permite mandar de volta ao modelo.
+    # que o princípio 2 permite mandar de volta ao modelo. QAORQ-062 (checklist
+    # negativa incompleta) é dono da fatia `dossie`: o reparo da tentativa 2
+    # reemite SÓ essa fatia, sem re-explorar o backend.
     delta_a = next(
         evento for evento in eventos if evento["tipo"] == "delta" and evento["estagio"] == "gate_a"
     )
-    assert "QAORQ-063" in delta_a["codigos"], "dossiê ausente é o que a 1ª tentativa erra"
+    assert "QAORQ-062" in delta_a["codigos"], "a 1ª tentativa erra a checklist do dossiê"
+
+    # A prova do fatiamento: a tentativa de reparo não tem chamada de exploração —
+    # só a fatia dona da violação.
+    chamadas_t2 = [
+        evento
+        for evento in eventos
+        if evento["tipo"] == "requisicao_llm_concluida"
+        and evento.get("estagio") == "mapeador"
+        and evento.get("tentativa") == 2
+    ]
+    assert chamadas_t2, "o reparo precisa ter acontecido na tentativa 2"
+    assert all(evento.get("fatia") == "fatia:dossie" for evento in chamadas_t2), (
+        f"reparo deveria reemitir só a fatia dossie: {[e.get('fatia') for e in chamadas_t2]}"
+    )
 
     assert [evento["aprovado"] for evento in gates if evento["gate"] == "gate_b"] == [True]
 

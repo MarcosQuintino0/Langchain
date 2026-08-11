@@ -79,6 +79,19 @@ class ArquivoSchema(BaseModel):
         return caminho
 
 
+class FatiaDeSchemas(BaseModel):
+    """A fatia de serialização dos schemas de entrada.
+
+    Envelope, e não `list[ArquivoSchema]` solto, porque o mini-loop de schema
+    valida contra um `BaseModel` — e porque a fatia precisa de um contrato próprio
+    citável no prompt, com o mesmo nome que a telemetria usa.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schemas: list[ArquivoSchema] = Field(default_factory=list[ArquivoSchema])
+
+
 class SaidaMapeador(BaseModel):
     """O que o Bloco 1 emite para um recurso."""
 

@@ -233,15 +233,34 @@ troque de backend sem o usuário pedir.
 | Onde os specs aparecem | `<projeto>/cypress/e2e/apis/<recurso>/` |
 | Artefatos e log da execução | `.execucoes/<run_id>/` |
 
-### O comando
+### O comando — sempre pelo venv de execução
+
+A suíte leva dezenas de minutos, e o desenvolvimento não para enquanto ela anda.
+Dois arquivos que a execução lê **ao vivo** tornariam qualquer edição
+concorrente um risco: os `prompts/*.md` são relidos do disco a cada chamada, e o
+código Python de um subprocesso futuro viria do checkout. A resposta é congelar:
+instalar o pacote num venv próprio e rodar a suíte **dele** — o pacote instalado
+carrega a própria cópia de código e prompts em `site-packages`, e o checkout
+fica livre para ser editado.
 
 ```powershell
-python -m orquestrador --recurso customers --recurso products
+python -m venv .venv-execucao
+.venv-execucao\Scripts\pip install --quiet .
+.venv-execucao\Scripts\python -m orquestrador --recurso customers
 ```
 
-Rode-o **em segundo plano** e acompanhe: são dezenas de minutos, e prender o
-terminal impede o usuário de ver o log enquanto anda. O JSONL vai sendo escrito
-durante a execução, então dá para seguir com `Get-Content -Wait`.
+O `pip install .` (sem `-e`!) é o congelamento: `-e` apontaria de volta para o
+checkout e desfaria tudo. **Reinstale a cada suíte** — o venv não se atualiza
+sozinho, e rodar código velho achando que é novo é o único jeito de esta
+proteção falhar; a reinstalação custa ~30 s contra os minutos da suíte.
+
+O `config.toml`, o backend e o projeto Cypress continuam sendo os do disco: o
+congelamento cobre o que muda quando se edita ESTE repositório. A saída continua
+em `.execucoes/` (vem da configuração), então `execucoes listar/comparar`
+enxergam tudo no mesmo lugar.
+
+Rode **em segundo plano** e acompanhe: o JSONL vai sendo escrito durante a
+execução, então dá para seguir com `Get-Content -Wait`.
 
 Acrescente `--rodar-cypress` **só se o usuário pedir**: ele executa a suíte
 gerada de verdade e exige Node e um `[execucao].cypress` configurado. Sem essa

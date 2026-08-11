@@ -32,6 +32,7 @@ src/orquestrador/
     orcamento.py     tetos, consumo e a decisão pura de parar
     recurso.py       Recurso e NomeDeRecurso — a unidade de trabalho e o nome que vira diretório
     inventario.py    o que o backend expõe, segundo quem leu o código
+    notas.py         o contrato de forma das notas de descoberta, e o parser que monta inventário delas
     manifesto.py     o gabarito de cobertura — espelho de _support/cobertura.json
     plano.py         o gabarito expandido em cenários concretos, e a conferência de completude
     dossie.py        o que o mapeador leu além do gabarito: regras, erros, consultas e incertezas

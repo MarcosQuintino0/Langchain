@@ -1,0 +1,16 @@
+{
+  "descricao": "Fatia schemas: o envelope com os schemas de entrada do recurso.",
+  "passos": [
+    {
+      "tipo": "final",
+      "artefato": {
+        "schemas": [
+          {
+            "caminho": "pedidos/entidade.schema.json",
+            "conteudo": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"title\": \"Pedido\",\n  \"type\": \"object\",\n  \"required\": [\"situacao\"],\n  \"properties\": {\n    \"situacao\": {\n      \"type\": \"string\",\n      \"enum\": [\"ABERTO\", \"FECHADO\"]\n    }\n  }\n}\n"
+          }
+        ]
+      }
+    }
+  ]
+}

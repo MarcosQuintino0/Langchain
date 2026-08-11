@@ -1,0 +1,52 @@
+{
+  "descricao": "Fatia dossiê, primeira tentativa: checklist negativa incompleta — o Gate A reprova com QAORQ-062 e o reparo reemite SÓ esta fatia.",
+  "passos": [
+    {
+      "tipo": "final",
+      "artefato": {
+        "recurso": "pedidos",
+        "regras": [
+          {
+            "id": "RN-01",
+            "resumo": "a criacao valida o corpo antes de gravar",
+            "efeito": "POST com situacao fora do conjunto ABERTO/FECHADO responde erro funcional de validacao e nenhum registro e criado",
+            "evidencias": [
+              {
+                "arquivo": "src/controllers/PedidoController.java",
+                "linha": 17
+              }
+            ],
+            "endpoints": [
+              "POST /pedidos"
+            ]
+          }
+        ],
+        "erros": [
+          {
+            "endpoint": "POST /pedidos",
+            "respostas": [
+              {
+                "status": 400,
+                "quando": "situacao ausente ou fora do conjunto ABERTO/FECHADO"
+              }
+            ]
+          }
+        ],
+        "incertezas": [
+          {
+            "descricao": "nao foi possivel determinar pela fonte se campo desconhecido no corpo e rejeitado ou ignorado",
+            "endpoints": [
+              "POST /pedidos"
+            ]
+          }
+        ],
+        "verificacoesNegativas": [
+          {
+            "aspecto": "campos-derivados",
+            "resultado": "nenhum: a resposta devolve o registro exatamente como enviado"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -72,7 +72,56 @@ max_retries = 2
 # que REVOGA o "não entregam" acima para o Baidu — a medição antiga é anterior ao
 # desconto e ao endpoint atual. Alternativas se ele degradar: gmicloud (fp8,
 # 99,9% de uptime); deepinfra é mais barata ainda, mas serve fp4.
-provedores_permitidos = ["baidu"]
+#
+# 2026-08-10, mais tarde: o pool compartilhado do Baidu fechou por
+# `tpm_rate_limit_exceeded` — nem uma chamada mínima passava, e duas execuções da
+# suíte morreram no mapeador. Isso é janela do provedor, não concorrência nossa:
+# o mapeador roda com paralelismo 1. Acrescentar `deepinfra` como segundo nome
+# foi tentado e desfeito, por duas razões que valem para qualquer futura
+# tentativa de "só destravar": ele serve **fp4** contra o fp8 do Baidu, e o cache
+# de prefixo mora no provedor final, então alternar entre dois desfaz parte dos
+# 69% medidos. Com dois nomes na lista, tokens, custo e qualidade passam a
+# depender de QUEM atendeu cada chamada — e duas execuções deixam de ser
+# comparáveis, que é justamente o que uma linha de base precisa ser.
+#
+# O caminho que resolve a causa é uma chave própria do provedor (BYOK) em
+# openrouter.ai/settings/integrations: ela tira as chamadas do pool compartilhado.
+#
+# 2026-08-10, decisão: **o pin sai**. Dois provedores fixados encheram em duas
+# semanas (Together, depois Baidu), e o padrão é o que a lista acima já dizia sem
+# ninguém tirar a conclusão: fixar um provedor converte a saturação DELE em parada
+# total, porque `roteamento()` desliga o fallback junto. A linha de base passa a
+# ser medida como um cliente mede — este arquivo é gerado por `orquestrador init`
+# com a lista vazia, então roteamento livre é o que o cliente recebe, e é o que
+# precisa ser bom.
+#
+# O que se perde está medido e é caro: 0% de cache sem pin contra 69% com ele. A
+# entrada do mapeador e o custo vão subir. Registre os dois números da linha de
+# base sem pin e compare com os do pin antes de decidir de novo — a escolha entre
+# "barato e frágil" e "caro e estável" é de quem paga, e agora terá as duas
+# medidas em vez de uma.
+#
+# **A lista vazia NÃO afrouxa a privacidade.** `retencao_de_dados = "deny"` é campo
+# separado e continua viajando em toda chamada, então o roteador só considera
+# provedor que não retém o conteúdo enviado — e o mapeador envia código-fonte do
+# cliente. É o fallback que volta, não a política.
+#
+# 2026-08-11, decisão: **pin de volta, no GMICloud, por enquanto.** O período sem
+# pin cumpriu o papel — mediu o mundo do cliente — e o veredito foi pior do que o
+# esperado: a MESMA chamada variou de 40 tokens com erro a 18k de raciocínio
+# conforme o provedor sorteado, uma espiral de 65.536 custou 12 minutos, e a
+# variância entre execuções (±10 min) engoliu qualquer medição de arquitetura.
+# GMICloud, e não Baidu ou BaseTen: o Baidu perdeu o desconto que o justificava
+# (0,080 → 0,140/M) além de ter fechado o pool; o BaseTen é são (fp8, 100% de
+# uptime) porém 14% mais caro que o GMICloud (0,112/0,224, fp8, 99,97%) — e o
+# GMICloud é o único com validação empírica nossa: 7/7 chamadas saudáveis nos
+# probes de 2026-08-11, na chamada exata que concentrava o problema. BaseTen é a
+# reserva designada se ele degradar. **Cache medido em 2026-08-11 (3 amostras do
+# Bloco 1): 57–61% do total, com a exploração lendo 144k–173k do cache por
+# amostra — o GMICloud entrega o prefixo.** Mapeador fatiado: 6,1/3,5/4,6 min
+# contra 10,6 do monolítico — o pin devolveu a consistência que a medição sem
+# pin não tinha.
+provedores_permitidos = ["gmicloud"]
 
 # ---------------------------------------------------------------------------
 # Modelos por estágio
@@ -92,6 +141,9 @@ temperatura = 0.0
 modo_estruturado = "prompt"
 max_tentativas_schema = 3
 limite_passos = 60
+# As 3 fatias de serialização (manifesto, dossiê, schemas) rodam em paralelo — a
+# exploração continua serial, é uma conversa só. Mesmo racional do planejador.
+paralelismo = 3
 
 # O planejador expande o gabarito em cenários concretos, um endpoint por chamada.
 # É onde mora o julgamento que o executor não deve improvisar no meio da escrita.
