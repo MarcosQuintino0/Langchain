@@ -249,6 +249,49 @@ def test_reparo_e_uma_chamada_que_nomeia_os_arquivos_das_violacoes(config_falso)
     assert [a.caminho for a in saida.arquivos] == ["seguranca.cy.js"], "saída parcial é aceita"
 
 
+def test_reparo_com_varios_arquivos_e_uma_chamada_por_arquivo(config_falso):
+    """Medido em 2026-08-11: 6 violações em 3 arquivos numa chamada só pediram a
+    reescrita de 3.300 linhas de uma vez. A resposta saiu com 60 mil tokens e JSON
+    inválido, e a retentativa foi cortada no teto de 120 mil — a mesma espiral que
+    o fatiamento da geração tinha fechado, reaberta pelo reparo.
+    """
+    modelo = ModeloSequencial(
+        respostas=[
+            resposta(("criar-pedidos.cy.js", "it('a')")),
+            resposta(("listar-pedidos.cy.js", "it('b')")),
+        ]
+    )
+    delta = Delta(
+        estagio="gate_b",
+        recurso="pedidos",
+        violacoes=[
+            Violacao(codigo="QAORQ-074", arquivo="criar-pedidos.cy.js", mensagem="condicional"),
+            Violacao(codigo="QAORQ-072", arquivo="listar-pedidos.cy.js", mensagem="sem mensagem"),
+        ],
+        tentativa=2,
+    )
+
+    saida = executar(
+        config_falso,
+        modelo,
+        tentativa=2,
+        delta=delta,
+        artefato_atual="--- criar-pedidos.cy.js ---\n// atual",
+        plano=plano_de_pedidos(),
+    )
+
+    assert len(modelo.capturas) == 2, "uma chamada por arquivo implicado"
+    primeira = "\n".join(str(m.content) for m in modelo.capturas[0] if isinstance(m, HumanMessage))
+    assert "`criar-pedidos.cy.js`" in primeira
+    # Cada chamada leva SÓ as violações do arquivo dela: mandar as dos outros faria
+    # o modelo tentar consertar aqui o que é para consertar lá.
+    assert "sem mensagem" not in primeira
+    assert sorted(a.caminho for a in saida.arquivos) == [
+        "criar-pedidos.cy.js",
+        "listar-pedidos.cy.js",
+    ]
+
+
 def test_sem_plano_e_sem_delta_permanece_a_chamada_unica(config_falso):
     modelo = ModeloSequencial(
         respostas=[resposta(("_support/api.js", "// api"), ("crud.cy.js", "it('a')"))]

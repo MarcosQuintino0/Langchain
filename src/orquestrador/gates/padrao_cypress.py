@@ -80,9 +80,17 @@ _URL_LITERAL = re.compile(r"https?://", re.IGNORECASE)
 # teste; `Bearer` e o cabeçalho de um JWT distinguem.
 _SEGREDO_LITERAL = re.compile(r"^(?:Bearer\s+\S|eyJ[\w-]{10,}\.)", re.IGNORECASE)
 
-# Uma letra só, exceto `_`, que é o descarte convencional em desestruturação.
-_PARAMETRO_CURTO = re.compile(r"\(\s*([A-Za-z$])\s*\)\s*=>|(?<![\w$.])([A-Za-z$])\s*=>")
+# Uma letra só, exceto `_`, que é o descarte convencional em desestruturação — e
+# só quando o corpo do callback é um BLOCO. `itens.map((i) => i.externalCode)` cabe
+# numa linha e não custa nada a quem lê; `.then((r) => { ...vinte linhas... })`
+# obriga a subir o arquivo para lembrar o que é `r`, que é a razão da regra. Medido:
+# das 31 acusações da primeira execução real, 31 eram do primeiro caso.
+_PARAMETRO_CURTO = re.compile(r"(?:\(\s*([A-Za-z$])\s*\)|(?<![\w$.])([A-Za-z$]))\s*=>\s*\{")
 _DECLARACAO_CURTA = re.compile(r"(?<![\w$])(?:const|let|var)\s+([A-Za-z$])\s*=[^=]")
+# `for (let i = 0; ...)` fica de fora: índice de laço é o único nome de uma letra
+# que a comunidade inteira lê sem hesitar, e o escopo dele é a própria linha. O
+# recuo é conferido em código porque `re` não aceita lookbehind de tamanho variável.
+_ABERTURA_DE_LACO = re.compile(r"for\s*\(\s*$")
 
 # Asserção que passa com o backend devolvendo qualquer coisa daquele formato.
 _ORACULO_FRACO = re.compile(
@@ -97,6 +105,14 @@ _ORACULO_FRACO = re.compile(
 )
 
 SUFIXO_SPEC = ".cy.js"
+
+# `import { validarX, validarY } from "./_support/asserts.js"` — o que o spec usa
+# como oráculo sem escrever `expect`. Casado no fonte ORIGINAL: a neutralização
+# apaga o conteúdo das aspas, e foi assim que a primeira versão desta regra nunca
+# encontrou import nenhum e seguiu acusando o probe do CAT-04.
+_IMPORT_DE_ASSERTS = re.compile(
+    r"import\s*\{(?P<nomes>[^}]*)\}\s*from\s*[\"'][^\"']*asserts[^\"']*[\"']"
+)
 
 
 def conferir_padrao(arquivos: dict[str, str]) -> ResultadoGate:
@@ -132,7 +148,7 @@ def _conferir_arquivo(caminho: str, fonte: str) -> list[Violacao]:
     achatado = percorrer(blocos)
     violacoes += _estrutura(caminho, achatado)
     violacoes += _titulos(caminho, achatado)
-    violacoes += _dentro_dos_testes(caminho, achatado, neutro, linhas)
+    violacoes += _dentro_dos_testes(caminho, achatado, fonte, neutro, linhas)
     return violacoes
 
 
@@ -242,6 +258,8 @@ def _identificadores(caminho: str, neutro: str, linhas: list[int]) -> list[Viola
     violacoes: list[Violacao] = []
     for padrao in (_PARAMETRO_CURTO, _DECLARACAO_CURTA):
         for casamento in padrao.finditer(neutro):
+            if _ABERTURA_DE_LACO.search(neutro[max(0, casamento.start() - 8) : casamento.start()]):
+                continue
             nome = next(grupo for grupo in casamento.groups() if grupo)
             violacoes.append(
                 Violacao(
@@ -377,6 +395,7 @@ def _violacao_de_titulo(caminho: str, bloco: Bloco, motivo: str) -> Violacao:
 def _dentro_dos_testes(
     caminho: str,
     achatado: list[tuple[Bloco, tuple[Bloco, ...]]],
+    fonte: str,
     neutro: str,
     linhas: list[int],
 ) -> list[Violacao]:
@@ -389,6 +408,7 @@ def _dentro_dos_testes(
     violacoes: list[Violacao] = []
     testes = [bloco for bloco, _ in achatado if bloco.tipo in {"it", "specify"}]
     expects = chamadas(neutro, "expect")
+    verificadores = _verificadores_importados(fonte)
 
     for teste in testes:
         corpo = neutro[teste.inicio : teste.fim]
@@ -421,7 +441,11 @@ def _dentro_dos_testes(
             )
 
         do_teste = [chamada for chamada in expects if teste.contem(chamada.inicio)]
-        if do_teste and all(_e_fraco(neutro, chamada.fim) for chamada in do_teste):
+        if (
+            do_teste
+            and all(_e_fraco(neutro, chamada.fim) for chamada in do_teste)
+            and not _usa_verificador_compartilhado(corpo, verificadores)
+        ):
             violacoes.append(
                 Violacao(
                     codigo=CODIGO_ORACULO,
@@ -470,6 +494,28 @@ def _tem_assercao_no_statement(neutro: str, posicao: int) -> bool:
     fim = neutro.find(";", posicao)
     trecho = neutro[inicio : fim if fim != -1 else len(neutro)]
     return bool(re.search(r"(?<![\w$.])expect\s*\(", trecho))
+
+
+def _verificadores_importados(neutro: str) -> frozenset[str]:
+    """Os nomes que o spec importa de `_support/asserts.js`.
+
+    Sem isto, um teste cuja prova mora num verificador compartilhado passaria por
+    "só prova existência": o gate conta `expect`, e a camada de verificação existe
+    justamente para tirar o `expect` de dentro do spec. Foi assim que a regra
+    acusou o probe de magnitude do `CAT-04`, que faz `lessThan(500)` **e**
+    `validarNaoVazaInterno(resposta)` — exatamente o que o contrato dele manda.
+    """
+    nomes: set[str] = set()
+    for casamento in _IMPORT_DE_ASSERTS.finditer(neutro):
+        for nome in casamento.group("nomes").split(","):
+            limpo = nome.split(" as ")[-1].strip()
+            if limpo:
+                nomes.add(limpo)
+    return frozenset(nomes)
+
+
+def _usa_verificador_compartilhado(corpo: str, verificadores: frozenset[str]) -> bool:
+    return any(re.search(rf"(?<![\w$.]){re.escape(nome)}\s*\(", corpo) for nome in verificadores)
 
 
 def _e_fraco(neutro: str, desde: int) -> bool:

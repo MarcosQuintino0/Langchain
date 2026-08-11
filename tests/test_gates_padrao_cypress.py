@@ -291,6 +291,87 @@ export function criarParaTeste(corpo) {
     assert "QAORQ-074" not in codigos(fonte, "_support/helpers.js")
 
 
+def test_uma_letra_numa_expressao_de_uma_linha_nao_reprova():
+    """`itens.map((i) => i.externalCode)` é idiomático e não custa nada a quem lê.
+
+    Foram 31 das 38 violações da primeira execução real com a norma nova. A regra
+    existe contra `.then((r) => { ...vinte linhas... })`, onde é preciso subir o
+    arquivo para lembrar o que é `r` — e essa é a justificativa escrita na norma.
+    """
+    fonte = """
+describe("Listar clientes", () => {
+  context("quando existem clientes", () => {
+    it("devolve os clientes em ordem alfabética", () => {
+      listar().then((consulta) => {
+        const nomes = consulta.body.items.map((item) => item.nome);
+        expect(nomes, "a ordem deve ser alfabética").to.deep.equal(["Ana", "Bruno"]);
+        expect(nomes.some((n) => n === "Zeca"), "não deve vazar outro tenant").to.be.false;
+      });
+    });
+  });
+});
+"""
+    assert "QAORQ-077" not in codigos(fonte)
+
+
+def test_indice_de_laco_nao_reprova():
+    fonte = """
+describe("Listar clientes", () => {
+  context("quando há mais de uma página", () => {
+    it("devolve a segunda página", () => {
+      for (let i = 1; i <= 25; i++) {
+        criarCliente({ nome: `Cliente ${i}` });
+      }
+      expect(1, "mensagem explicativa").to.eq(1);
+    });
+  });
+});
+"""
+    assert "QAORQ-077" not in codigos(fonte)
+
+
+def test_verificador_compartilhado_conta_como_oraculo():
+    """O probe do CAT-04 afirma `lessThan(500)` E chama o verificador de vazamento.
+
+    O contrato daquela categoria pede exatamente isso. O gate conta `expect`, e a
+    camada de verificação existe justamente para tirar o `expect` do spec — sem ler
+    os imports, a regra condenava o teste por seguir o que lhe foi mandado.
+    """
+    fonte = """
+import { validarNaoVazaInterno } from "./_support/asserts.js";
+
+describe("Criar cliente", () => {
+  context("quando o valor é absurdamente grande", () => {
+    // @endpoint POST /clientes  @cat CAT-04  @campo email
+    it("responde de forma controlada a e-mail com 10000 caracteres", () => {
+      criarCliente({ corpo: enorme() }).then((resposta) => {
+        expect(resposta.status, "a resposta deve ser controlada, sem 5xx").to.be.lessThan(500);
+        validarNaoVazaInterno(resposta);
+      });
+    });
+  });
+});
+"""
+    assert "QAORQ-076" not in codigos(fonte)
+
+
+def test_sem_o_verificador_o_oraculo_fraco_continua_reprovando():
+    # O contraponto do caso acima: sem a segunda prova, `lessThan(500)` sozinho
+    # passa com o backend devolvendo qualquer coisa que não seja erro de servidor.
+    fonte = """
+describe("Criar cliente", () => {
+  context("quando o valor é absurdamente grande", () => {
+    it("responde de forma controlada a e-mail com 10000 caracteres", () => {
+      criarCliente({ corpo: enorme() }).then((resposta) => {
+        expect(resposta.status, "a resposta deve ser controlada, sem 5xx").to.be.lessThan(500);
+      });
+    });
+  });
+});
+"""
+    assert "QAORQ-076" in codigos(fonte)
+
+
 def test_varredura_data_driven_nao_conta_como_titulo_repetido():
     fonte = """
 describe("Criar cliente", () => {

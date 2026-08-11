@@ -21,9 +21,12 @@ as categorias daquele endpoint. O nome do arquivo é derivado do endpoint por
 `nomes_dos_specs` — quem nomeia é o código, e é isso que faz o filtro de fatia
 valer e o reparo achar o dono de uma violação.
 
-O reparo regenera **apenas os arquivos que as violações apontam**: reescrever a
-suíte inteira por causa de um `expect` sem mensagem é reabrir a porta da resposta
-gigante que o fatiamento fechou.
+O reparo regenera **apenas os arquivos que as violações apontam, um por chamada**:
+reescrever a suíte inteira por causa de um `expect` sem mensagem é reabrir a porta
+da resposta gigante que o fatiamento fechou — e reescrever três arquivos numa
+chamada só a reabre pela metade, que foi como ela voltou a se fechar em
+2026-08-11 (6 violações, 3.300 linhas pedidas de uma vez, 60 mil tokens de
+resposta e JSON inválido).
 """
 
 from __future__ import annotations
@@ -44,7 +47,7 @@ from orquestrador.dominio.manifesto import Manifesto
 from orquestrador.dominio.plano import PlanoDeTestes
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
-from orquestrador.dominio.veredito import Delta
+from orquestrador.dominio.veredito import Delta, Violacao
 from orquestrador.ferramentas.publicacao import AreaDeStaging
 from orquestrador.llm.cliente import PoliticaDeRetentativa
 from orquestrador.llm.estruturado import GeradorEstruturado
@@ -141,9 +144,10 @@ def executar(
 
     Três caminhos, pela mesma razão de sempre — o tamanho da resposta:
 
-    * `delta` presente → **reparo**: uma chamada que reescreve só os arquivos
-      apontados pelas violações. A `SaidaExecutor` devolvida pode ser parcial; o
-      staging acumula, e o gate mede o diretório inteiro.
+    * `delta` presente → **reparo**: uma chamada por arquivo apontado pelas
+      violações, cada uma recebendo só as violações daquele arquivo. A
+      `SaidaExecutor` devolvida pode ser parcial; o staging acumula, e o gate mede
+      o diretório inteiro.
     * `plano` presente → **geração fatiada**: `_support/` primeiro (a fundação),
       depois um spec por chamada, cada um com a fatia do plano que lhe cabe.
     * nenhum dos dois → o caminho antigo de chamada única. Existe para quem invoca
@@ -206,9 +210,14 @@ def _gerar_fatiado(
         instrucao,
         recurso,
         base + "\n## Fatia desta chamada: SOMENTE os arquivos `_support/`\n\n"
-        "Gere api.js e, quando a arquitetura dos arquivos pedir, factories.js, "
-        "helpers.js e asserts.js. O plano completo abaixo é o contexto do que os "
-        "specs vão consumir. Os specs serão gerados em chamadas próprias.\n\n"
+        "Gere api.js e, quando a norma pedir, factories.js, helpers.js e "
+        "asserts.js. **Não escreva nenhum `it` nesta chamada** — os specs vêm "
+        "em chamadas próprias, uma por operação.\n\n"
+        "O plano abaixo está aqui como CONTEXTO do que os specs vão consumir, e "
+        "não como lista de coisas a implementar. O `_support/` não cresce com o "
+        "número de cenários: uma função por operação da API, um construtor de "
+        "corpo válido com sobrescritas, os helpers de massa e limpeza, e só as "
+        "verificações que se repetem. Uma função por cenário é o erro a evitar.\n\n"
         "### Plano de cenários do recurso\n\n"
         + plano.render()
         + _contexto_do_suporte(dossie, inventario),
@@ -365,37 +374,67 @@ def _reparar(
         nomes = nomes_dos_specs([parte.endpoint for parte in plano.endpoints])
         implicados.update(nomes[endpoint] for endpoint in plano.endpoints_das_cats(cats_faltantes))
 
-    ordenados = sorted(implicados)
-    if ordenados:
-        alvo = (
-            "Reescreva SOMENTE os arquivos apontados pelas violações: "
-            + ", ".join(f"`{nome}`" for nome in ordenados)
-            + ". Devolva apenas eles; os demais permanecem como estão no disco."
-        )
-    else:
-        alvo = (
-            "Reescreva apenas os arquivos necessários para sanar as violações e "
-            "devolva somente os que mudou; os demais permanecem como estão no disco."
-        )
-
     # A fatia do plano das categorias cobradas volta junto: a violação diz O QUE
     # falta, o plano diz COMO era para ser — sem ele, o modelo re-decide o cenário
     # que o planejador já tinha decidido.
+    do_plano = ""
     if plano is not None and cats_faltantes:
         fatia = plano.cenarios_das_cats(tuple(sorted(cats_faltantes)))
         if fatia.strip():
-            alvo += "\n\n### Cenários do plano para as categorias cobradas\n\n" + fatia
+            do_plano = "\n\n### Cenários do plano para as categorias cobradas\n\n" + fatia
 
-    return gerador.gerar(
-        SaidaExecutor,
-        instrucao=instrucao,
-        entrada=montar_entrada_reparo(artefato_atual or "(artefato ausente)", delta)
-        + "\n\n"
-        + alvo,
-        recurso=recurso.nome,
-        tentativa=tentativa,
-        fatia="reparo_gate",
-    )
+    atual = artefato_atual or "(artefato ausente)"
+    ordenados = sorted(implicados)
+    if not ordenados:
+        return gerador.gerar(
+            SaidaExecutor,
+            instrucao=instrucao,
+            entrada=montar_entrada_reparo(atual, delta)
+            + "\n\nReescreva apenas os arquivos necessários para sanar as violações e "
+            "devolva somente os que mudou; os demais permanecem como estão no disco." + do_plano,
+            recurso=recurso.nome,
+            tentativa=tentativa,
+            fatia="reparo_gate",
+        )
+
+    # UMA CHAMADA POR ARQUIVO, pela mesma razão da geração: o tamanho da resposta é
+    # o que separa reparo de espiral. Medido em 2026-08-11: 6 violações em 3
+    # arquivos numa chamada só pediram a reescrita de 3.300 linhas de uma vez — a
+    # resposta saiu com 60 mil tokens e JSON inválido, e a retentativa foi cortada
+    # no teto de 120 mil. O arquivo maior sozinho custa 25 mil.
+    arquivos: list[ArquivoGerado] = []
+    for nome in ordenados:
+        # O delta da chamada leva SÓ as violações deste arquivo. Recortar apenas o
+        # pedido, e deixar a lista inteira na entrada, mandaria o modelo consertar
+        # aqui o que é para consertar na chamada seguinte.
+        so_deste = delta.model_copy(update={"violacoes": _violacoes_do_arquivo(delta, nome)})
+        arquivos += _fatia(
+            gerador,
+            instrucao,
+            recurso,
+            montar_entrada_reparo(atual, so_deste)
+            + f"\n\nReescreva SOMENTE `{nome}`, inteiro, corrigindo as violações "
+            "acima. Os outros arquivos permanecem como estão no disco — não os "
+            "devolva." + do_plano,
+            tentativa=tentativa,
+            aceitos=lambda caminho, nome=nome: caminho == nome,
+            rotulo=f"reparo:{nome}",
+        )
+    return SaidaExecutor(recurso=recurso.nome, arquivos=arquivos)
+
+
+def _violacoes_do_arquivo(delta: Delta, nome: str) -> list[Violacao]:
+    """As violações que este arquivo precisa sanar.
+
+    Violação sem arquivo — a de cobertura, que aponta o manifesto — vai para todos
+    os implicados: ela não sabe dizer de quem é, e omiti-la faria a chamada receber
+    uma lista vazia e reescrever por nada.
+    """
+    return [
+        violacao
+        for violacao in delta.violacoes
+        if not violacao.arquivo or _nome_de_suite(violacao.arquivo) == nome
+    ]
 
 
 def _nome_de_suite(caminho: str) -> str | None:

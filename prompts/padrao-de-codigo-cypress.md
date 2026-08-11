@@ -75,6 +75,18 @@ específica ou limpeza; `asserts.js` quando uma verificação se repetir — ver
 de um cenário só fica no próprio teste. Todo export precisa de consumidor dentro do
 recurso, e todo import relativo precisa resolver.
 
+**O `_support/` é uma fundação pequena, e o tamanho dele não acompanha o número de
+cenários.** Um recurso com 250 casos de teste tem o mesmo `_support/` de um com 40:
+uma função por operação da API, um construtor de corpo válido com sobrescritas, os
+helpers de massa e limpeza, e as poucas verificações que se repetem. As quatro
+camadas juntas costumam ficar entre 100 e 250 linhas.
+
+Uma função por cenário é o erro a evitar: `criarClienteSemEmail`,
+`criarClienteComEmailInvalido`, `criarClienteComEmailLongo` são o mesmo
+`clienteValido({ email })` chamado com argumentos diferentes. Quem varia o dado é o
+teste, no ponto onde a variação é lida — é isso que o construtor por sobrescrita
+existe para permitir.
+
 **O endereço da API e a montagem da request não são seus.** Eles vêm dos módulos
 compartilhados que o projeto já tem (o client HTTP, o mapa de rotas, a autenticação),
 listados na seção da superfície. Rota literal dentro do recurso é duplicação que
@@ -339,95 +351,44 @@ it('recusa o cadastro com e-mail sem arroba', () => {});
 A tag é índice, não oráculo: declara o que o teste pretende cobrir; quem prova é a
 asserção.
 
-## Um exemplo completo
+## Como as camadas se encaixam
 
-Uma operação inteira, das camadas ao teste. Os nomes de `apiRequest`, `RotasApi` e
-`tokenPadrao` aqui são ilustrativos — use os que a seção da superfície listar.
+Fragmentos, de propósito — o que segue mostra a FORMA de cada camada, não o
+tamanho dela. Os nomes de `apiRequest`, `RotasApi` e `tokenPadrao` são
+ilustrativos: use os que a seção da superfície listar.
 
 ```js
-// _support/api.js — as operações do recurso. Nenhuma asserção, nenhum cy.request.
-import { apiRequest } from "../../../../support/api/client.js";
-import { RotasApi } from "../../../../support/api/rotas.js";
-
+// _support/api.js — a operação. Sem asserção, sem cy.request, sem rota literal.
 export function criarCliente({ token, corpo }) {
   return apiRequest({ metodo: "POST", url: RotasApi.customers.raiz, corpo, token });
 }
 
-export function obterCliente({ token, id }) {
-  return apiRequest({ metodo: "GET", url: RotasApi.customers.porId(id), token });
-}
-```
-
-```js
-// _support/factories.js — só entradas. Nada persistido, nenhuma request.
+// _support/factories.js — só entradas, montadas por sobrescrita do caso válido.
 export function clienteValido(sobrescritas = {}) {
-  return {
-    externalCode: `EXT-${Date.now()}`,
-    name: "Cliente Exemplo",
-    email: "cliente@exemplo.com",
-    ...sobrescritas,
-  };
+  return { name: "Cliente Exemplo", email: "cliente@exemplo.com", ...sobrescritas };
 }
 
-export function clienteSemEmail() {
-  const { email, ...semEmail } = clienteValido();
-  return semEmail;
-}
-```
-
-```js
 // _support/helpers.js — cria massa de verdade e registra a limpeza. Sem oráculo.
-import { criarCliente, excluirCliente } from "./api.js";
-
-const criados = [];
-
 export function criarClienteParaTeste({ token, corpo }) {
   return criarCliente({ token, corpo }).then((criacao) => {
     // Registrado ANTES de qualquer verificação: asserção que falha interrompe o
     // teste, e o cliente já existe no banco mesmo assim.
-    if (criacao.body && criacao.body.id) {
-      criados.push({ id: criacao.body.id, token });
-    }
+    if (criacao.body?.id) criados.push({ id: criacao.body.id, token });
     return criacao;
   });
 }
 
-export function limparClientesCriados() {
-  const falhas = [];
-  while (criados.length) {
-    const { id, token } = criados.pop();
-    excluirCliente({ token, id }).then((exclusao) => {
-      if (exclusao.status !== 204) falhas.push(`${id}: ${exclusao.status}`);
-    });
-  }
-  cy.then(() => {
-    expect(falhas, "toda massa criada pelo teste precisa ser apagada").to.be.empty;
-  });
-}
-```
-
-```js
 // _support/asserts.js — recebe resposta pronta. Nunca faz request.
 export function validarClienteCadastrado(criacao, enviado) {
   expect(criacao.status, "cliente com dados válidos deve ser cadastrado").to.equal(201);
   expect(criacao.body.name, "o nome salvo deve ser o que foi enviado").to.equal(enviado.name);
-  expect(criacao.body.id, "o cadastro deve devolver o identificador criado").to.be.a("string");
-}
-
-export function validarCadastroRecusado(resposta, motivo) {
-  expect(resposta.status, `cadastro deve ser recusado: ${motivo}`).to.equal(422);
-  expect(resposta.body.erros, `a resposta deve dizer o que está errado: ${motivo}`).to.not.be.empty;
 }
 ```
 
+E o spec que consome as quatro:
+
 ```js
 // criar-cliente.cy.js
-import { obterCliente } from "./_support/api.js";
-import { clienteValido, clienteSemEmail } from "./_support/factories.js";
-import { criarClienteParaTeste, limparClientesCriados } from "./_support/helpers.js";
-import { validarClienteCadastrado, validarCadastroRecusado } from "./_support/asserts.js";
-import { tokenPadrao, tokenSemPermissao } from "../../../support/api/auth.js";
-
 describe("Criar cliente", () => {
   afterEach(() => {
     limparClientesCriados();
@@ -446,7 +407,7 @@ describe("Criar cliente", () => {
         validarClienteCadastrado(criacao, corpo);
 
         obterCliente({ token, id: criacao.body.id }).then((consulta) => {
-          expect(consulta.body.name, "o cliente salvo deve continuar lá depois").to.equal(corpo.name);
+          expect(consulta.body.name, "o cliente deve continuar salvo depois").to.equal(corpo.name);
         });
       });
     });
@@ -458,17 +419,6 @@ describe("Criar cliente", () => {
       criarClienteParaTeste({ token: tokenPadrao(), corpo: clienteSemEmail() }).then((resposta) => {
         validarCadastroRecusado(resposta, "e-mail é obrigatório");
       });
-    });
-  });
-
-  context("quando quem está chamando não tem permissão", () => {
-    // @endpoint POST /api/v1/customers  @cat CAT-08
-    it("recusa o cadastro de quem não pode criar clientes", () => {
-      criarClienteParaTeste({ token: tokenSemPermissao(), corpo: clienteValido() }).then(
-        (resposta) => {
-          expect(resposta.status, "quem não tem permissão não deve cadastrar").to.equal(403);
-        },
-      );
     });
   });
 });
