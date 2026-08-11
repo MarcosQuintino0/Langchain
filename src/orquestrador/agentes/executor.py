@@ -59,6 +59,10 @@ from orquestrador.observabilidade.telemetria import Telemetria
 
 ESTAGIO = "executor"
 
+# A norma de escrita do código gerado, em `prompts/`. Não é um estágio: é conteúdo
+# que o `executor.md` injeta e que o auditor consumirá pelo mesmo nome.
+NORMA_DE_CODIGO = "padrao-de-codigo-cypress"
+
 # A partição das 12 categorias entre os specs-base espelha a "Arquitetura dos
 # arquivos" do prompt: validações levam entrada/forma; segurança leva identidade;
 # o CRUD leva o resto. A definição mora em `dominio/plano.py` porque o planejador
@@ -88,6 +92,11 @@ def instrucao_do_estagio(
 
     A fatia NÃO entra aqui pelo mesmo motivo, só que invertido: ela muda a cada
     chamada, e instrução que muda invalida o prefixo do cache para todas as outras.
+
+    A norma de código é arquivo separado, injetada inteira. Ela não vive dentro do
+    `executor.md` porque o auditor semântico julga contra a MESMA norma: regra que
+    mora dentro do prompt de um estágio só pode ser lida por aquele estágio, e a
+    segunda cópia diverge da primeira sem ninguém notar.
     """
     return carregar_prompt(
         ESTAGIO,
@@ -97,6 +106,9 @@ def instrucao_do_estagio(
             "caminho_projeto": str(config.caminhos.projeto_testes),
             "superficie_do_projeto": (
                 superficie.render() if superficie else "(superfície não extraída)"
+            ),
+            "padrao_de_codigo": carregar_prompt(
+                NORMA_DE_CODIGO, dir_prompts=config.caminhos.prompts
             ),
             "schema_json": esquema_json(SaidaExecutor),
         },

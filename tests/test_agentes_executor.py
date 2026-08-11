@@ -117,6 +117,18 @@ def executar(config, modelo, **kwargs):
     )
 
 
+def test_a_norma_de_codigo_chega_inteira_na_instrucao(config_falso):
+    # A norma mora em arquivo próprio para que o auditor julgue contra exatamente a
+    # regra que o executor recebeu. Se a injeção sumir, o executor volta a escrever
+    # sem padrão e NADA quebra — nenhum gate percebe a ausência de uma instrução.
+    # Por isso a checagem é aqui.
+    instrucao = executor.instrucao_do_estagio(config_falso, recurso_de(config_falso))
+
+    assert "{{padrao_de_codigo}}" not in instrucao
+    assert "## O nome do teste" in instrucao
+    assert "Todo `it` mora dentro de um `context`" in instrucao
+
+
 def test_geracao_com_plano_e_uma_chamada_por_fatia(config_falso):
     modelo = ModeloSequencial(
         respostas=[
