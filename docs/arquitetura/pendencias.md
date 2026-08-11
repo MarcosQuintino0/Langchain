@@ -70,16 +70,51 @@ prova precisa ficar visível no log e no manifesto da execução.
 
 Acrescentar adaptador é trabalho localizado: a matriz fica declarada num lugar só.
 
-## O reparo do executor pede a suíte inteira numa resposta
+## Import que não resolve não tem gate
 
-Medido em 2026-08-10: para corrigir três cabeçalhos e remover quatro exports
-mortos, `agentes/executor.py::_reparar` mandou reescrever os seis arquivos
-implicados — 225 KB, ~56 mil tokens — numa chamada só, e o modelo via apenas 16%
-desse conteúdo, porque `recortar_por_violacoes` corta o artefato em 60 KB. Resultado
-medido: 120.000 tokens de saída e 24 minutos até o provedor cortar.
+Medido em 2026-08-11, execução `20260811-200736-32500-5ff58905`: o
+`criar-customers.cy.js` gerado chamava `validarNaoVazaInterno(resposta)` sem
+importar a função. O spec quebraria na primeira execução com
+`validarNaoVazaInterno is not defined`, e nada reprovou — nem o `padrao_cypress`,
+que não confere import, nem o eslint, que só roda quando o projeto do cliente o
+tem configurado.
 
-A geração já resolveu esse problema fatiando (um arquivo por chamada, 20-24 mil
-tokens cada, todas bem-sucedidas). O reparo é a única parte que continua
-monolítica — ele desfaz o fatiamento que faz a geração funcionar. A correção é
-fatiá-lo igual: uma chamada por arquivo implicado, cada uma vendo o arquivo
-inteiro.
+O `prompts/executor.md` alegava que este caso reprovava, herança da skill; a
+alegação saiu, porque prompt que ameaça gate inexistente ensina o modelo a não
+levar a sério o que está escrito.
+
+Conferir isto exige resolver o que a **superfície do projeto** oferece contra o
+que o spec importa e usa — o extrator já lê os exports compartilhados
+(`analise_estatica/extrator_de_superficie.py`), então falta cruzar as duas
+listas com os identificadores chamados em cada arquivo.
+
+## Execução interrompida deixa staging no projeto do cliente
+
+`AreaDeStaging.descartar()` só roda no caminho feliz. Recurso reprovado mantém o
+staging de propósito — é o que se inspeciona —, mas execução que morre por erro
+de provedor ou por corte de token deixa o diretório `.qa-staging-<execucao>-<recurso>`
+para trás sem que ninguém o reivindique depois.
+
+Medido em 2026-08-11: oito diretórios órfãos acumulados em
+`cypress/e2e/apis/` do projeto de referência, de execuções de dias anteriores. O
+ponto inicial do nome os mantém fora do `specPattern` do Cypress, então eles não
+quebram nada — só sujam o repositório de quem paga pela ferramenta, e ninguém
+sabe quais podem ser apagados sem ler o diário.
+
+A correção provável é uma varredura no início da execução: staging cujo `run_id`
+não corresponde a nenhuma execução em curso é lixo de execução morta, e o diário
+já sabe dizer que o criamos.
+
+## O que a norma de código deixa para julgamento
+
+`gates/padrao_cypress.py` cobra oito regras. Três da norma ficaram sem fiscal
+porque nenhuma delas decide sem interpretar:
+
+- se o import do spec veio de camada permitida (depende da superfície de cada
+  projeto, que varia por cliente);
+- se a mensagem da asserção **explica** alguma coisa, em vez de repetir o nome do
+  campo;
+- se o nome do teste descreve comportamento em vez de mecanismo.
+
+Elas valem igual e estão escritas na norma. O que não existe é quem as cobre — e
+esta seção existe para que isso não passe por garantido.
