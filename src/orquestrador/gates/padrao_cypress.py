@@ -588,7 +588,6 @@ def _sem_tabela(caminho: str, fonte: str, neutro: str) -> list[Violacao]:
         Violacao(
             codigo=CODIGO_SEM_TABELA,
             arquivo=caminho,
-            linha=1,
             mensagem=(
                 f"{varreduras} testes de varredura por campo (CAT-02/03/04) escritos um "
                 "a um, sem nenhuma tabela. Mesma ação e mesmo oráculo variando só o "
@@ -612,7 +611,6 @@ def _sem_limpeza(caminho: str, fonte: str, neutro: str) -> list[Violacao]:
         Violacao(
             codigo=CODIGO_SEM_LIMPEZA,
             arquivo=caminho,
-            linha=1,
             mensagem=(
                 "o spec cria massa pela API e não tem `afterEach` de limpeza. A massa "
                 "que fica não quebra este teste — quebra a execução seguinte, por "

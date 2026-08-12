@@ -496,7 +496,7 @@ def _reparar(
         saida = gerador.gerar(
             SaidaDeReparo,
             instrucao=instrucao,
-            entrada=montar_entrada_reparo(atual, so_deste)
+            entrada=montar_entrada_reparo(_conteudo_para_editar(nome, dir_recurso, atual), so_deste)
             + _PEDIDO_DE_EDICAO.format(nome=nome, schema=esquema_json(SaidaDeReparo))
             + do_plano,
             recurso=recurso.nome,
@@ -553,6 +553,29 @@ DIFERENTE do schema de geração descrito na instrução fixa:
 {schema}
 ```
 """
+
+
+def _conteudo_para_editar(nome: str, dir_recurso: Path | None, recorte: str) -> str:
+    """O arquivo que esta chamada vai editar, INTEIRO — não o recorte da suíte.
+
+    Para dizer "troque este trecho", o modelo precisa estar vendo o trecho. O
+    recorte compartilhado não garante isso por dois motivos, e os dois são
+    fatais para uma edição: ele mostra 12 linhas em volta da linha citada (e
+    violação de arquivo inteiro cita a linha 1, o que mostraria só o cabeçalho),
+    e é montado UMA vez para o delta todo, com teto de 60 mil caracteres — com
+    cinco specs somando 120 mil, o arquivo desta chamada pode estar justamente na
+    metade elidida.
+
+    Mandar só este arquivo resolve os dois e ainda encolhe a entrada: as outras
+    quatro quintas partes não interessam a quem vai editar esta.
+    """
+    if dir_recurso is None:
+        return recorte
+    caminho = dir_recurso / nome
+    if not caminho.is_file():
+        return recorte
+    conteudo = caminho.read_text(encoding="utf-8", errors="replace")
+    return f"--- {nome} ---\n{conteudo}"
 
 
 def _aplicar_reparo(

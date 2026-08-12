@@ -405,3 +405,25 @@ def test_o_pedido_manda_nao_reescrever(config_falso, tmp_path):
     assert "copiado do arquivo" in entrada, "o antigo tem de ser cópia, não descrição"
     assert "SaidaDeReparo" in entrada, "o schema da chamada é o de troca, não o de geração"
     assert "criar-pedidos.cy.js" in entrada
+
+
+def test_o_reparo_ve_o_arquivo_inteiro_que_vai_editar(config_falso, tmp_path):
+    """Para copiar o trecho, o modelo precisa estar vendo o trecho.
+
+    O recorte compartilhado do delta não garante isso: ele mostra 12 linhas em
+    volta da linha citada, e é montado UMA vez para a suíte toda, com teto de 60
+    mil caracteres. Uma violação de arquivo inteiro cita a linha 1 — o modelo veria
+    só o cabeçalho e teria de adivinhar o resto, e adivinhação não casa.
+    """
+    longo = SPEC + "\n".join(f"// linha de enchimento {i}" for i in range(400)) + "\n"
+    modelo = ModeloSequencial(
+        respostas=[
+            reparo((("criar-pedidos.cy.js", "// linha de enchimento 399", "// consertado"),))
+        ]
+    )
+
+    saida, _ = consertar(config_falso, modelo, tmp_path, conteudo=longo)
+
+    entrada = "\n".join(str(m.content) for m in modelo.capturas[0] if isinstance(m, HumanMessage))
+    assert "// linha de enchimento 399" in entrada, "o fim do arquivo precisa estar à vista"
+    assert "// consertado" in saida.arquivos[0].conteudo
