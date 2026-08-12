@@ -34,6 +34,18 @@ usuário e leva dezenas de minutos. "Rodar a suíte" numa frase sobre testes
 costuma significar `python -m pytest`; a suíte paga é a que tem `--recurso` e
 chama o provedor. Na dúvida entre as duas, pergunte.
 
+**Se a mudança foi do Bloco 2 para frente, proponha `--reaproveitar` em vez da
+suíte completa** — norma de código, prompt do executor, fatiamento, reparo, gate
+do Gate B. O procedimento está em "Iterar no executor sem pagar o pipeline
+inteiro", no `AGENTS.md`. Custa um quinto do tempo e mede melhor: rodar o
+pipeline completo faz o mapeador e o planejador variarem, e aí não se sabe se o
+que mudou no resultado foi a sua alteração ou o sorteio.
+
+Duas coisas suas nesse ciclo: **fixe um `run_id` e não o troque** entre as voltas
+da mesma investigação, e **dispare o gate em seco** contra a suíte publicada antes
+de dar a qualquer régua nova o poder de reprovar. Custo zero, e é o que impede
+uma régua mal calibrada de queimar as três tentativas do Gate B.
+
 **Rode pelo venv de execução congelado** (`.venv-execucao`, ver o tutorial no
 `AGENTS.md`) — nunca pelo `.venv` de desenvolvimento: o usuário edita o checkout
 enquanto a suíte anda, e os prompts são relidos do disco a cada chamada. Lembre

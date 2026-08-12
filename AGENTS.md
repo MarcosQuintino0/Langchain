@@ -268,26 +268,60 @@ flag, a cobertura relatada é estática — e o resumo final diz isso, em vermel
 
 ### Iterar no executor sem pagar o pipeline inteiro
 
-Quando o que mudou foi a norma de código, o prompt do executor ou o fatiamento,
-o mapeador e o planejador vão refazer exatamente o mesmo trabalho — caro, lento,
-e com variância própria que suja a comparação.
+**Use isto sempre que a mudança for do Bloco 2 para frente**: norma de código,
+prompt do executor, fatiamento, reparo ou qualquer gate do Gate B. Rodar a suíte
+completa nesses casos é pagar duas vezes pelo mesmo trabalho e ainda medir errado.
 
 ```powershell
 .venv-execucao\Scripts\python -m orquestrador --recurso customers --reaproveitar <run_id>
 ```
 
-A execução começa no Bloco 2 com o gabarito, o plano, o dossiê e o inventário da
-execução citada. **Os dois gates continuam rodando** e o executor roda inteiro,
-do zero: o que se reaproveita é decisão, nunca veredito nem código.
+**Escolhendo o `run_id`.** Precisa ser uma execução que tenha chegado ao plano
+daquele recurso — o mapeador e o planejador precisam ter rodado nela. Execução que
+morreu no Bloco 1 não serve.
 
-É a forma honesta de medir uma mudança no Bloco 2, porque a entrada fica
-literalmente idêntica entre as voltas — o mesmo plano, os mesmos cenários, na
-mesma ordem. Rodar o pipeline inteiro duas vezes compara duas coisas que já
-diferem antes de o executor começar.
+```powershell
+python -m orquestrador execucoes listar
+dir .execucoes\<run_id>\artefatos\<recurso>   # tem plano.json? então serve
+```
 
-A execução nova é auto-contida: ela grava a própria cópia dos artefatos
-reaproveitados, então `execucoes comparar` continua funcionando mesmo depois de
-a execução de origem ser apagada pela retenção.
+**Fixe um só e não troque.** Todas as voltas de uma investigação têm de citar o
+MESMO `run_id`, ou a comparação perde o sentido: plano diferente é entrada
+diferente. Foi medido — o planejador emitiu 200 cenários numa execução e 253 na
+seguinte, com o mesmo backend.
+
+**O que se reaproveita e o que não.** Voltam do disco o gabarito, o plano, o
+dossiê e o inventário. **Os dois gates continuam rodando** e o executor roda
+inteiro, do zero: reaproveita-se decisão, nunca veredito nem código. A execução
+nova grava a própria cópia dos artefatos, então `execucoes comparar` continua
+funcionando mesmo depois de a origem ser apagada pela retenção.
+
+**Por que é a medição honesta.** A entrada do executor fica literalmente idêntica
+entre as voltas — o mesmo plano, os mesmos cenários, na mesma ordem. O que diferir
+no resultado é a sua mudança, e nada mais. Rodar o pipeline completo duas vezes
+compara duas coisas que já diferem antes de o executor começar.
+
+**O que custa**, medido em `customers` (5 endpoints, 253 cenários) em 2026-08-12:
+
+| | Suíte completa | Só o executor |
+| --- | --- | --- |
+| Tempo | ~25 min | **4,5 min** |
+| Custo | ~US$ 0,08 | **~US$ 0,05** |
+| Chamadas | 38 | 14 |
+
+O ciclo prático é: muda, `pip install .` no venv congelado, roda, lê o Gate B,
+muda de novo. Cinco voltas custam menos que uma suíte completa.
+
+**Antes de rodar, dispare o gate em seco** contra a suíte publicada — custo zero,
+e é o que separa régua que pega defeito de régua que inventa trabalho:
+
+```powershell
+python -c "from pathlib import Path; from orquestrador.gates.padrao_cypress import conferir_padrao; r=Path('../projeto-de-testes/cypress/e2e/apis/customers'); print(conferir_padrao({p.relative_to(r).as_posix(): p.read_text('utf-8') for p in r.rglob('*.js')}).violacoes)"
+```
+
+Foi assim que três falsos positivos morreram antes de custar uma volta paga, e
+que os tetos de `QAORQ-079` e `QAORQ-084` foram calibrados com número em vez de
+gosto.
 
 ### O relatório é obrigatório
 
