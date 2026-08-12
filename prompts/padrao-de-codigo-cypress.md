@@ -392,6 +392,40 @@ O título é template e precisa resolver **único** por caso, usando identificad
 simples ou acesso pontilhado (`${campo}`) — um ternário no título não resolve.
 Cada caso carrega o texto pronto de que o título precisa.
 
+### Se precisou de `if` para saber o que esperar, falta uma coluna
+
+O corpo do `it` **não decide nada por caso**. Tudo que muda entre um caso e outro
+mora na tabela, inclusive o resultado esperado:
+
+```js
+// não: o corpo escolhe a expectativa, e o oráculo se dissolve num ramo
+[{ campo: "name" }, { campo: "email" }].forEach(({ campo }) => {
+  it(`recusa ${campo} inválido`, () => {
+    if (campo === "name") {
+      expect(resposta.body.erro, "nome inválido").to.eq("NOME_INVALIDO");
+    } else {
+      expect(resposta.body.erro, "e-mail inválido").to.eq("EMAIL_INVALIDO");
+    }
+  });
+});
+
+// sim: o caso já traz o que esperar, e o corpo é o mesmo para todos
+[
+  { campo: "name",  valor: "",    erro: "NOME_OBRIGATORIO" },
+  { campo: "email", valor: "abc", erro: "EMAIL_INVALIDO" },
+].forEach(({ campo, valor, erro }) => {
+  it(`recusa o cadastro com ${campo} inválido`, () => {
+    criarCliente({ corpo: clienteValido({ [campo]: valor }) }).then((resposta) => {
+      expect(resposta.body.erro, `${campo} inválido deve ser recusado`).to.eq(erro);
+    });
+  });
+});
+```
+
+Um `if` dentro de um caso de tabela significa que os casos **não são o mesmo
+teste** — e teste diferente pede `it` próprio, não um ramo. Quando eles são o
+mesmo teste, o que os separa é dado, e dado vai na coluna. `QAORQ-074`
+
 A tag `@campo` é **por iteração**, nunca a lista de campos toda acumulada numa tag só:
 
 ```js
