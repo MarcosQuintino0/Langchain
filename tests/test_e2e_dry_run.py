@@ -20,6 +20,8 @@ import pytest
 from orquestrador.aplicacao.simulacao import Roteiros
 from orquestrador.cli import principal as modulo_cli
 from orquestrador.cli.codigos_de_saida import ERRO_DE_USO
+from orquestrador.dominio.manifesto import Manifesto
+from orquestrador.gates.cobertura import conferir_cobertura
 from orquestrador.raiz import DIR_FIXTURES
 
 # Módulo misto: três casos exercitam o pipeline inteiro em disco, e o quarto só lê
@@ -65,13 +67,12 @@ def ultima_execucao(base: Path) -> Path:
 
 @e2e
 def test_dry_run_completo_com_reparo_no_gate_a(config_toml: Path, tmp_path: Path):
-    """O ciclo reprova-repara-aprova, com o delta que o alimentou.
+    """O ciclo reprova-repara-aprova nos DOIS gates, com o delta que os alimentou.
 
-    O Gate B entrava aqui também, reprovando por `QAAPI-025` e `QAAPI-002` — dois
-    códigos do `validar-suite-gerada.mjs`. Ele saiu com o desacoplamento e, com os
-    roteiros de hoje, o Gate B aprova de primeira. Ver
-    `test_gate_b_ainda_nao_cobra_o_que_o_plano_mandou`, que é onde essa perda está
-    registrada como perda, e não como silêncio.
+    O Gate B ficou sem reprovar por um tempo: os códigos que o faziam vinham do
+    `validar-suite-gerada.mjs`, que saiu com o desacoplamento da skill. Com a
+    reconciliação de cobertura de volta (`gates/cobertura.py`), ele reprova de novo
+    — e por conta própria. Ver `test_gate_b_cobra_o_que_o_gabarito_prometeu`.
     """
     codigo = modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)])
     assert codigo == 0
@@ -110,7 +111,12 @@ def test_dry_run_completo_com_reparo_no_gate_a(config_toml: Path, tmp_path: Path
         f"reparo deveria reemitir só a fatia dossie: {[e.get('fatia') for e in chamadas_t2]}"
     )
 
-    assert [evento["aprovado"] for evento in gates if evento["gate"] == "gate_b"] == [True]
+    # O Gate B reprova a primeira tentativa por cobertura e aprova a segunda —
+    # ver test_gate_b_cobra_o_que_o_gabarito_prometeu.
+    assert [evento["aprovado"] for evento in gates if evento["gate"] == "gate_b"] == [
+        False,
+        True,
+    ]
 
     # Nenhum modelo foi chamado.
     chamadas = [evento for evento in eventos if evento["tipo"] == "requisicao_llm_concluida"]
@@ -163,30 +169,43 @@ def test_artefatos_ficam_em_disco(config_toml: Path, tmp_path: Path):
 
 
 @e2e
-def test_gate_b_ainda_nao_cobra_o_que_o_plano_mandou(config_toml: Path, tmp_path: Path):
-    """A perda do desacoplamento, escrita como teste em vez de como comentário.
+def test_gate_b_cobra_o_que_o_gabarito_prometeu(config_toml: Path, tmp_path: Path):
+    """A maior perda do desacoplamento, agora como exigência.
 
-    O roteiro do executor transcreve só uma parte dos cenários do plano. Enquanto o
-    `qa-cobertura.mjs` rodava, a diferença era `QAAPI-025`/`QAORQ-030` e o Gate B
-    reprovava; hoje passa. Está em `docs/arquitetura/pendencias.md`.
+    Onde este teste afirmava a AUSÊNCIA da reconciliação de cobertura — e existia
+    para quebrar no dia em que ela voltasse —, ele agora prova o ciclo inteiro: a
+    primeira tentativa do executor deixa categorias prometidas sem `it`, o Gate B
+    reprova com `QAORQ-030`, e a segunda entrega e aprova.
 
-    Este teste afirma a ausência de propósito. Quando o gate de cobertura for
-    escrito, ele quebra — e quem o escrever é obrigado a vir aqui trocar a asserção
-    pela exigência, que é exatamente o momento em que a pendência deixa de existir.
-    Uma linha de comentário não teria feito isso: ninguém a lê no dia certo.
+    É a promessa do produto rodando de ponta a ponta sem custar um token: "tudo
+    que foi prometido virou teste?" respondido por script, não por afirmação.
     """
     assert modulo_cli.main(["--dry-run", "--recurso", "pedidos", "--config", str(config_toml)]) == 0
     execucao = ultima_execucao(tmp_path / "execucoes")
-    recurso = execucao / "sandbox" / "projeto-testes" / "cypress" / "e2e" / "apis" / "pedidos"
 
-    plano = json.loads((execucao / "artefatos" / "pedidos" / "plano.json").read_text("utf-8"))
-    planejados = sum(len(parte["cenarios"]) for parte in plano["endpoints"])
-    transcritos = sum(spec.read_text("utf-8").count("@cat ") for spec in recurso.glob("*.cy.js"))
-
-    assert transcritos < planejados, (
-        "o roteiro deixa cenários por transcrever de propósito; se isso deixou de "
-        "ser verdade, o teste perdeu o objeto e precisa ser reescrito"
+    gates = [evento for evento in eventos_de(execucao) if evento["tipo"] == "gate"]
+    do_b = [evento for evento in gates if evento["gate"] == "gate_b"]
+    assert [evento["aprovado"] for evento in do_b] == [False, True], (
+        "a primeira tentativa precisa reprovar por cobertura e a segunda aprovar"
     )
+
+    codigos = {codigo for evento in do_b for codigo in evento.get("violacoes_codigos", [])}
+    if not codigos:
+        codigos = {
+            violacao.get("code", violacao.get("codigo"))
+            for evento in do_b
+            for violacao in evento.get("violacoes", [])
+        }
+    assert "QAORQ-030" in codigos, f"a reprovação precisa ser de cobertura: {codigos}"
+
+    # E o que foi publicado cobre o gabarito inteiro: nenhuma categoria prometida
+    # ficou sem `it` na versão que chegou ao projeto do consumidor.
+    recurso = execucao / "sandbox" / "projeto-testes" / "cypress" / "e2e" / "apis" / "pedidos"
+    manifesto = Manifesto.model_validate_json(
+        (recurso / "_support" / "cobertura.json").read_text("utf-8")
+    )
+    specs = {spec.name: spec.read_text("utf-8") for spec in recurso.glob("*.cy.js")}
+    assert conferir_cobertura(manifesto, specs, {}).aprovado
 
 
 def eventos_de(execucao: Path) -> list[dict]:

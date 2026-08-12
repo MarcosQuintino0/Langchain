@@ -1,26 +1,32 @@
 """Gate B — verificação da implementação (determinístico).
 
-Duas checagens, depois do desacoplamento da skill (2026-08-10):
+Quatro checagens:
 
 1. **Formatadores** (prettier/eslint), quando configurados — são do projeto do
    cliente, não de skill nenhuma, e nunca reprovam o artefato: instalar
    toolchain não é trabalho que o executor faça reescrevendo teste.
 2. **Limpeza gerada** (`gates/limpeza.py`) — a receita determinística virou
    código de verdade, ou o executor só disse que sim?
+3. **Norma de código** (`gates/padrao_cypress.py`) — o pedaço de
+   `prompts/padrao-de-codigo-cypress.md` que um script consegue provar.
+4. **Cobertura** (`gates/cobertura.py`) — tudo que o gabarito prometeu virou
+   `it`, e todo campo do schema de entrada foi exercitado?
 
-O que saiu com a skill: a reconciliação de cobertura por categoria e por campo
-(`QAAPI-025`, `QAORQ-030` via `qa-cobertura.mjs`) e as checagens de padrão de
-código. **É a maior perda do desacoplamento** e está registrada como pendência
-em `docs/arquitetura/pendencias.md`: enquanto ela não voltar, o Gate B não
-responde "planejei e não entreguei" — quem responde por cobertura hoje é o
-QAORQ-050/051/052 no planejador, que é sobre o PLANO, não sobre o código.
+A quarta é a que fechou o buraco do desacoplamento da skill. Entre 2026-08-10 e
+2026-08-12 este gate não respondia "planejei e não entreguei": quem falava de
+cobertura era o `QAORQ-050/051/052` no planejador, que mede o PLANO, e não o
+código. Medido na volta, sobre a suíte publicada de `customers`: 33 de 39
+categorias prometidas tinham teste — as outras 6 ninguém tinha visto faltar.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from orquestrador.config import Config
+from orquestrador.dominio.artefatos import SUFIXO_SCHEMA
 from orquestrador.dominio.dossie import DossieDoRecurso
 from orquestrador.dominio.inventario import Inventario
 from orquestrador.dominio.manifesto import Manifesto
@@ -28,6 +34,7 @@ from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.veredito import ResultadoGate, Violacao
 from orquestrador.excecoes import ExecutavelAusente
 from orquestrador.ferramentas.processo import executar as rodar_processo
+from orquestrador.gates.cobertura import conferir_cobertura
 from orquestrador.gates.limpeza import conferir_limpeza
 from orquestrador.gates.padrao_cypress import conferir_padrao
 from orquestrador.gates.saidas import violacoes_do_eslint
@@ -54,17 +61,47 @@ def executar(
     Ver `gate_a.executar` sobre por que `dir_recurso` e `dir_schemas` não têm
     padrão.
     """
-    del dir_schemas, manifesto, out_cobertura, recurso  # ver a docstring: saíram com a skill
+    del out_cobertura  # ver a docstring: era o relatório do script da skill
+    codigo = _codigo_do_recurso(dir_recurso)
     partes = [
         _formatador(config, "prettier", "QAORQ-020", config.execucao.prettier, dir_recurso),
         _formatador(config, "eslint", "QAORQ-021", config.execucao.eslint, dir_recurso),
         conferir_limpeza(_modulos_de_suporte(dir_recurso), inventario, dossie),
-        conferir_padrao(_codigo_do_recurso(dir_recurso)),
+        conferir_padrao(codigo),
+        conferir_cobertura(
+            manifesto,
+            {nome: fonte for nome, fonte in codigo.items() if nome.endswith(".cy.js")},
+            _schemas_do_recurso(dir_schemas, recurso),
+        ),
     ]
     combinado = ResultadoGate.combinar([parte for parte in partes if parte], gate=NOME)
     # Checagem que não rodou não vira delta: `exigir_veredito` interrompe o recurso
     # em vez de devolver ao executor uma lista que ele não tem como satisfazer.
     return combinado.exigir_veredito()
+
+
+def _schemas_do_recurso(dir_schemas: Path, recurso: Recurso) -> dict[str, dict[str, Any]]:
+    """Os schemas de entrada do recurso, indexados pela referência do gabarito.
+
+    A chave é o nome curto (`create`, `patch`) porque é assim que o
+    `schemaEntrada` do gabarito os cita — resolver o caminho aqui e comparar por
+    caminho faria a conta depender do layout, que já tem dono em
+    `dominio/artefatos.py`.
+    """
+    raiz = dir_schemas / recurso.nome
+    if not raiz.is_dir():
+        return {}
+    schemas: dict[str, dict[str, Any]] = {}
+    for arquivo in sorted(raiz.glob(f"*{SUFIXO_SCHEMA}")):
+        try:
+            conteudo = json.loads(arquivo.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # Schema ilegível não vira lacuna de cobertura: quem responde por
+            # schema quebrado é o Gate A, sobre o artefato do mapeador.
+            continue
+        if isinstance(conteudo, dict):
+            schemas[arquivo.name[: -len(SUFIXO_SCHEMA)]] = conteudo
+    return schemas
 
 
 def _codigo_do_recurso(dir_recurso: Path) -> dict[str, str]:

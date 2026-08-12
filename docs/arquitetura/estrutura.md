@@ -100,6 +100,7 @@ src/orquestrador/
     gate_a.py        diff grafo × manifesto + conferência do dossiê
     gate_b.py        prettier + eslint + limpeza gerada + padrão de código
     limpeza.py       QAORQ-031/032/033: a receita de limpeza virou código de verdade
+    cobertura.py     QAORQ-030/082: o gabarito prometeu, os specs entregaram?
     padrao_cypress.py  QAORQ-070..081: o pedaço da norma de código que um script prova
     saidas.py        JSON de ferramenta externa → ResultadoGate/Violacao
 ```

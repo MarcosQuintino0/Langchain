@@ -62,6 +62,7 @@ edite o catálogo e regenere.
 | `QAORQ-079` | varredura por campo escrita `it` a `it`, sem tabela data-driven |
 | `QAORQ-080` | spec que cria massa e não chama a limpeza |
 | `QAORQ-081` | identificador chamado sem import nem declaração que o forneça |
+| `QAORQ-082` | campo do schema de entrada sem nenhum `it` que o exercite |
 <!-- FIM DOS CODIGOS QAORQ -->
 
 `QAORQ-030` está no catálogo e **não é emitido hoje**: quem contava as lacunas era

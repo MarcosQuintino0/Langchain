@@ -40,12 +40,25 @@ afirmava que a checagem estava ligada enquanto ela não existia mais. Foi removi
 junto com `[caminhos].skill` e as `flags` dos gates. Quando a reconciliação
 voltar, o campo volta com ela — e aí ligado vai querer dizer ligado.
 
-**O caminho de volta.** A reconciliação por categoria e por campo é conhecida: as
-tags `@endpoint`/`@cat`/`@campo` já são parseadas por
-`analise_estatica/tags_cypress.py`, hoje sem autoridade — ele serve só para nomear
-o que faltou num delta. Dar autoridade a ele, cruzando as tags dos specs gerados
-com `cats` do manifesto e com as `properties` dos schemas, devolve a invariante 4
-sem Node e sem repositório de terceiro.
+**A volta, em 2026-08-12.** A reconciliação por categoria e por campo é
+`gates/cobertura.py`, e o caminho foi o previsto aqui: dar autoridade ao
+`analise_estatica/tags_cypress.py`, cruzando as tags dos specs com `cats` do
+gabarito e com as `properties` dos schemas. Sem Node e sem repositório de terceiro.
+
+Um acréscimo que o plano não previa: o parser precisou aprender a **resolver** a
+interpolação das varreduras. A norma manda escrever varredura por campo em tabela
+(`QAORQ-079`), e tabela produz `@campo ${campo}` — contar isso como campo não
+testado puniria exatamente a forma que a outra régua exige, e o executor ficaria
+entre duas regras incompatíveis.
+
+Medido na volta, sobre a suíte publicada de `customers`: **33 de 39 categorias
+prometidas tinham teste**. As outras seis ninguém tinha visto faltar, e o arquivo
+com mais lacunas era o **menor** da suíte — o tamanho não denuncia lacuna. A
+cobertura por campo estava em 6 de 6.
+
+O que continua de fora, e por quê: as `12 categorias contabilizadas` do Gate A
+(`cats ∪ naoAplica` cobre CAT-01..12 sem interseção) segue sem checagem própria —
+é do gabarito, não do código, e mora do outro lado do pipeline.
 
 ## O produto não prepara o projeto Cypress do cliente
 
