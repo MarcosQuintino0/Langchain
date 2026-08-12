@@ -79,13 +79,26 @@ recurso, e todo import relativo precisa resolver.
 cenários.** Um recurso com 250 casos de teste tem o mesmo `_support/` de um com 40:
 uma função por operação da API, um construtor de corpo válido com sobrescritas, os
 helpers de massa e limpeza, e as poucas verificações que se repetem. As quatro
-camadas juntas costumam ficar entre 100 e 250 linhas.
+camadas juntas costumam ficar entre 100 e 250 linhas, e nenhuma delas passa de
+**oito exports por operação** — o `api.js` é a referência, com uma função por
+operação e mais nada. `QAORQ-084`
 
 Uma função por cenário é o erro a evitar: `criarClienteSemEmail`,
 `criarClienteComEmailInvalido`, `criarClienteComEmailLongo` são o mesmo
 `clienteValido({ email })` chamado com argumentos diferentes. Quem varia o dado é o
 teste, no ponto onde a variação é lida — é isso que o construtor por sobrescrita
 existe para permitir.
+
+### O nome promete, e a função tem de cumprir
+
+**Nome de função descreve o que ela faz de DIFERENTE.** `criarClienteNoTenantB`
+que chama `criarClienteParaTeste` sem trocar o tenant é pior do que não existir:
+quem lê o spec acredita que aquele teste exercita outro tenant, e ele não
+exercita. Nome mentiroso engana o revisor e o gate ao mesmo tempo.
+
+E **nada de repasse**: `tokenUser()` que só devolve `tokenPadrao()` acrescenta um
+nome, um arquivo a abrir e zero informação. Se a função não faz nada além de
+chamar outra, apague-a e chame a outra.
 
 ### O `_support/` é lido pelas mesmas pessoas
 
@@ -455,6 +468,23 @@ A tag `@campo` é **por iteração**, nunca a lista de campos toda acumulada num
   promessa, mas a fila de comandos e as promessas nativas têm relógios diferentes,
   e misturar os dois é origem conhecida de teste intermitente — o pior defeito
   possível numa suíte, porque some quando alguém vai investigar.
+- **O que se acumula na fila só pode ser lido depois dela.** `QAORQ-083`
+
+```js
+// não: quando o `if` roda, nada foi excluído ainda e `falhas` está vazio
+pendentes.forEach((item) => excluirRegistrado(item, falhas));
+if (falhas.length > 0) throw new Error(falhas.join("; "));
+
+// sim: o cy.then entra na fila e roda depois de tudo que foi enfileirado antes
+pendentes.forEach((item) => excluirRegistrado(item, falhas));
+cy.then(() => {
+  expect(falhas, "toda massa criada pelo teste precisa ser apagada").to.be.empty;
+});
+```
+
+  A primeira forma **parece** conferir: ela lê o status de cada exclusão, guarda a
+  falha numa lista — e joga a lista fora, porque a lê antes de existir. É limpeza
+  cega com aparência de limpeza conferida, que é pior que limpeza cega assumida.
 - Em operação rejeitada, registre também a criação indevida, caso o backend
   devolva um identificador.
 - **Nunca compartilhe id** por `Cypress.env`, variável global mutável ou efeito de
@@ -607,6 +637,8 @@ automaticamente.
 | `QAORQ-079` | varredura por campo escrita `it` a `it`, sem tabela |
 | `QAORQ-080` | spec que cria massa e não chama a limpeza |
 | `QAORQ-081` | identificador usado sem import que o forneça |
+| `QAORQ-083` | acumulador preenchido dentro da fila do Cypress e lido fora dela |
+| `QAORQ-084` | camada do `_support/` com exports demais para o número de operações |
 
 O que **não** tem fiscal, e por isso vale como julgamento: se a mensagem da
 asserção realmente explica, se o nome do teste descreve comportamento em vez de

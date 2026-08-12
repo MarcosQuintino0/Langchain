@@ -45,6 +45,8 @@ CODIGOS_DO_ORQUESTRADOR: dict[str, str] = {
     "QAORQ-080": "spec que cria massa e não chama a limpeza",
     "QAORQ-081": "identificador chamado sem import nem declaração que o forneça",
     "QAORQ-082": "campo do schema de entrada sem nenhum `it` que o exercite",
+    "QAORQ-083": "acumulador preenchido dentro da fila do Cypress e lido fora dela",
+    "QAORQ-084": "camada do `_support/` que cresceu com os cenários, não com as operações",
 }
 
 

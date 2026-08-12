@@ -543,3 +543,107 @@ describe("Criar cliente", () => {
 """
     )
     assert "QAORQ-080" not in codigos(fonte)
+
+
+# ---------------------------------------------------------------------------
+# O que a leitura da suíte de 2026-08-12 pediu
+# ---------------------------------------------------------------------------
+
+
+def test_acumulador_lido_fora_da_fila_reprova():
+    """A limpeza gerada conferia o status de cada exclusão e jogava o resultado fora.
+
+    `excluirRegistrado` devolve um encadeável: o `forEach` só ENFILEIRA as
+    exclusões, e o `if` roda em seguida, síncrono, com `falhas` ainda vazio. Parece
+    limpeza conferida e é limpeza cega — pior que a cega assumida, porque ninguém
+    desconfia.
+    """
+    fonte = """// Helpers de limpeza.
+const falhas = [];
+
+export function limpar(pendentes) {
+  pendentes.forEach((item) => {
+    excluir(item).then((exclusao) => {
+      if (exclusao.status !== 204) falhas.push(item.id);
+    });
+  });
+
+  if (falhas.length > 0) {
+    throw new Error("falhou");
+  }
+}
+"""
+    assert "QAORQ-083" in codigos(fonte, "_support/helpers.js")
+
+
+def test_acumulador_lido_dentro_de_cy_then_nao_reprova():
+    fonte = """// Helpers de limpeza.
+const falhas = [];
+
+export function limpar(pendentes) {
+  pendentes.forEach((item) => {
+    excluir(item).then((exclusao) => {
+      if (exclusao.status !== 204) falhas.push(item.id);
+    });
+  });
+
+  cy.then(() => {
+    expect(falhas, "toda massa criada precisa ser apagada").to.be.empty;
+  });
+}
+"""
+    assert "QAORQ-083" not in codigos(fonte, "_support/helpers.js")
+
+
+def test_lista_sincrona_comum_nao_reprova():
+    # Sem `.then` no meio, o acumulador é lido depois de preenchido — é código
+    # normal, e acusá-lo seria inventar trabalho.
+    fonte = """// Factory de clientes.
+export function nomes(quantidade) {
+  const gerados = [];
+  for (let i = 0; i < quantidade; i++) {
+    gerados.push(`Cliente ${i}`);
+  }
+  if (gerados.length === 0) {
+    throw new Error("nada gerado");
+  }
+  return gerados;
+}
+"""
+    assert "QAORQ-083" not in codigos(fonte, "_support/factories.js")
+
+
+def test_camada_de_suporte_inchada_reprova():
+    """54 factories para 5 operações: uma função por cenário, que a norma nomeia.
+
+    O teto é por OPERAÇÃO, não absoluto: a âncora é o `api.js`, que sai com uma
+    função por endpoint nas suítes medidas.
+    """
+    specs = {f"op{i}.cy.js": "// spec\n" for i in range(5)}
+    inchado = "// Factories.\n" + "".join(
+        f"export function cliente{i}() {{ return {{}}; }}\n" for i in range(41)
+    )
+    violacoes = conferir_padrao({**specs, "_support/factories.js": inchado}).violacoes
+
+    assert "QAORQ-084" in [v.codigo for v in violacoes]
+
+
+def test_camada_proporcional_ao_numero_de_operacoes_nao_reprova():
+    specs = {f"op{i}.cy.js": "// spec\n" for i in range(5)}
+    enxuto = "// Factories.\n" + "".join(
+        f"export function cliente{i}() {{ return {{}}; }}\n" for i in range(40)
+    )
+    violacoes = conferir_padrao({**specs, "_support/factories.js": enxuto}).violacoes
+
+    assert "QAORQ-084" not in [v.codigo for v in violacoes]
+
+
+def test_recurso_de_um_endpoint_tem_piso():
+    # Com uma operação só, 8 exports seria apertado demais para as quatro camadas.
+    um = {"criar.cy.js": "// spec\n"}
+    camada = "// Factories.\n" + "".join(
+        f"export function cliente{i}() {{ return {{}}; }}\n" for i in range(12)
+    )
+    assert "QAORQ-084" not in [
+        v.codigo for v in conferir_padrao({**um, "_support/factories.js": camada}).violacoes
+    ]

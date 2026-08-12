@@ -59,6 +59,24 @@ CODIGO_SEM_CABECALHO = "QAORQ-078"
 CODIGO_SEM_TABELA = "QAORQ-079"
 CODIGO_SEM_LIMPEZA = "QAORQ-080"
 CODIGO_NAO_RESOLVIDO = "QAORQ-081"
+CODIGO_LIMPEZA_SEM_FILA = "QAORQ-083"
+CODIGO_SUPORTE_INCHADO = "QAORQ-084"
+
+# Quantos exports uma camada do `_support/` pode ter POR SPEC. A âncora é o
+# `api.js`, que a norma manda ter uma função por operação e que sai com exatamente
+# isso: 5 exports para 5 endpoints, nas duas suítes medidas. As outras camadas
+# deveriam escalar igual — com operações, não com cenários.
+#
+# Calibrado em 2026-08-12 contra três suítes reais. O teto de 8 acusa as duas
+# camadas que explodiram (54 factories e 44 asserts para 5 operações, uma função
+# por cenário) e deixa passar api.js (5), helpers.js (12) e o asserts.js da suíte
+# anterior (24 para 3 specs). Piso de 12 porque recurso de um endpoint só ainda
+# precisa de um punhado.
+EXPORTS_POR_SPEC = 8
+PISO_DE_EXPORTS = 12
+
+_EXPORT = re.compile(r"export\s+(?:async\s+)?(?:function|const|let|var|class)\s+(\w+)")
+_ACUMULADOR = re.compile(r"(?<![\w$])(?:const|let|var)\s+(\w+)\s*=\s*\[\s*\]")
 
 # Quantos testes de varredura (campo ausente, tipo errado, fronteira) um arquivo
 # aguenta escritos um a um antes de a repetição custar mais que a explicitude. O
@@ -123,6 +141,8 @@ _ORACULO_FRACO = re.compile(
 )
 
 SUFIXO_SPEC = ".cy.js"
+# O diretório das camadas, como o executor o emite.
+PREFIXO_SUPPORT = "_support/"
 
 # `import { validarX, validarY } from "./_support/asserts.js"` — o que o spec usa
 # como oráculo sem escrever `expect`. Casado no fonte ORIGINAL: a neutralização
@@ -147,6 +167,7 @@ def conferir_padrao(arquivos: dict[str, str]) -> ResultadoGate:
     violacoes: list[Violacao] = []
     for caminho in sorted(arquivos):
         violacoes += _conferir_arquivo(caminho, arquivos[caminho])
+    violacoes += _suporte_inchado(arquivos)
     if violacoes:
         return ResultadoGate.reprovado_por(violacoes, gate=NOME)
     return ResultadoGate.aprovado_por(gate=NOME)
@@ -166,6 +187,7 @@ def _conferir_arquivo(caminho: str, fonte: str) -> list[Violacao]:
     violacoes += _nomes_sem_origem(caminho, fonte)
 
     if not e_spec:
+        violacoes += _verificacao_fora_da_fila(caminho, neutro, linhas)
         return violacoes
 
     violacoes += _sem_tabela(caminho, fonte, neutro)
@@ -618,6 +640,116 @@ def _sem_limpeza(caminho: str, fonte: str, neutro: str) -> list[Violacao]:
             ),
         )
     ]
+
+
+def _corpos_de_then(neutro: str) -> list[tuple[int, int]]:
+    """Os limites de cada callback de `.then(...)`: o que roda na fila do Cypress."""
+    spans: list[tuple[int, int]] = []
+    for casamento in re.finditer(r"\.\s*then\s*\(", neutro):
+        seta = neutro.find("=>", casamento.end())
+        if seta == -1:
+            continue
+        abre = neutro.find("{", seta)
+        if abre == -1:
+            continue
+        profundidade = 0
+        for indice in range(abre, len(neutro)):
+            if neutro[indice] == "{":
+                profundidade += 1
+            elif neutro[indice] == "}":
+                profundidade -= 1
+                if profundidade == 0:
+                    spans.append((abre, indice))
+                    break
+    return spans
+
+
+def _verificacao_fora_da_fila(caminho: str, neutro: str, linhas: list[int]) -> list[Violacao]:
+    """Acumulador preenchido DENTRO da fila e lido FORA dela.
+
+    O defeito é silencioso, e foi medido na limpeza gerada em 2026-08-12:
+
+        pendentes.forEach((item) => { excluirRegistrado(item, falhas); });
+        if (falhas.length > 0) { throw ... }
+
+    `excluirRegistrado` devolve um encadeável — o trabalho é ENFILEIRADO. O
+    `forEach` só empilha as cadeias, e o `if` roda em seguida, síncrono, com
+    `falhas` ainda vazio. A limpeza confere o status de cada exclusão, guarda a
+    falha numa lista e joga a lista fora: se as exclusões falharem ninguém sabe, a
+    massa se acumula, e quem quebra é a execução SEGUINTE, longe da causa.
+
+    O `QAORQ-032` não pega este caso porque tecnicamente há verificação. O que
+    falta é ela acontecer no momento certo — dentro de um `cy.then`, que é o que o
+    Cypress oferece justamente para rodar depois da fila.
+    """
+    corpos = _corpos_de_then(neutro)
+
+    def na_fila(posicao: int) -> bool:
+        return any(inicio < posicao < fim for inicio, fim in corpos)
+
+    violacoes: list[Violacao] = []
+    for declaracao in _ACUMULADOR.finditer(neutro):
+        nome = declaracao.group(1)
+        empurra_na_fila = any(
+            na_fila(uso.start())
+            for uso in re.finditer(rf"(?<![\w$]){re.escape(nome)}\s*\.\s*push\s*\(", neutro)
+        )
+        if not empurra_na_fila:
+            continue
+        for leitura in re.finditer(rf"(?<![\w$]){re.escape(nome)}\s*\.\s*length", neutro):
+            if na_fila(leitura.start()):
+                continue
+            violacoes.append(
+                Violacao(
+                    codigo=CODIGO_LIMPEZA_SEM_FILA,
+                    arquivo=caminho,
+                    linha=_linha(linhas, leitura.start()),
+                    mensagem=(
+                        f"`{nome}` é preenchido dentro de um `.then` e lido fora dele: "
+                        "quando esta linha roda, a fila do Cypress ainda não executou e "
+                        f"`{nome}` está vazio, então a verificação nunca dispara. Envolva "
+                        "a leitura num `cy.then(() => ...)`."
+                    ),
+                )
+            )
+    return violacoes
+
+
+def _suporte_inchado(arquivos: dict[str, str]) -> list[Violacao]:
+    """Camada do `_support/` que cresceu com os cenários em vez das operações.
+
+    O `api.js` é a âncora: a norma manda uma função por operação, e é o que ele
+    tem nas suítes medidas — 5 exports para 5 endpoints. Quando `factories.js`
+    chega a 54, o que aconteceu foi `clienteSemEmail`, `clienteComEmail`,
+    `clienteComEmailVazio`, `clienteComEmailNull` — todas o mesmo
+    `clienteValido({ email })` com argumentos diferentes, que é o erro que a norma
+    nomeia com essas palavras.
+    """
+    specs = sum(1 for caminho in arquivos if caminho.endswith(SUFIXO_SPEC))
+    if not specs:
+        return []
+    teto = max(PISO_DE_EXPORTS, EXPORTS_POR_SPEC * specs)
+
+    violacoes: list[Violacao] = []
+    for caminho in sorted(arquivos):
+        if not caminho.startswith(PREFIXO_SUPPORT):
+            continue
+        quantos = len(_EXPORT.findall(arquivos[caminho]))
+        if quantos <= teto:
+            continue
+        violacoes.append(
+            Violacao(
+                codigo=CODIGO_SUPORTE_INCHADO,
+                arquivo=caminho,
+                mensagem=(
+                    f"{quantos} exports para {specs} operação(ões) — o teto é {teto}. O "
+                    "`_support/` não cresce com o número de cenários: quem varia o dado é "
+                    "o teste, chamando um construtor por sobrescrita. Uma função por "
+                    "cenário é o erro a evitar."
+                ),
+            )
+        )
+    return violacoes
 
 
 def _verificadores_importados(neutro: str) -> frozenset[str]:
