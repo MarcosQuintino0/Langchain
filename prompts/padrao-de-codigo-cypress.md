@@ -87,10 +87,55 @@ Uma função por cenário é o erro a evitar: `criarClienteSemEmail`,
 teste, no ponto onde a variação é lida — é isso que o construtor por sobrescrita
 existe para permitir.
 
+### O `_support/` é lido pelas mesmas pessoas
+
+Tudo que a norma exige do spec vale aqui: nome que diz o que faz, nada de
+identificador de uma letra em callback de bloco, no máximo dois níveis de
+aninhamento, e **etapa densa vira função com nome** em vez de ficar embutida.
+
+Uma limpeza que consulta a versão de cada registro, exclui, confere o resultado e
+agrega as falhas são quatro coisas — e quatro coisas numa função só obrigam quem
+lê a segurar tudo na cabeça de uma vez:
+
+```js
+// não: quatro responsabilidades e três níveis, tudo numa função
+export function limparClientesCriados() { /* consulta, exclui, confere, agrega */ }
+
+// sim: a etapa tem nome, e a função de cima vira uma frase
+function excluirClienteRegistrado({ id, token }, falhas) { /* uma exclusão */ }
+export function limparClientesCriados() { /* esvazia a fila e agrega */ }
+```
+
+Quebrar assim **não** contraria nenhuma boa prática: o que a literatura desaconselha
+é fragmentar lógica trivial em muitas funçõezinhas, não dar nome a uma etapa densa.
+
 **O endereço da API e a montagem da request não são seus.** Eles vêm dos módulos
 compartilhados que o projeto já tem (o client HTTP, o mapa de rotas, a autenticação),
 listados na seção da superfície. Rota literal dentro do recurso é duplicação que
 some do lugar onde alguém iria procurar quando a rota mudar.
+
+## Todo arquivo se apresenta
+
+**Todo arquivo gerado começa com um comentário curto** dizendo o que ele é, o que
+se encontra dentro dele e quem o consome. Vale para spec e para cada camada do
+`_support/`. `QAORQ-078`
+
+```js
+/**
+ * Operações HTTP do recurso customers.
+ *
+ * Uma função por operação da API, montada sobre o client compartilhado do
+ * projeto. Não faz asserção nem limpeza: quem verifica é o asserts.js, quem
+ * cria e apaga massa é o helpers.js.
+ *
+ * Consumido por: os specs do recurso e o helpers.js.
+ */
+```
+
+Três linhas resolvem. O que ele não pode ser é catálogo do que já está logo
+abaixo — listar os nomes das funções é ruído que envelhece na primeira mudança.
+O que interessa é a **fronteira**: o que este arquivo é dono e o que ele
+deliberadamente não faz.
 
 ## Nada de comando customizado do Cypress
 
@@ -136,6 +181,36 @@ existe quarto nível. Se `context` fosse opcional, cada suíte sairia com uma ca
 Lidos de cima para baixo, os três viram uma frase: *Criar cliente, quando os dados
 estão errados, recusa o cadastro sem e-mail.* Esse é o teste de aceite — leia em
 voz alta; se não soar como português, algum dos três níveis está errado.
+
+### A frase é em linguagem de negócio; o jargão fica na asserção
+
+`describe`, `context` e `it` são o que alguém lê antes de saber qualquer coisa
+sobre esta API. Nome de cabeçalho HTTP, código de status e termo de protocolo não
+entram aí — eles entram na mensagem do `expect`, que é onde servem para alguma
+coisa: depurar a falha.
+
+```js
+// não: quem lê precisa saber o que é If-Match antes de entender a circunstância
+context("quando a versão do If-Match diverge da atual", () => {
+  it("recusa a exclusão", () => {
+    expect(exclusao.status, "versão divergente").to.equal(412);
+  });
+});
+
+// sim: a circunstância é o que aconteceu no mundo; o protocolo prova
+context("quando outra pessoa já alterou o cliente antes", () => {
+  it("recusa a exclusão e mantém o cliente intacto", () => {
+    expect(
+      exclusao.status,
+      "excluir com uma versão desatualizada deve falhar com 412 VERSION_MISMATCH",
+    ).to.equal(412);
+  });
+});
+```
+
+A regra vale para o mecanismo, não para o vocabulário do produto: se o negócio
+chama de "pedido faturado", o teste chama de "pedido faturado". O que se traduz é
+o que é linguagem de máquina — `If-Match`, `422`, `ETag`, `payload`.
 
 ## O nome do teste
 
@@ -237,9 +312,26 @@ encadeamento não óbvio; num teste de uma chamada e verificação direta, os
 marcadores só poluem. A releitura de confirmação faz parte do verificar, não é uma
 segunda ação.
 
-Fora isso, comente só o que não é evidente: a origem de um limite, a razão de uma
-ordem que precisa ser aquela, um campo derivado ou imutável, um defeito conhecido.
-Comentário que narra a linha seguinte é ruído.
+Fora isso, o critério é um só: **comente por que a alternativa óbvia está errada.**
+Se quem lê provavelmente pensaria "por que não fazer do jeito X?", responda; caso
+contrário, não comente. Comentário que narra a linha seguinte (`// incrementa o
+contador`) é ruído, e ruído ensina a pular comentário.
+
+O que costuma merecer, no código que esta norma produz:
+
+```js
+// A fila é esvaziada de uma vez: se a limpeza falhar no meio, o que já saiu
+// daqui não é tentado de novo na próxima chamada.
+const pendentes = criados.splice(0);
+
+// A versão atual é consultada antes de excluir porque a API só aceita a
+// exclusão acompanhada dela — sem isso a limpeza deixa massa para trás.
+obterCliente({ token, id }).then((consulta) => { ... });
+```
+
+Nos dois casos o código está certo e continua parecendo estranho sem a linha de
+cima. É esse o teste: o comentário serve quando explica uma decisão que o leitor
+questionaria.
 
 ## Constantes e segredos
 
@@ -283,8 +375,13 @@ Mesma ação e mesmo oráculo, muda só o dado → `forEach` sobre lista literal
 Muda o que se prova → `it` explícito.
 
 - **Sempre:** varreduras por campo (campo ausente, tipo errado, fronteira).
+  `QAORQ-079`
 - **Nunca:** fluxo positivo principal e regra de negócio — forçá-los numa tabela
   produz `if` por caso e dissolve o oráculo.
+
+Não é economia de linha, é economia de **leitura**: vinte `it` que só diferem no
+valor enviado escondem, no meio deles, o caso que difere de verdade. Numa tabela,
+a variação fica numa coluna e o que é comum aparece uma vez só.
 
 O array precisa ser **literal, no próprio spec**, só com dado (texto, número,
 booleano, `null`, objeto e array desses). Função dentro do caso invalida o bloco
@@ -313,10 +410,17 @@ A tag `@campo` é **por iteração**, nunca a lista de campos toda acumulada num
 - Dados únicos por execução.
 - **Registre o recurso criado para limpeza antes da primeira asserção que possa
   interromper o fluxo** — e registre junto a identidade capaz de excluí-lo.
-- Limpeza em `afterEach`, tentando todos os itens e agregando as falhas ao final:
-  não abandone a fila no primeiro status inesperado.
+- **Spec que cria massa chama a limpeza**, em `afterEach`, tentando todos os itens
+  e agregando as falhas ao final: não abandone a fila no primeiro status
+  inesperado. Massa criada e não apagada quebra a execução seguinte, não esta —
+  e o defeito aparece longe da causa. `QAORQ-080`
 - A limpeza **confere o resultado** do que apagou. `DELETE` sem verificação é
   limpeza cega, e deixa massa para trás sem ninguém notar.
+- A limpeza anda na **fila do Cypress**, encadeando os comandos. Nada de
+  `Promise.all` sobre chamadas de API: o encadeável do Cypress se parece com uma
+  promessa, mas a fila de comandos e as promessas nativas têm relógios diferentes,
+  e misturar os dois é origem conhecida de teste intermitente — o pior defeito
+  possível numa suíte, porque some quando alguém vai investigar.
 - Em operação rejeitada, registre também a criação indevida, caso o backend
   devolva um identificador.
 - **Nunca compartilhe id** por `Cypress.env`, variável global mutável ou efeito de
@@ -464,10 +568,14 @@ automaticamente.
 | `QAORQ-074` | `cy.wait` com número, ou `if`/`else` dentro do corpo de um teste |
 | `QAORQ-075` | credencial literal: `Bearer <valor>` ou JWT escrito no código |
 | `QAORQ-076` | teste cujas asserções só provam existência ou formato |
-| `QAORQ-077` | identificador de uma letra |
+| `QAORQ-077` | identificador de uma letra em callback de bloco |
+| `QAORQ-078` | arquivo sem o comentário de apresentação no topo |
+| `QAORQ-079` | varredura por campo escrita `it` a `it`, sem tabela |
+| `QAORQ-080` | spec que cria massa e não chama a limpeza |
+| `QAORQ-081` | identificador usado sem import que o forneça |
 
-O que **não** tem fiscal, e por isso vale como julgamento: se o import do spec veio
-de camada permitida (depende da superfície de cada projeto), se a mensagem da
-asserção realmente explica, e se o nome do teste descreve comportamento em vez de
-mecanismo. Regra prometida e não cobrada ensina a não levar a sério o que está
+O que **não** tem fiscal, e por isso vale como julgamento: se a mensagem da
+asserção realmente explica, se o nome do teste descreve comportamento em vez de
+mecanismo, se um comentário é útil, e se a linguagem do `context` é mesmo de
+negócio. Regra prometida e não cobrada ensina a não levar a sério o que está
 escrito — se você ler uma ameaça de gate que não está na tabela acima, é engano.
