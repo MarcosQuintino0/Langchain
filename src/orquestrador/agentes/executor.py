@@ -21,12 +21,20 @@ as categorias daquele endpoint. O nome do arquivo é derivado do endpoint por
 `nomes_dos_specs` — quem nomeia é o código, e é isso que faz o filtro de fatia
 valer e o reparo achar o dono de uma violação.
 
-O reparo regenera **apenas os arquivos que as violações apontam, um por chamada**:
-reescrever a suíte inteira por causa de um `expect` sem mensagem é reabrir a porta
-da resposta gigante que o fatiamento fechou — e reescrever três arquivos numa
-chamada só a reabre pela metade, que foi como ela voltou a se fechar em
-2026-08-11 (6 violações, 3.300 linhas pedidas de uma vez, 60 mil tokens de
-resposta e JSON inválido).
+O reparo NÃO reescreve: ele **edita**. O modelo devolve trocas
+(`dominio/edicao.py`) e o código faz a cirurgia — a mesma divisão de um assistente
+de código, onde o modelo também só descreve a edição.
+
+Foram precisas três medições para chegar aqui, e vale guardar as três porque cada
+uma matou uma alternativa. Reescrever a suíte inteira por causa de um `expect` sem
+mensagem: 60 mil tokens e JSON inválido. Reescrever um arquivo por chamada: o
+modelo resume ao redigitar, e um spec de 1.022 linhas voltou com 20 dos 57 testes
+— violação de estilo trocada por perda de cobertura. Mandar "devolva idêntico
+exceto nos pontos apontados": quatro arquivos consertaram em 20 segundos e o
+quinto entrou em laço, 120 mil tokens para corrigir 5 violações.
+
+Trocar um trecho não tem nenhum dos três defeitos: a resposta é curta, o que não
+foi citado não é tocado por construção, e não há nada longo para escrever.
 """
 
 from __future__ import annotations
@@ -44,6 +52,7 @@ from orquestrador.analise_estatica.tags_cypress import extrair_tags
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import ArquivoGerado, SaidaExecutor, nomes_dos_specs
 from orquestrador.dominio.dossie import DossieDoRecurso
+from orquestrador.dominio.edicao import SaidaDeReparo, aplicar
 from orquestrador.dominio.inventario import Inventario
 from orquestrador.dominio.limpeza import render_ausencias, render_limpeza
 from orquestrador.dominio.manifesto import Manifesto
@@ -186,6 +195,7 @@ def executar(
             plano,
             dir_recurso,
             parametros.paralelismo,
+            registro,
         )
     if plano is not None:
         return _gerar_fatiado(
@@ -401,6 +411,7 @@ def _reparar(
     plano: PlanoDeTestes | None,
     dir_recurso: Path | None,
     paralelismo: int,
+    registro: RegistradorDeEventos | None = None,
 ) -> SaidaExecutor:
     """Reparo dirigido: reescreve os arquivos que as violações apontam.
 
@@ -444,15 +455,32 @@ def _reparar(
     atual = artefato_atual or "(artefato ausente)"
     ordenados = sorted(implicados)
     if not ordenados:
-        return gerador.gerar(
-            SaidaExecutor,
+        # Nenhuma violação nomeia arquivo: uma chamada só, e o modelo escolhe onde
+        # mexer. O contrato é o MESMO das outras — reparo é troca, saiba-se ou não
+        # de antemão qual arquivo será tocado.
+        saida = gerador.gerar(
+            SaidaDeReparo,
             instrucao=instrucao,
             entrada=montar_entrada_reparo(atual, delta)
-            + "\n\nReescreva apenas os arquivos necessários para sanar as violações e "
-            "devolva somente os que mudou; os demais permanecem como estão no disco." + do_plano,
+            + _PEDIDO_DE_EDICAO.format(
+                nome="os arquivos que as violações exigirem",
+                schema=esquema_json(SaidaDeReparo),
+            )
+            + do_plano,
             recurso=recurso.nome,
             tentativa=tentativa,
             fatia="reparo_gate",
+        )
+        alvos = sorted(
+            {troca.caminho for troca in saida.trocas} | {a.caminho for a in saida.arquivos}
+        )
+        arquivos = [
+            arquivo
+            for alvo in alvos
+            for arquivo in _aplicar_reparo(alvo, saida, dir_recurso, registro)
+        ]
+        return SaidaExecutor(
+            recurso=recurso.nome, arquivos=arquivos or _como_esta(alvos, dir_recurso)
         )
 
     # UMA CHAMADA POR ARQUIVO, pela mesma razão da geração: o tamanho da resposta é
@@ -465,27 +493,103 @@ def _reparar(
         # pedido, e deixar a lista inteira na entrada, mandaria o modelo consertar
         # aqui o que é para consertar na chamada seguinte.
         so_deste = delta.model_copy(update={"violacoes": _violacoes_do_arquivo(delta, nome)})
-        gerados = _fatia(
-            gerador,
-            instrucao,
-            recurso,
-            montar_entrada_reparo(atual, so_deste) + f"\n\n### O que fazer com `{nome}`\n\n"
-            "Devolva o arquivo COMPLETO, **idêntico ao atual exceto nos pontos "
-            "apontados acima**. Corrija apenas essas violações: não reescreva o que "
-            "já está certo, não resuma, não junte testes e **não remova nenhum `it` "
-            "nem nenhuma tag** que não esteja na lista. Todo teste que existe hoje "
-            "precisa continuar existindo depois. Os outros arquivos permanecem como "
-            "estão no disco — não os devolva." + do_plano,
+        saida = gerador.gerar(
+            SaidaDeReparo,
+            instrucao=instrucao,
+            entrada=montar_entrada_reparo(atual, so_deste)
+            + _PEDIDO_DE_EDICAO.format(nome=nome, schema=esquema_json(SaidaDeReparo))
+            + do_plano,
+            recurso=recurso.nome,
             tentativa=tentativa,
-            aceitos=lambda caminho, nome=nome: caminho == nome,
-            rotulo=f"reparo:{nome}",
+            fatia=f"reparo:{nome}",
         )
-        return _sem_regressao(nome, gerados, dir_recurso)
+        return _aplicar_reparo(nome, saida, dir_recurso, registro)
 
     arquivos: list[ArquivoGerado] = []
     for lote in _em_paralelo(consertar, ordenados, paralelismo):
         arquivos += lote
+    # Nenhuma edição aplicada em arquivo nenhum: o contrato exige ao menos um, e
+    # devolver o conteúdo atual deixa o staging explicitamente inalterado — o
+    # gate torna a cobrar as mesmas violações na volta seguinte.
+    if not arquivos:
+        arquivos = _como_esta(ordenados, dir_recurso)
     return SaidaExecutor(recurso=recurso.nome, arquivos=arquivos)
+
+
+def _como_esta(nomes: list[str], dir_recurso: Path | None) -> list[ArquivoGerado]:
+    """Os arquivos implicados como estão no disco, sem uma vírgula de diferença."""
+    if dir_recurso is None:
+        return []
+    return [
+        ArquivoGerado(
+            caminho=nome,
+            conteudo=(dir_recurso / nome).read_text(encoding="utf-8", errors="replace"),
+        )
+        for nome in nomes
+        if (dir_recurso / nome).is_file()
+    ]
+
+
+_PEDIDO_DE_EDICAO = """
+
+### O que fazer com `{nome}`
+
+**Não reescreva o arquivo.** Devolva as TROCAS que corrigem as violações acima, e
+só elas — o que você não citar continua exatamente como está.
+
+Cada troca tem `antigo` e `novo`. O `antigo` precisa ser **copiado do arquivo, ao
+pé da letra**, e ser longo o bastante para aparecer uma vez só: é ele que localiza
+o ponto. Trecho parafraseado não casa, e trecho curto demais casa em vários
+lugares — nos dois casos a troca é recusada e a violação continua lá.
+
+Use `arquivos` (o arquivo completo) **só** quando a correção for ACRESCENTAR algo
+que ainda não existe — um teste de uma categoria que ninguém escreveu. Para
+corrigir o que já existe, sempre `trocas`.
+
+Responda apenas com um objeto JSON que valide contra este schema — que é
+DIFERENTE do schema de geração descrito na instrução fixa:
+
+```json
+{schema}
+```
+"""
+
+
+def _aplicar_reparo(
+    nome: str,
+    saida: SaidaDeReparo,
+    dir_recurso: Path | None,
+    registro: RegistradorDeEventos | None,
+) -> list[ArquivoGerado]:
+    """Aplica as trocas ao arquivo em disco e devolve o conteúdo final.
+
+    A aplicação é nossa, não do modelo: ele diz o que trocar, o código faz a
+    cirurgia e recusa o que não casa exatamente uma vez. É a mesma divisão de um
+    assistente de código — lá o modelo também só descreve a edição.
+
+    O arquivo completo (`arquivos`) continua aceito, para a violação que é
+    ausência e não tem trecho antigo para citar. Ele passa pela trava de
+    regressão; a troca não precisa dela, porque o que não foi citado não foi tocado.
+    """
+    do_arquivo = [troca for troca in saida.trocas if troca.caminho == nome]
+    completos = [arquivo for arquivo in saida.arquivos if arquivo.caminho == nome]
+
+    if do_arquivo and dir_recurso is not None and (dir_recurso / nome).is_file():
+        atual = (dir_recurso / nome).read_text(encoding="utf-8", errors="replace")
+        resultado = aplicar(atual, do_arquivo)
+        if resultado.recusadas and registro is not None:
+            registro.aviso(
+                f"reparo de {nome}: {len(resultado.recusadas)} troca(s) recusada(s) — "
+                + "; ".join(resultado.recusadas)
+            )
+        if resultado.mudou:
+            return [ArquivoGerado(caminho=nome, conteudo=resultado.conteudo)]
+        # Nenhuma troca casou: sem arquivo completo de reserva, o arquivo fica como
+        # está e o gate torna a cobrar. É melhor que gravar uma edição adivinhada.
+        if not completos:
+            return []
+
+    return _sem_regressao(nome, completos, dir_recurso)
 
 
 def _sem_regressao(

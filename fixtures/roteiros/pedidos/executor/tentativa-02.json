@@ -1,10 +1,10 @@
 {
-  "descricao": "Reparo do executor a partir do delta do Gate B: criar-pedidos ganha os cenários de entrada inválida que faltavam.",
+  "descricao": "Reparo do executor a partir do delta do Gate B, no contrato SaidaDeReparo: criar-pedidos ganha as categorias que faltavam. Usa `arquivos` e não `trocas` porque a violação é de ausência — não existe trecho antigo para citar.",
   "passos": [
     {
       "tipo": "final",
       "artefato": {
-        "recurso": "pedidos",
+        "trocas": [],
         "arquivos": [
           {
             "caminho": "_support/api.js",

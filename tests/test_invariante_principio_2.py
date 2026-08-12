@@ -54,9 +54,14 @@ class ModeloEspiao(ModeloSimulado):
         )
 
 
-def espiao_de(estagio: str) -> ModeloEspiao:
-    """Espião que devolve o artefato bom da fixture — o foco é a entrada, não a saída."""
-    tentativa = 1 if estagio == "mapeador" else 2
+def espiao_de(estagio: str, tentativa: int = 1) -> ModeloEspiao:
+    """Espião que devolve o artefato bom da fixture — o foco é a entrada, não a saída.
+
+    A tentativa importa no executor porque as duas fases têm CONTRATOS diferentes:
+    geração devolve `SaidaExecutor` (arquivos completos) e reparo devolve
+    `SaidaDeReparo` (trocas). Devolver o roteiro errado reprova por schema antes de
+    o teste chegar a medir a entrada, que é o que ele existe para medir.
+    """
     roteiro = Roteiros(FIXTURES / "roteiros").carregar("pedidos", estagio, tentativa)
     return ModeloEspiao(passos=roteiro["passos"])
 
@@ -116,7 +121,7 @@ def rodar_mapeador(config, *, delta: Delta | None, artefato: str | None) -> Mode
 
 
 def rodar_executor(config, *, delta: Delta | None, artefato: str | None) -> ModeloEspiao:
-    espiao = espiao_de("executor")
+    espiao = espiao_de("executor", tentativa=2 if delta else 1)
     agente_executor.executar(
         config,
         recurso_de(config),

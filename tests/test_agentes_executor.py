@@ -216,82 +216,6 @@ def test_filtro_descarta_arquivo_fora_da_fatia(config_falso):
     assert conteudos["listar-pedidos.cy.js"] == "it('a')"
 
 
-def test_reparo_e_uma_chamada_que_nomeia_os_arquivos_das_violacoes(config_falso):
-    modelo = ModeloSequencial(respostas=[resposta(("seguranca.cy.js", "it('consertado')"))])
-    delta = Delta(
-        estagio="gate_b",
-        recurso="pedidos",
-        violacoes=[
-            Violacao(codigo="QAAPI-002", arquivo="seguranca.cy.js", mensagem="spec ausente"),
-            Violacao(
-                codigo="QAAPI-025",
-                arquivo="pedidos/_support/cobertura.json",
-                mensagem="campo sem teste",
-            ),
-        ],
-        tentativa=2,
-    )
-
-    saida = executar(
-        config_falso,
-        modelo,
-        tentativa=2,
-        delta=delta,
-        artefato_atual="--- crud.cy.js ---\n// atual",
-        plano=plano_de_pedidos(),
-    )
-
-    assert len(modelo.capturas) == 1, "reparo não refaz a geração fatiada"
-    entrada = "\n".join(str(m.content) for m in modelo.capturas[0] if isinstance(m, HumanMessage))
-    assert "`seguranca.cy.js`" in entrada, "o reparo nomeia o arquivo apontado"
-    # cobertura.json é do mapeador: não pode virar alvo de reescrita do executor.
-    assert "cobertura.json`" not in entrada
-    assert [a.caminho for a in saida.arquivos] == ["seguranca.cy.js"], "saída parcial é aceita"
-
-
-def test_reparo_com_varios_arquivos_e_uma_chamada_por_arquivo(config_falso):
-    """Medido em 2026-08-11: 6 violações em 3 arquivos numa chamada só pediram a
-    reescrita de 3.300 linhas de uma vez. A resposta saiu com 60 mil tokens e JSON
-    inválido, e a retentativa foi cortada no teto de 120 mil — a mesma espiral que
-    o fatiamento da geração tinha fechado, reaberta pelo reparo.
-    """
-    modelo = ModeloSequencial(
-        respostas=[
-            resposta(("criar-pedidos.cy.js", "it('a')")),
-            resposta(("listar-pedidos.cy.js", "it('b')")),
-        ]
-    )
-    delta = Delta(
-        estagio="gate_b",
-        recurso="pedidos",
-        violacoes=[
-            Violacao(codigo="QAORQ-074", arquivo="criar-pedidos.cy.js", mensagem="condicional"),
-            Violacao(codigo="QAORQ-072", arquivo="listar-pedidos.cy.js", mensagem="sem mensagem"),
-        ],
-        tentativa=2,
-    )
-
-    saida = executar(
-        config_falso,
-        modelo,
-        tentativa=2,
-        delta=delta,
-        artefato_atual="--- criar-pedidos.cy.js ---\n// atual",
-        plano=plano_de_pedidos(),
-    )
-
-    assert len(modelo.capturas) == 2, "uma chamada por arquivo implicado"
-    primeira = "\n".join(str(m.content) for m in modelo.capturas[0] if isinstance(m, HumanMessage))
-    assert "`criar-pedidos.cy.js`" in primeira
-    # Cada chamada leva SÓ as violações do arquivo dela: mandar as dos outros faria
-    # o modelo tentar consertar aqui o que é para consertar lá.
-    assert "sem mensagem" not in primeira
-    assert sorted(a.caminho for a in saida.arquivos) == [
-        "criar-pedidos.cy.js",
-        "listar-pedidos.cy.js",
-    ]
-
-
 def test_sem_plano_e_sem_delta_permanece_a_chamada_unica(config_falso):
     modelo = ModeloSequencial(
         respostas=[resposta(("_support/api.js", "// api"), ("crud.cy.js", "it('a')"))]
@@ -304,14 +228,16 @@ def test_sem_plano_e_sem_delta_permanece_a_chamada_unica(config_falso):
 
 
 # ---------------------------------------------------------------------------
-# O reparo não pode perder o que já estava lá
+# Reparo: o modelo diz o que trocar, o código faz a cirurgia
 # ---------------------------------------------------------------------------
 
-SPEC_COMPLETO = """// Criação de pedidos.
+SPEC = """// Criação de pedidos.
 describe("Criar pedido", () => {
   context("quando os dados estão corretos", () => {
     // @endpoint POST /pedidos  @cat CAT-01
-    it("cria o pedido", () => {});
+    it("deve criar o pedido", () => {
+      expect(resposta.status).to.eq(201);
+    });
   });
 
   context("quando os dados estão errados", () => {
@@ -321,7 +247,136 @@ describe("Criar pedido", () => {
 });
 """
 
-SPEC_RESUMIDO = """// Criação de pedidos.
+
+def reparo(
+    trocas: tuple[tuple[str, str, str], ...] = (),
+    arquivos: tuple[tuple[str, str], ...] = (),
+) -> str:
+    return json.dumps(
+        {
+            "trocas": [
+                {"caminho": caminho, "antigo": antigo, "novo": novo}
+                for caminho, antigo, novo in trocas
+            ],
+            "arquivos": [
+                {"caminho": caminho, "conteudo": conteudo} for caminho, conteudo in arquivos
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def delta_de(nome: str) -> Delta:
+    return Delta(
+        estagio="gate_b",
+        recurso="pedidos",
+        violacoes=[Violacao(codigo="QAORQ-071", arquivo=nome, mensagem="título com 'deve'")],
+        tentativa=2,
+    )
+
+
+def consertar(config, modelo, tmp_path, conteudo: str = SPEC):
+    staging = tmp_path / "staging"
+    staging.mkdir(exist_ok=True)
+    (staging / "criar-pedidos.cy.js").write_text(conteudo, encoding="utf-8")
+    saida = executar(
+        config,
+        modelo,
+        tentativa=2,
+        delta=delta_de("criar-pedidos.cy.js"),
+        artefato_atual=conteudo,
+        plano=plano_de_pedidos(),
+        dir_recurso=staging,
+    )
+    return saida, staging
+
+
+def test_a_troca_muda_so_o_trecho_citado(config_falso, tmp_path):
+    """O resto do arquivo não é reescrito — é o mesmo texto, byte a byte.
+
+    É o que torna impossível a perda medida em 2026-08-11, quando o reparo por
+    reescrita devolveu 20 dos 57 testes de um spec.
+    """
+    modelo = ModeloSequencial(
+        respostas=[
+            reparo((("criar-pedidos.cy.js", 'it("deve criar o pedido"', 'it("cria o pedido"'),))
+        ]
+    )
+
+    saida, _ = consertar(config_falso, modelo, tmp_path)
+
+    conteudo = saida.arquivos[0].conteudo
+    assert 'it("cria o pedido"' in conteudo
+    assert "deve criar" not in conteudo
+    # Tudo que não foi citado continua idêntico.
+    assert conteudo == SPEC.replace('it("deve criar o pedido"', 'it("cria o pedido"')
+
+
+def test_troca_que_nao_casa_e_recusada(config_falso, tmp_path):
+    # O modelo parafraseou em vez de copiar. Aplicar por aproximação corromperia o
+    # arquivo; recusar devolve o problema ao gate, que torna a cobrar.
+    modelo = ModeloSequencial(
+        respostas=[reparo((("criar-pedidos.cy.js", "trecho que não existe", "qualquer coisa"),))]
+    )
+
+    saida, _ = consertar(config_falso, modelo, tmp_path)
+
+    assert saida.arquivos[0].conteudo == SPEC, "arquivo intocado"
+
+
+def test_troca_ambigua_e_recusada(config_falso, tmp_path):
+    # `});` aparece várias vezes: trocar "a primeira" acertaria o lugar errado.
+    modelo = ModeloSequencial(
+        respostas=[reparo((("criar-pedidos.cy.js", "});", "}); // marcado"),))]
+    )
+
+    saida, _ = consertar(config_falso, modelo, tmp_path)
+
+    assert saida.arquivos[0].conteudo == SPEC, "arquivo intocado"
+
+
+def test_varias_trocas_sao_aplicadas_em_ordem(config_falso, tmp_path):
+    modelo = ModeloSequencial(
+        respostas=[
+            reparo(
+                (
+                    ("criar-pedidos.cy.js", 'it("deve criar o pedido"', 'it("cria o pedido"'),
+                    (
+                        "criar-pedidos.cy.js",
+                        "expect(resposta.status).to.eq(201)",
+                        'expect(resposta.status, "o pedido deve ser criado").to.eq(201)',
+                    ),
+                )
+            )
+        ]
+    )
+
+    conteudo = consertar(config_falso, modelo, tmp_path)[0].arquivos[0].conteudo
+
+    assert 'it("cria o pedido"' in conteudo
+    assert '"o pedido deve ser criado"' in conteudo
+
+
+def test_arquivo_completo_continua_valendo_para_acrescimo(config_falso, tmp_path):
+    """Violação de AUSÊNCIA não tem trecho antigo para citar.
+
+    "O gabarito prometeu CAT-05 e não existe teste nenhum" só se resolve
+    acrescentando — e aí o arquivo inteiro volta, passando pela trava de regressão.
+    """
+    maior = SPEC.replace(
+        "});\n",
+        '  // @endpoint POST /pedidos  @cat CAT-05\n  it("recusa corpo vazio", () => {});\n});\n',
+        1,
+    )
+    modelo = ModeloSequencial(respostas=[reparo(arquivos=(("criar-pedidos.cy.js", maior),))])
+
+    saida, _ = consertar(config_falso, modelo, tmp_path)
+
+    assert "CAT-05" in saida.arquivos[0].conteudo
+
+
+def test_arquivo_completo_que_perde_cobertura_continua_barrado(config_falso, tmp_path):
+    menor = """// Criação de pedidos.
 describe("Criar pedido", () => {
   context("quando os dados estão corretos", () => {
     // @endpoint POST /pedidos  @cat CAT-01
@@ -329,85 +384,24 @@ describe("Criar pedido", () => {
   });
 });
 """
+    modelo = ModeloSequencial(respostas=[reparo(arquivos=(("criar-pedidos.cy.js", menor),))])
+
+    saida, _ = consertar(config_falso, modelo, tmp_path)
+
+    assert saida.arquivos[0].conteudo == SPEC, "o que perdeu CAT-02 não chega ao disco"
 
 
-def delta_de(nome: str) -> Delta:
-    return Delta(
-        estagio="gate_b",
-        recurso="pedidos",
-        violacoes=[Violacao(codigo="QAORQ-071", arquivo=nome, mensagem="título fora do padrão")],
-        tentativa=2,
+def test_o_pedido_manda_nao_reescrever(config_falso, tmp_path):
+    modelo = ModeloSequencial(
+        respostas=[
+            reparo((("criar-pedidos.cy.js", 'it("deve criar o pedido"', 'it("cria o pedido"'),))
+        ]
     )
 
-
-def test_reparo_que_perde_cobertura_e_descartado(config_falso, tmp_path):
-    """Medido em 2026-08-11: o reparo devolveu 20 dos 57 testes de um spec.
-
-    Ninguém pediu remoção — pedir para reescrever um arquivo grande é pedir para
-    redigitá-lo, e ao redigitar o modelo resume. Preferir o arquivo antigo é a
-    escolha certa: violação de estilo o gate torna a cobrar, teste perdido some em
-    silêncio e é publicado.
-    """
-    staging = tmp_path / "staging"
-    staging.mkdir()
-    (staging / "criar-pedidos.cy.js").write_text(SPEC_COMPLETO, encoding="utf-8")
-
-    modelo = ModeloSequencial(respostas=[resposta(("criar-pedidos.cy.js", SPEC_RESUMIDO))])
-    saida = executar(
-        config_falso,
-        modelo,
-        tentativa=2,
-        delta=delta_de("criar-pedidos.cy.js"),
-        artefato_atual=SPEC_COMPLETO,
-        plano=plano_de_pedidos(),
-        dir_recurso=staging,
-    )
-
-    assert [a.caminho for a in saida.arquivos] == ["criar-pedidos.cy.js"]
-    assert saida.arquivos[0].conteudo == SPEC_COMPLETO, (
-        "o reparo que perdeu cobertura não pode chegar ao disco; o antigo fica"
-    )
-
-
-def test_reparo_que_preserva_cobertura_passa(config_falso, tmp_path):
-    staging = tmp_path / "staging"
-    staging.mkdir()
-    (staging / "criar-pedidos.cy.js").write_text(SPEC_COMPLETO, encoding="utf-8")
-
-    corrigido = SPEC_COMPLETO.replace("recusa sem situação", "recusa a criação sem situação")
-    modelo = ModeloSequencial(respostas=[resposta(("criar-pedidos.cy.js", corrigido))])
-    saida = executar(
-        config_falso,
-        modelo,
-        tentativa=2,
-        delta=delta_de("criar-pedidos.cy.js"),
-        artefato_atual=SPEC_COMPLETO,
-        plano=plano_de_pedidos(),
-        dir_recurso=staging,
-    )
-
-    assert [a.caminho for a in saida.arquivos] == ["criar-pedidos.cy.js"]
-
-
-def test_o_reparo_pede_para_mudar_so_o_apontado(config_falso, tmp_path):
-    # A moldura importa: "reescreva inteiro" convida a redigitar, e redigitar
-    # resume. O pedido é partir do que existe e mudar pontualmente.
-    staging = tmp_path / "staging"
-    staging.mkdir()
-    (staging / "criar-pedidos.cy.js").write_text(SPEC_COMPLETO, encoding="utf-8")
-
-    modelo = ModeloSequencial(respostas=[resposta(("criar-pedidos.cy.js", SPEC_COMPLETO))])
-    executar(
-        config_falso,
-        modelo,
-        tentativa=2,
-        delta=delta_de("criar-pedidos.cy.js"),
-        artefato_atual=SPEC_COMPLETO,
-        plano=plano_de_pedidos(),
-        dir_recurso=staging,
-    )
+    consertar(config_falso, modelo, tmp_path)
 
     entrada = "\n".join(str(m.content) for m in modelo.capturas[0] if isinstance(m, HumanMessage))
-    assert "idêntico ao atual" in entrada
-    assert "não remova nenhum `it`" in entrada
-    assert "inteiro" not in entrada, "a palavra que convidava a redigitar saiu"
+    assert "Não reescreva o arquivo" in entrada
+    assert "copiado do arquivo" in entrada, "o antigo tem de ser cópia, não descrição"
+    assert "SaidaDeReparo" in entrada, "o schema da chamada é o de troca, não o de geração"
+    assert "criar-pedidos.cy.js" in entrada
