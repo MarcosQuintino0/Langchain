@@ -531,6 +531,9 @@ class Pipeline:
                 plano=plano,
                 dossie=dossie,
                 inventario=inventario,
+                # O staging desta execução: é contra ele que o reparo confere se
+                # devolveu o arquivo com menos cobertura do que tinha.
+                dir_recurso=area.dir_recurso,
             )
 
         def persistir(saida: SaidaExecutor) -> list[Path]:

@@ -177,6 +177,18 @@ max_tentativas_schema = 3
 modelo = "deepseek/deepseek-v4-flash-0731"
 temperatura = 0.0
 modo_estruturado = "prompt"
+# As fatias de spec são independentes por construção — cada uma escreve um arquivo
+# diferente — então correm juntas. Medido em 2026-08-11, serial: 16 chamadas
+# somando 16,6 min, que era praticamente toda a execução.
+#
+# O `_support/` continua fora do paralelo, e não é só por ser pré-requisito dos
+# specs: rodando sozinho e primeiro, ele aquece o cache do prefixo. As três fatias
+# seguintes pegam a instrução fixa de 36 mil caracteres já cacheada, em vez de as
+# três pagarem preço cheio pela mesma coisa.
+#
+# Se o provedor devolver 429 (tpm_rate_limit_exceeded), baixe para 2: a entrada por
+# chamada aqui é maior que a do mapeador, que roda em 3 no mesmo pin sem bater teto.
+paralelismo = 3
 max_tentativas_schema = 3
 # 120.000 de teto por resposta, contra os 65.536 que o provedor aplica quando
 # ninguém pede nada. O modelo aceita até 131.072 nesta rota.

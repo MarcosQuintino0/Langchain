@@ -31,20 +31,23 @@ resposta e JSON inválido).
 
 from __future__ import annotations
 
+import contextvars
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
 
 from orquestrador.agentes.guarda_de_orcamento import exigir_folga
+from orquestrador.analise_estatica.tags_cypress import extrair_tags
 from orquestrador.config import Config
 from orquestrador.dominio.artefatos import ArquivoGerado, SaidaExecutor, nomes_dos_specs
 from orquestrador.dominio.dossie import DossieDoRecurso
 from orquestrador.dominio.inventario import Inventario
 from orquestrador.dominio.limpeza import render_ausencias, render_limpeza
 from orquestrador.dominio.manifesto import Manifesto
-from orquestrador.dominio.plano import PlanoDeTestes
+from orquestrador.dominio.plano import PlanoDeTestes, PlanoDoEndpoint
 from orquestrador.dominio.recurso import Recurso
 from orquestrador.dominio.superficie import SuperficieDoProjeto
 from orquestrador.dominio.veredito import Delta, Violacao
@@ -139,6 +142,7 @@ def executar(
     plano: PlanoDeTestes | None = None,
     dossie: DossieDoRecurso | None = None,
     inventario: Inventario | None = None,
+    dir_recurso: Path | None = None,
 ) -> SaidaExecutor:
     """Uma tentativa do executor para um recurso. Sem histórico algum.
 
@@ -147,7 +151,8 @@ def executar(
     * `delta` presente → **reparo**: uma chamada por arquivo apontado pelas
       violações, cada uma recebendo só as violações daquele arquivo. A
       `SaidaExecutor` devolvida pode ser parcial; o staging acumula, e o gate mede
-      o diretório inteiro.
+      o diretório inteiro. `dir_recurso` é o staging, e serve para comparar o que
+      o reparo devolveu com o que existia — ver `_sem_regressao`.
     * `plano` presente → **geração fatiada**: `_support/` primeiro (a fundação),
       depois um spec por chamada, cada um com a fatia do plano que lhe cabe.
     * nenhum dos dois → o caminho antigo de chamada única. Existe para quem invoca
@@ -171,10 +176,28 @@ def executar(
     instrucao = instrucao_do_estagio(config, recurso, superficie)
 
     if delta is not None:
-        return _reparar(gerador, instrucao, recurso, delta, artefato_atual, tentativa, plano)
+        return _reparar(
+            gerador,
+            instrucao,
+            recurso,
+            delta,
+            artefato_atual,
+            tentativa,
+            plano,
+            dir_recurso,
+            parametros.paralelismo,
+        )
     if plano is not None:
         return _gerar_fatiado(
-            gerador, instrucao, recurso, manifesto, plano, tentativa, dossie, inventario
+            gerador,
+            instrucao,
+            recurso,
+            manifesto,
+            plano,
+            tentativa,
+            parametros.paralelismo,
+            dossie,
+            inventario,
         )
 
     return gerador.gerar(
@@ -194,6 +217,7 @@ def _gerar_fatiado(
     manifesto: Manifesto,
     plano: PlanoDeTestes,
     tentativa: int,
+    paralelismo: int,
     dossie: DossieDoRecurso | None = None,
     inventario: Inventario | None = None,
 ) -> SaidaExecutor:
@@ -240,9 +264,10 @@ def _gerar_fatiado(
     # (duas fatias jamais disputam o mesmo caminho) e o que deixa o reparo achar o
     # dono de uma violação de cobertura.
     nomes = nomes_dos_specs([parte.endpoint for parte in plano.endpoints])
-    for parte in plano.endpoints:
+
+    def escrever_spec(parte: PlanoDoEndpoint) -> list[ArquivoGerado]:
         nome = nomes[parte.endpoint]
-        gerados = _fatia(
+        return _fatia(
             gerador,
             instrucao,
             recurso,
@@ -260,9 +285,40 @@ def _gerar_fatiado(
             rotulo=nome,
             endpoint=parte.endpoint,
         )
-        arquivos += gerados
+
+    for lote in _em_paralelo(escrever_spec, plano.endpoints, paralelismo):
+        arquivos += lote
 
     return SaidaExecutor(recurso=manifesto.recurso, arquivos=arquivos)
+
+
+def _em_paralelo[T](
+    tarefa: Callable[[T], list[ArquivoGerado]], itens: Sequence[T], paralelismo: int
+) -> list[list[ArquivoGerado]]:
+    """Roda as fatias concorrentes, na ordem dos itens.
+
+    As fatias são independentes por construção — cada uma escreve um arquivo
+    diferente, e o filtro de `_fatia` impede que uma invada o do vizinho —, então
+    a ordem só importa para o log ficar legível.
+
+    O `_support/` NÃO entra aqui, e não é só por ele ser pré-requisito dos specs:
+    ele roda sozinho e primeiro, o que aquece o cache do prefixo. Disparar tudo de
+    uma vez faria as primeiras chamadas pagarem preço cheio pela mesma instrução
+    fixa de 36 mil caracteres.
+
+    Cópia de contexto POR TAREFA porque thread nova nasce com contexto vazio e o
+    span do recurso não atravessaria — mesmo arranjo do mapeador e do planejador.
+    """
+    if paralelismo <= 1 or len(itens) <= 1:
+        return [tarefa(item) for item in itens]
+
+    def no_contexto(par: tuple[contextvars.Context, T]) -> list[ArquivoGerado]:
+        contexto, item = par
+        return contexto.run(tarefa, item)
+
+    pares = [(contextvars.copy_context(), item) for item in itens]
+    with ThreadPoolExecutor(max_workers=paralelismo) as fila:
+        return list(fila.map(no_contexto, pares))
 
 
 def _contexto_do_suporte(dossie: DossieDoRecurso | None, inventario: Inventario | None) -> str:
@@ -342,7 +398,9 @@ def _reparar(
     delta: Delta,
     artefato_atual: str | None,
     tentativa: int,
-    plano: PlanoDeTestes | None = None,
+    plano: PlanoDeTestes | None,
+    dir_recurso: Path | None,
+    paralelismo: int,
 ) -> SaidaExecutor:
     """Reparo dirigido: reescreve os arquivos que as violações apontam.
 
@@ -402,25 +460,71 @@ def _reparar(
     # arquivos numa chamada só pediram a reescrita de 3.300 linhas de uma vez — a
     # resposta saiu com 60 mil tokens e JSON inválido, e a retentativa foi cortada
     # no teto de 120 mil. O arquivo maior sozinho custa 25 mil.
-    arquivos: list[ArquivoGerado] = []
-    for nome in ordenados:
+    def consertar(nome: str) -> list[ArquivoGerado]:
         # O delta da chamada leva SÓ as violações deste arquivo. Recortar apenas o
         # pedido, e deixar a lista inteira na entrada, mandaria o modelo consertar
         # aqui o que é para consertar na chamada seguinte.
         so_deste = delta.model_copy(update={"violacoes": _violacoes_do_arquivo(delta, nome)})
-        arquivos += _fatia(
+        gerados = _fatia(
             gerador,
             instrucao,
             recurso,
-            montar_entrada_reparo(atual, so_deste)
-            + f"\n\nReescreva SOMENTE `{nome}`, inteiro, corrigindo as violações "
-            "acima. Os outros arquivos permanecem como estão no disco — não os "
-            "devolva." + do_plano,
+            montar_entrada_reparo(atual, so_deste) + f"\n\n### O que fazer com `{nome}`\n\n"
+            "Devolva o arquivo COMPLETO, **idêntico ao atual exceto nos pontos "
+            "apontados acima**. Corrija apenas essas violações: não reescreva o que "
+            "já está certo, não resuma, não junte testes e **não remova nenhum `it` "
+            "nem nenhuma tag** que não esteja na lista. Todo teste que existe hoje "
+            "precisa continuar existindo depois. Os outros arquivos permanecem como "
+            "estão no disco — não os devolva." + do_plano,
             tentativa=tentativa,
             aceitos=lambda caminho, nome=nome: caminho == nome,
             rotulo=f"reparo:{nome}",
         )
+        return _sem_regressao(nome, gerados, dir_recurso)
+
+    arquivos: list[ArquivoGerado] = []
+    for lote in _em_paralelo(consertar, ordenados, paralelismo):
+        arquivos += lote
     return SaidaExecutor(recurso=recurso.nome, arquivos=arquivos)
+
+
+def _sem_regressao(
+    nome: str, gerados: list[ArquivoGerado], dir_recurso: Path | None
+) -> list[ArquivoGerado]:
+    """Descarta o reparo que devolveu o arquivo com MENOS cobertura do que tinha.
+
+    Medido em 2026-08-11: mandado corrigir violações de estilo num spec de 1.022
+    linhas, o modelo devolveu o arquivo "corrigido" com 20 dos 57 testes. Ninguém
+    pediu remoção — pedir para reescrever um arquivo grande é pedir para redigitá-lo,
+    e ao redigitar ele resume. O sintoma foi cruel: a geração tinha entregue as 39
+    categorias prometidas, e as violações de cobertura só apareceram DEPOIS do
+    primeiro reparo.
+
+    Preferir o arquivo antigo é a escolha certa quando as duas opções são ruins:
+    violação de estilo o gate torna a cobrar na volta seguinte, e o pior que
+    acontece é esgotar tentativa. Teste perdido some em silêncio, é publicado, e
+    ninguém descobre — a suíte simplesmente prova menos e continua verde.
+    """
+    if dir_recurso is None:
+        return gerados
+    caminho = dir_recurso / nome
+    if not caminho.is_file():
+        return gerados
+
+    conteudo_atual = caminho.read_text(encoding="utf-8", errors="replace")
+    antes = extrair_tags(conteudo_atual)
+    conferidos: list[ArquivoGerado] = []
+    for arquivo in gerados:
+        depois = extrair_tags(arquivo.conteudo)
+        perdeu = (antes.pares - depois.pares) or (antes.campos - depois.campos)
+        # Devolver o conteúdo ANTIGO, e não descartar o arquivo, por duas razões: o
+        # contrato de saída exige ao menos um arquivo, e escrever os mesmos bytes
+        # deixa o staging explicitamente inalterado em vez de depender de ninguém
+        # ter mexido nele.
+        conferidos.append(
+            ArquivoGerado(caminho=arquivo.caminho, conteudo=conteudo_atual) if perdeu else arquivo
+        )
+    return conferidos
 
 
 def _violacoes_do_arquivo(delta: Delta, nome: str) -> list[Violacao]:
