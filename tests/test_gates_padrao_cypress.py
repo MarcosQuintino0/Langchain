@@ -19,7 +19,11 @@ def codigos(fonte: str, caminho: str = "criar-cliente.cy.js") -> list[str]:
     return [violacao.codigo for violacao in conferir_padrao({caminho: fonte}).violacoes]
 
 
-SUITE_CONFORME = """
+SUITE_CONFORME = """/**
+ * Cadastro de clientes: o que a API aceita e o que ela recusa.
+ *
+ * Consumido pelo Cypress; a verificação mora em _support/asserts.js.
+ */
 import { criarCliente } from "./_support/api.js";
 import { validarCadastroRecusado } from "./_support/asserts.js";
 
@@ -111,7 +115,12 @@ describe("Criar cliente", () => {
 
 
 def test_expect_sem_mensagem_reprova_tambem_no_support():
-    fonte = "export function validar(resposta) {\n  expect(resposta.status).to.eq(201);\n}\n"
+    fonte = (
+        "// Verificações repetidas do recurso.\n"
+        "export function validar(resposta) {\n"
+        "  expect(resposta.status).to.eq(201);\n"
+        "}\n"
+    )
     assert codigos(fonte, "_support/asserts.js") == ["QAORQ-072"]
 
 
@@ -389,3 +398,148 @@ describe("Criar cliente", () => {
 });
 """
     assert "QAORQ-071" not in codigos(fonte)
+
+
+# ---------------------------------------------------------------------------
+# As réguas que a leitura da primeira suíte publicada pediu
+# ---------------------------------------------------------------------------
+
+CABECALHO = "// Testes de criação de cliente.\n"
+
+
+def test_arquivo_sem_cabecalho_reprova():
+    assert "QAORQ-078" in codigos("export function nada() {}\n", "_support/api.js")
+
+
+def test_cabecalho_em_qualquer_forma_de_comentario_aprova():
+    for topo in ("// linha\n", "/** bloco */\n", "/* bloco */\n"):
+        assert "QAORQ-078" not in codigos(topo + "export function nada() {}\n", "_support/api.js")
+
+
+def test_chamada_sem_import_nem_declaracao_reprova():
+    """Medido na suíte publicada: cinco chamadas assim em dois specs.
+
+    É `ReferenceError` antes da primeira asserção — o defeito mais barato de achar
+    por script e o mais caro de descobrir rodando.
+    """
+    fonte = (
+        CABECALHO
+        + """
+import { criarCliente } from "./_support/api.js";
+
+describe("Criar cliente", () => {
+  context("quando os dados estão corretos", () => {
+    it("cadastra o cliente", () => {
+      criarCliente({}).then((criacao) => {
+        validarClienteCadastrado(criacao, {});
+        expect(criacao.status, "deve cadastrar").to.equal(201);
+      });
+    });
+  });
+});
+"""
+    )
+    violacoes = conferir_padrao({"criar-cliente.cy.js": fonte}).violacoes
+    achado = next(v for v in violacoes if v.codigo == "QAORQ-081")
+    assert "validarClienteCadastrado" in achado.mensagem
+    assert "criarCliente" not in achado.mensagem, "o que está importado não é acusado"
+
+
+def test_globais_do_cypress_e_do_javascript_nao_sao_acusados():
+    fonte = (
+        CABECALHO
+        + """
+describe("Criar cliente", () => {
+  context("quando os dados estão corretos", () => {
+    it("cadastra o cliente", () => {
+      const corpo = JSON.parse(String(Number(1)));
+      cy.wrap(corpo).then((valor) => {
+        expect(valor, "mensagem explicativa").to.be.ok;
+      });
+    });
+  });
+});
+"""
+    )
+    assert "QAORQ-081" not in codigos(fonte)
+
+
+def test_varredura_extensa_sem_tabela_reprova():
+    fonte = (
+        CABECALHO
+        + 'describe("Criar cliente", () => {\n  context("quando os dados estão errados", () => {\n'
+    )
+    for indice in range(9):
+        fonte += f"    // @endpoint POST /clientes  @cat CAT-03  @campo campo{indice}\n"
+        fonte += f'    it("recusa o cadastro com campo{indice} inválido", () => {{\n'
+        fonte += '      expect(1, "mensagem explicativa").to.eq(1);\n    });\n'
+    fonte += "  });\n});\n"
+    assert "QAORQ-079" in codigos(fonte)
+
+
+def test_varredura_extensa_com_tabela_nao_reprova():
+    fonte = (
+        CABECALHO
+        + """
+describe("Criar cliente", () => {
+  context("quando os dados estão errados", () => {
+    [
+      { campo: "email", esperado: "nulo" },
+      { campo: "nome", esperado: "vazio" },
+    ].forEach(({ campo, esperado }) => {
+      // @endpoint POST /clientes  @cat CAT-02  @campo ${campo}
+      // @cat CAT-03 @cat CAT-04 @cat CAT-02 @cat CAT-03 @cat CAT-04
+      // @cat CAT-02 @cat CAT-03 @cat CAT-04 @cat CAT-02
+      it(`recusa o cadastro com ${campo} ${esperado}`, () => {
+        expect(1, "mensagem explicativa").to.eq(1);
+      });
+    });
+  });
+});
+"""
+    )
+    assert "QAORQ-079" not in codigos(fonte)
+
+
+def test_spec_que_cria_massa_sem_limpeza_reprova():
+    fonte = (
+        CABECALHO
+        + """
+import { criarClienteParaTeste } from "./_support/helpers.js";
+
+describe("Criar cliente", () => {
+  context("quando os dados estão corretos", () => {
+    it("cadastra o cliente", () => {
+      criarClienteParaTeste({}).then((criacao) => {
+        expect(criacao.status, "deve cadastrar").to.equal(201);
+      });
+    });
+  });
+});
+"""
+    )
+    assert "QAORQ-080" in codigos(fonte)
+
+
+def test_spec_que_cria_massa_com_limpeza_nao_reprova():
+    fonte = (
+        CABECALHO
+        + """
+import { criarClienteParaTeste, limparClientesCriados } from "./_support/helpers.js";
+
+describe("Criar cliente", () => {
+  afterEach(() => {
+    limparClientesCriados();
+  });
+
+  context("quando os dados estão corretos", () => {
+    it("cadastra o cliente", () => {
+      criarClienteParaTeste({}).then((criacao) => {
+        expect(criacao.status, "deve cadastrar").to.equal(201);
+      });
+    });
+  });
+});
+"""
+    )
+    assert "QAORQ-080" not in codigos(fonte)

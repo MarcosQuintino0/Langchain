@@ -19,10 +19,15 @@ o que estava certo. Então só entra a regra que decide sem interpretar — e qu
 uma delas precisa escolher entre acusar de menos e acusar de mais, ela acusa de
 menos. É a mesma assimetria de `gates/limpeza.py`.
 
-Por isso ficaram de fora, e estão em `docs/arquitetura/pendencias.md`: se o import
-do spec veio de camada permitida (depende da superfície do projeto, que varia por
-cliente), se a mensagem da asserção **explica** alguma coisa, e se o nome do teste
-descreve comportamento em vez de mecanismo.
+Por isso ficaram de fora, e estão em `docs/arquitetura/pendencias.md`: se a
+mensagem da asserção **explica** alguma coisa, se o nome do teste descreve
+comportamento em vez de mecanismo, se um comentário é útil, e se a linguagem do
+`context` é de negócio. Todas exigem interpretar o texto, e nenhum script decide.
+
+Cada régua aqui foi disparada **em seco** contra a suíte real publicada antes de
+poder reprovar. Foi assim que três falsos positivos morreram antes de custar uma
+volta de reparo — e é a razão de os comentários abaixo citarem número medido em
+vez de justificativa de gosto.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from orquestrador.analise_estatica.estrutura_de_suite import (
     neutralizar,
     percorrer,
 )
+from orquestrador.analise_estatica.identificadores_javascript import analisar_identificadores
 from orquestrador.dominio.veredito import ResultadoGate, Violacao
 
 NOME = "gate_b"
@@ -49,6 +55,18 @@ CODIGO_DETERMINISMO = "QAORQ-074"
 CODIGO_SEGREDO = "QAORQ-075"
 CODIGO_ORACULO = "QAORQ-076"
 CODIGO_IDENTIFICADOR = "QAORQ-077"
+CODIGO_SEM_CABECALHO = "QAORQ-078"
+CODIGO_SEM_TABELA = "QAORQ-079"
+CODIGO_SEM_LIMPEZA = "QAORQ-080"
+CODIGO_NAO_RESOLVIDO = "QAORQ-081"
+
+# Quantos testes de varredura (campo ausente, tipo errado, fronteira) um arquivo
+# aguenta escritos um a um antes de a repetição custar mais que a explicitude. O
+# número saiu de medição, não de gosto — ver `_sem_tabela`.
+LIMITE_DE_VARREDURA = 8
+
+# As categorias que a norma manda escrever em tabela: são as que variam só o dado.
+CATS_DE_VARREDURA = ("CAT-02", "CAT-03", "CAT-04")
 
 LIMITE_DO_TITULO = 80
 
@@ -114,6 +132,10 @@ _IMPORT_DE_ASSERTS = re.compile(
     r"import\s*\{(?P<nomes>[^}]*)\}\s*from\s*[\"'][^\"']*asserts[^\"']*[\"']"
 )
 
+# Importar do `helpers.js` é a assinatura de "este spec cria massa de verdade":
+# a camada existe para criar pela API, registrar e limpar.
+_IMPORT_DE_HELPERS = re.compile(r"from\s*[\"'][^\"']*helpers[^\"']*[\"']")
+
 
 def conferir_padrao(arquivos: dict[str, str]) -> ResultadoGate:
     """As violações de norma nos arquivos do recurso.
@@ -140,9 +162,14 @@ def _conferir_arquivo(caminho: str, fonte: str) -> list[Violacao]:
     violacoes += _camadas(caminho, neutro, linhas)
     violacoes += _segredos(caminho, fonte, neutro, linhas)
     violacoes += _identificadores(caminho, neutro, linhas)
+    violacoes += _cabecalho(caminho, fonte)
+    violacoes += _nomes_sem_origem(caminho, fonte)
 
     if not e_spec:
         return violacoes
+
+    violacoes += _sem_tabela(caminho, fonte, neutro)
+    violacoes += _sem_limpeza(caminho, fonte, neutro)
 
     blocos = extrair_estrutura(fonte)
     achatado = percorrer(blocos)
@@ -494,6 +521,105 @@ def _tem_assercao_no_statement(neutro: str, posicao: int) -> bool:
     fim = neutro.find(";", posicao)
     trecho = neutro[inicio : fim if fim != -1 else len(neutro)]
     return bool(re.search(r"(?<![\w$.])expect\s*\(", trecho))
+
+
+def _cabecalho(caminho: str, fonte: str) -> list[Violacao]:
+    """O arquivo se apresenta antes de começar?
+
+    Regra barata e sem falso positivo possível: ou o primeiro conteúdo é
+    comentário, ou não é. Ela existia no prompt antigo, saiu sem querer na
+    reescrita, e a suíte da execução seguinte veio sem cabeçalho nenhum.
+    """
+    inicio = fonte.lstrip()
+    if inicio.startswith(("//", "/*")):
+        return []
+    return [
+        Violacao(
+            codigo=CODIGO_SEM_CABECALHO,
+            arquivo=caminho,
+            linha=1,
+            mensagem=(
+                "o arquivo começa sem se apresentar: as primeiras linhas dizem o que "
+                "ele é, o que se encontra dentro e quem o consome — a fronteira, não "
+                "a lista do que vem logo abaixo."
+            ),
+        )
+    ]
+
+
+def _nomes_sem_origem(caminho: str, fonte: str) -> list[Violacao]:
+    """Nome chamado que nenhum import e nenhuma declaração deste arquivo fornece.
+
+    É `ReferenceError` na primeira execução — o defeito mais barato de achar e o
+    mais caro de descobrir rodando. Medido na suíte publicada em 2026-08-11: cinco
+    chamadas assim em dois specs, e nada reprovava.
+    """
+    faltando = sorted(analisar_identificadores(fonte).nao_resolvidos())
+    if not faltando:
+        return []
+    return [
+        Violacao(
+            codigo=CODIGO_NAO_RESOLVIDO,
+            arquivo=caminho,
+            linha=1,
+            mensagem=(
+                f"chamadas sem origem: {', '.join(f'`{nome}`' for nome in faltando)}. "
+                "Nenhum import e nenhuma declaração deste arquivo fornece esses nomes, "
+                "então o teste quebra com ReferenceError antes da primeira asserção. "
+                "Importe do módulo certo, ou use o que já está importado."
+            ),
+        )
+    ]
+
+
+def _sem_tabela(caminho: str, fonte: str, neutro: str) -> list[Violacao]:
+    """Varredura por campo escrita `it` a `it`.
+
+    O limite é medido, não arbitrado: na suíte de 2026-08-11 o `criar-customers`
+    tinha 57 testes escritos um a um, 1.022 linhas, e nenhum `forEach` — enquanto
+    a norma manda tabela justamente para as três categorias que só variam o dado.
+    Abaixo do limite a repetição ainda se lê; acima, o caso que difere de verdade
+    se esconde no meio dos que só mudam de valor.
+    """
+    varreduras = sum(fonte.count(f"@cat {cat}") for cat in CATS_DE_VARREDURA)
+    if varreduras <= LIMITE_DE_VARREDURA or "forEach" in neutro:
+        return []
+    return [
+        Violacao(
+            codigo=CODIGO_SEM_TABELA,
+            arquivo=caminho,
+            linha=1,
+            mensagem=(
+                f"{varreduras} testes de varredura por campo (CAT-02/03/04) escritos um "
+                "a um, sem nenhuma tabela. Mesma ação e mesmo oráculo variando só o "
+                "dado é `forEach` sobre lista literal, com o título em template — a "
+                "variação fica numa coluna e o que é comum aparece uma vez só."
+            ),
+        )
+    ]
+
+
+def _sem_limpeza(caminho: str, fonte: str, neutro: str) -> list[Violacao]:
+    """Spec que cria massa pela API e não devolve o ambiente ao estado anterior.
+
+    O sintoma nunca é neste teste: a massa fica, e a execução seguinte falha por
+    unicidade ou por contagem, longe da causa. Por isso é régua e não julgamento.
+    """
+    cria_massa = bool(_IMPORT_DE_HELPERS.search(fonte))
+    if not cria_massa or "afterEach" in neutro:
+        return []
+    return [
+        Violacao(
+            codigo=CODIGO_SEM_LIMPEZA,
+            arquivo=caminho,
+            linha=1,
+            mensagem=(
+                "o spec cria massa pela API e não tem `afterEach` de limpeza. A massa "
+                "que fica não quebra este teste — quebra a execução seguinte, por "
+                "unicidade ou contagem, e longe da causa."
+            ),
+        )
+    ]
 
 
 def _verificadores_importados(neutro: str) -> frozenset[str]:

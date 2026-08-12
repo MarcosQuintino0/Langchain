@@ -40,6 +40,10 @@ CODIGOS_DO_ORQUESTRADOR: dict[str, str] = {
     "QAORQ-075": "URL, credencial ou segredo literal no código do teste",
     "QAORQ-076": "asserção que só prova existência, e passaria com o backend devolvendo lixo",
     "QAORQ-077": "identificador de uma letra",
+    "QAORQ-078": "arquivo gerado sem o comentário de apresentação no topo",
+    "QAORQ-079": "varredura por campo escrita `it` a `it`, sem tabela data-driven",
+    "QAORQ-080": "spec que cria massa e não chama a limpeza",
+    "QAORQ-081": "identificador chamado sem import nem declaração que o forneça",
 }
 
 
